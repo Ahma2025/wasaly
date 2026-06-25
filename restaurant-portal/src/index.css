@@ -1,0 +1,6 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+body { direction: rtl; }

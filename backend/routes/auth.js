@@ -1,0 +1,150 @@
+const router = require('express').Router();
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const pool = require('../config/database');
+const { auth } = require('../middleware/auth');
+
+const generateToken = (user) =>
+  jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE || '30d' });
+
+// Send OTP
+router.post('/send-otp', async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ success: false, message: 'Phone required' });
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await pool.query('DELETE FROM otp_codes WHERE phone=$1', [phone]);
+    await pool.query('INSERT INTO otp_codes (phone, code, expires_at) VALUES ($1,$2,$3)', [phone, code, expiresAt]);
+
+    // Send via Twilio in production
+    console.log(`OTP for ${phone}: ${code}`);
+
+    res.json({ success: true, message: 'OTP sent', ...(process.env.NODE_ENV !== 'production' && { code }) });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// Verify OTP & Login/Register
+router.post('/verify-otp', async (req, res) => {
+  try {
+    const { phone, code, name } = req.body;
+
+    const { rows: otpRows } = await pool.query(
+      'SELECT * FROM otp_codes WHERE phone=$1 AND code=$2 AND used=false AND expires_at > NOW()',
+      [phone, code]
+    );
+    if (!otpRows[0]) return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
+
+    await pool.query('UPDATE otp_codes SET used=true WHERE id=$1', [otpRows[0].id]);
+
+    let { rows: users } = await pool.query('SELECT * FROM users WHERE phone=$1', [phone]);
+    let user = users[0];
+
+    if (!user) {
+      const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const { rows: newUsers } = await pool.query(
+        `INSERT INTO users (name, phone, is_verified, referral_code, role) VALUES ($1,$2,true,$3,'customer') RETURNING *`,
+        [name || 'مستخدم جديد', phone, referralCode]
+      );
+      user = newUsers[0];
+    } else {
+      await pool.query('UPDATE users SET is_verified=true WHERE id=$1', [user.id]);
+      user.is_verified = true;
+    }
+
+    res.json({ success: true, token: generateToken(user), user: sanitizeUser(user), isNew: !users[0] });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// Register with email/password
+router.post('/register', async (req, res) => {
+  try {
+    const { name, email, phone, password } = req.body;
+    const existing = await pool.query('SELECT id FROM users WHERE email=$1 OR phone=$2', [email, phone]);
+    if (existing.rows[0]) return res.status(400).json({ success: false, message: 'User already exists' });
+
+    const hash = await bcrypt.hash(password, 12);
+    const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const { rows } = await pool.query(
+      `INSERT INTO users (name, email, phone, password_hash, referral_code, role) VALUES ($1,$2,$3,$4,$5,'customer') RETURNING *`,
+      [name, email, phone, hash, referralCode]
+    );
+    const user = rows[0];
+    res.status(201).json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// Login with email/password
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const { rows } = await pool.query('SELECT * FROM users WHERE (email=$1 OR phone=$1) AND is_active=true', [email]);
+    const user = rows[0];
+    if (!user || !user.password_hash) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    if (user.is_blocked) return res.status(403).json({ success: false, message: 'Account blocked' });
+
+    res.json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// Social login (Google/Apple/Facebook)
+router.post('/social', async (req, res) => {
+  try {
+    const { provider, provider_id, email, name, avatar } = req.body;
+    let { rows } = await pool.query('SELECT * FROM users WHERE email=$1', [email]);
+    let user = rows[0];
+
+    if (!user) {
+      const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const { rows: newUser } = await pool.query(
+        `INSERT INTO users (name, email, avatar, is_verified, referral_code, role) VALUES ($1,$2,$3,true,$4,'customer') RETURNING *`,
+        [name, email, avatar, referralCode]
+      );
+      user = newUser[0];
+    }
+
+    res.json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// Get current user
+router.get('/me', auth, (req, res) => {
+  res.json({ success: true, user: sanitizeUser(req.user) });
+});
+
+// Update FCM token
+router.put('/fcm', auth, async (req, res) => {
+  const { fcm_token } = req.body;
+  await pool.query('UPDATE users SET fcm_token=$1 WHERE id=$2', [fcm_token, req.user.id]);
+  res.json({ success: true });
+});
+
+// Logout
+router.post('/logout', auth, async (req, res) => {
+  await pool.query('UPDATE users SET fcm_token=NULL WHERE id=$1', [req.user.id]);
+  res.json({ success: true, message: 'Logged out' });
+});
+
+const sanitizeUser = (u) => ({
+  id: u.id, name: u.name, email: u.email, phone: u.phone,
+  avatar: u.avatar, role: u.role, is_verified: u.is_verified,
+  wallet_balance: u.wallet_balance, loyalty_points: u.loyalty_points,
+  loyalty_tier: u.loyalty_tier, referral_code: u.referral_code
+});
+
+module.exports = router;

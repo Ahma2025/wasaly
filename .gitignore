@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.local
+*.log
+dist/
+build/
+.expo/
+.expo-shared/
+uploads/*
+!uploads/.gitkeep
+*.pem
+*.p8
+*.mobileprovision
+android/.gradle/
+ios/Pods/
+ios/build/
+pgdata/

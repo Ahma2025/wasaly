@@ -1,0 +1,55 @@
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import api from '../utils/api';
+import toast from 'react-hot-toast';
+
+export default function Login() {
+  const navigate = useNavigate();
+  const [form, setForm] = useState({ email: '', password: '' });
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const data = await api.post('/auth/login', form);
+      if (!['restaurant', 'admin'].includes(data.user.role)) {
+        toast.error('هذا الحساب ليس حساب مطعم');
+        return;
+      }
+      localStorage.setItem('token', data.token);
+      if (data.user.role === 'restaurant') {
+        const rData = await api.get(`/restaurants?owner_id=${data.user.id}`);
+        if (rData.data?.[0]) localStorage.setItem('restaurant', JSON.stringify(rData.data[0]));
+      }
+      navigate('/');
+    } catch (e) { toast.error(e.message || 'خطأ في تسجيل الدخول'); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 to-orange-100 flex items-center justify-center p-4" dir="rtl">
+      <div className="bg-white rounded-3xl shadow-xl p-8 w-full max-w-md">
+        <div className="text-center mb-8">
+          <div className="text-5xl mb-3">🏪</div>
+          <h1 className="text-2xl font-bold text-gray-900">بورتال المطعم</h1>
+          <p className="text-gray-500 mt-1">وصلي - منصة التوصيل</p>
+        </div>
+
+        <form onSubmit={submit} className="space-y-4">
+          <div>
+            <label className="text-sm font-medium text-gray-700">البريد الإلكتروني</label>
+            <input type="email" className="w-full border rounded-xl p-3 mt-1 focus:outline-none focus:ring-2 focus:ring-orange-400" value={form.email} onChange={e => setForm({...form, email: e.target.value})} required />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-gray-700">كلمة المرور</label>
+            <input type="password" className="w-full border rounded-xl p-3 mt-1 focus:outline-none focus:ring-2 focus:ring-orange-400" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
+          </div>
+          <button type="submit" disabled={loading} className="w-full bg-orange-500 text-white py-3 rounded-xl font-bold hover:bg-orange-600 disabled:opacity-70 mt-2">
+            {loading ? 'جاري الدخول...' : 'دخول'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
