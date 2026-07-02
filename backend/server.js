@@ -33,6 +33,32 @@ app.use((req, res, next) => {
   next();
 });
 
+// Test login page for diagnosing iPhone login issues
+app.get('/test-login', (req, res) => {
+  res.send(`<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>اختبار تسجيل الدخول</title>
+<style>body{font-family:sans-serif;padding:20px;background:#f5f5f5}input{width:100%;padding:12px;margin:8px 0;border:1px solid #ddd;border-radius:8px;font-size:16px;box-sizing:border-box}button{width:100%;padding:14px;background:#FF6B00;color:white;border:none;border-radius:8px;font-size:16px;cursor:pointer}#result{margin-top:20px;padding:15px;background:white;border-radius:8px;white-space:pre-wrap;word-break:break-all}</style></head>
+<body>
+<h2>اختبار الاتصال بالسيرفر</h2>
+<input id="phone" type="tel" placeholder="رقم الهاتف" value="0599039707">
+<input id="pass" type="text" placeholder="كلمة المرور" value="123456">
+<select id="role" style="width:100%;padding:12px;margin:8px 0;border:1px solid #ddd;border-radius:8px;font-size:16px"><option value="customer">customer</option><option value="driver">driver</option><option value="restaurant">restaurant</option><option value="admin">admin</option></select>
+<button onclick="testLogin()">اختبر الدخول</button>
+<div id="result">النتيجة ستظهر هنا...</div>
+<script>
+async function testLogin(){
+  const phone=document.getElementById('phone').value;
+  const pass=document.getElementById('pass').value;
+  const role=document.getElementById('role').value;
+  document.getElementById('result').textContent='جاري الاتصال...';
+  try{
+    const r=await fetch('/api/auth/login-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,password:pass,role})});
+    const d=await r.json();
+    document.getElementById('result').textContent='الحالة: '+r.status+'\n\n'+JSON.stringify(d,null,2);
+  }catch(e){document.getElementById('result').textContent='خطأ: '+e.message;}
+}
+</script></body></html>`);
+});
+
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
