@@ -171,7 +171,7 @@ jobs:
         working-directory: customer-app/ios
         run: |
           security unlock-keychain -p wasaly123 build.keychain || true
-          WS=$(ls *.xcworkspace | head -1)
+          WS=$(ls -d *.xcworkspace | head -1)
           SCHEME="${WS%.xcworkspace}"
           echo "Using workspace: $WS / scheme: $SCHEME"
           xcodebuild archive \
