@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+﻿import { useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -11,7 +11,7 @@ export function useSocket() {
     AsyncStorage.getItem('driver_token').then(token => {
       if (!token) return;
       if (!socketInstance) {
-        socketInstance = io('https://snareless-diatonic-emmalynn.ngrok-free.dev', { auth: { token }, transports: ['websocket'] });
+        socketInstance = io('https://burger-app-production.up.railway.app', { auth: { token }, transports: ['websocket'] });
       }
       socketRef.current = socketInstance;
     });
@@ -20,3 +20,4 @@ export function useSocket() {
 
   return socketRef.current;
 }
+

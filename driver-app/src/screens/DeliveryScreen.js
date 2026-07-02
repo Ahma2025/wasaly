@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking, Alert, ScrollView } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../utils/api';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', green: '#34C759', bg: '#F8F9FA', red: '#FF3B30' };
-const SOCKET_URL = 'https://snareless-diatonic-emmalynn.ngrok-free.dev';
+const SOCKET_URL = 'https://burger-app-production.up.railway.app';
 
 const STEPS = [
   { status: 'confirmed', nextStatus: 'on_the_way', label: 'انطلق للمطعم', icon: '🏍️', desc: 'توجّه إلى المطعم لاستلام الطلب', buttonLabel: 'وصلت المطعم - استلمت الطلب' },
@@ -389,3 +389,4 @@ const styles = StyleSheet.create({
   doneText: { fontSize: 18, fontWeight: '900', color: '#1A5C33' },
   doneSubText: { fontSize: 13, color: '#2D8B55', marginTop: 4 },
 });
+

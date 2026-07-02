@@ -1,7 +1,8 @@
 const router = require('express').Router();
 const pool = require('../config/database');
 const { auth } = require('../middleware/auth');
-const { saveNotification, notifyUser } = require('../utils/notifications');
+const { saveNotification, notifyUser, Notify, sendFCM, getUserTokens } = require('../utils/notifications');
+const { sendWebPush } = require('./webpush');
 
 const generateOrderNumber = () => 'WSL' + Date.now().toString().slice(-8);
 
@@ -52,6 +53,11 @@ async function assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, ex
       restaurant_lat: restaurantLat,
       restaurant_lng: restaurantLng
     });
+    // Also send FCM push so driver gets it even when app is backgrounded
+    try {
+      const tokens = await getUserTokens(driver.user_id);
+      if (tokens.length) await sendFCM(tokens, '🛵 طلب توصيل جديد!', 'يوجد طلب جديد بانتظارك، اقبل الآن!', { type: 'new_order_request', order_id: String(orderId) });
+    } catch (e) { console.error('FCM push to driver failed:', e.message); }
 
     // Auto-reject after 60s if not accepted
     setTimeout(async () => {
@@ -147,10 +153,16 @@ router.post('/', auth, async (req, res) => {
       );
     }
 
-    // Notify restaurant owner
+    // Notify restaurant owner (socket + push)
     if (restaurant.owner_id) {
       notifyUser(req.io, restaurant.owner_id, 'new_order', { order_id: order.id, order_number: orderNumber });
       saveNotification(restaurant.owner_id, `طلب جديد #${orderNumber}`, 'new_order', { order_id: order.id });
+      try {
+        const tokens = await getUserTokens(restaurant.owner_id);
+        if (tokens.length) await sendFCM(tokens, '🛎️ طلب جديد!', `طلب #${orderNumber} ينتظر موافقتك`, { type: 'new_order', order_id: String(order.id) });
+      } catch (e) { console.error('FCM push to restaurant failed:', e.message); }
+      // Web Push for restaurant portal (browser)
+      sendWebPush(restaurant.id, '🛎️ طلب جديد!', `طلب #${orderNumber} ينتظر موافقتك`, { order_id: order.id }).catch(() => {});
     }
 
     res.status(201).json({ success: true, data: order });
@@ -224,7 +236,7 @@ router.patch('/:id/confirm', auth, async (req, res) => {
     }
 
     notifyUser(req.io, order.customer_id, 'order_status', { order_id: order.id, status: 'confirmed' });
-    saveNotification(order.customer_id, 'تم قبول طلبك 🎉', 'order_status', { order_id: order.id });
+    try { await Notify.orderConfirmed(req.io, order.customer_id, order.id); } catch (e) { console.error('notify confirm err:', e.message); }
 
     res.json({ success: true });
   } catch (e) {
@@ -265,14 +277,15 @@ router.patch('/:id/status', auth, async (req, res) => {
     await pool.query(`UPDATE orders SET ${setClause} WHERE id=$2`, params);
 
     notifyUser(req.io, order.customer_id, 'order_status', { order_id: order.id, status });
-
-    const msgs = {
-      preparing: 'جاري تحضير طلبك 🍳',
-      on_the_way: 'طلبك في الطريق إليك 🛵',
-      delivered: 'تم توصيل طلبك! 🎉',
-      cancelled: 'تم إلغاء طلبك'
-    };
-    if (msgs[status]) saveNotification(order.customer_id, msgs[status], 'order_status', { order_id: order.id });
+    try {
+      if (status === 'on_the_way') await Notify.orderOnTheWay(req.io, order.customer_id, order.id);
+      else if (status === 'delivered') await Notify.orderDelivered(req.io, order.customer_id, order.id);
+      else if (status === 'cancelled') await Notify.orderCancelled(req.io, order.customer_id, order.id);
+      else {
+        const msgs = { preparing: 'جاري تحضير طلبك 🍳' };
+        if (msgs[status]) saveNotification(order.customer_id, msgs[status], 'order_status', { order_id: order.id });
+      }
+    } catch (e) { console.error('notify status err:', e.message); }
 
     res.json({ success: true });
   } catch (e) {
@@ -283,28 +296,37 @@ router.patch('/:id/status', auth, async (req, res) => {
 // Driver accepts order
 router.post('/:id/accept', auth, async (req, res) => {
   try {
+    // Allow accepting if status is 'confirmed' OR already 'preparing' by this driver (idempotent retry)
     const { rows: orders } = await pool.query(
-      "SELECT * FROM orders WHERE id=$1 AND driver_id=$2 AND status='confirmed'",
+      "SELECT * FROM orders WHERE id=$1 AND driver_id=$2 AND status IN ('confirmed','preparing')",
       [req.params.id, req.user.id]
     );
     if (!orders[0]) return res.status(400).json({ success: false, message: 'الطلب غير متاح' });
 
-    await pool.query(
-      `UPDATE orders SET status='preparing', driver_assigned_at=datetime('now'), updated_at=datetime('now') WHERE id=$1`,
-      [req.params.id]
-    );
-    await pool.query('UPDATE drivers SET is_busy=1 WHERE user_id=$1', [req.user.id]);
-
     const order = orders[0];
-    notifyUser(req.io, order.customer_id, 'driver_assigned', { order_id: order.id, driver_id: req.user.id });
 
-    const { rows: driverInfo } = await pool.query(
-      'SELECT u.name, d.vehicle_type FROM users u JOIN drivers d ON d.user_id=u.id WHERE u.id=$1',
-      [req.user.id]
-    );
-    saveNotification(order.customer_id, `السائق ${driverInfo[0]?.name} في طريقه للمطعم`, 'driver_assigned', { order_id: order.id });
+    // Only update if still 'confirmed' (avoid double-update)
+    if (order.status === 'confirmed') {
+      await pool.query(
+        `UPDATE orders SET status='preparing', driver_assigned_at=datetime('now'), updated_at=datetime('now') WHERE id=$1`,
+        [req.params.id]
+      );
+      await pool.query('UPDATE drivers SET is_busy=1 WHERE user_id=$1', [req.user.id]);
 
-    res.json({ success: true });
+      // Notifications — don't let these fail the whole request
+      try {
+        notifyUser(req.io, order.customer_id, 'driver_assigned', { order_id: order.id, driver_id: req.user.id });
+        const { rows: driverInfo } = await pool.query(
+          'SELECT u.name, d.vehicle_type FROM users u JOIN drivers d ON d.user_id=u.id WHERE u.id=$1',
+          [req.user.id]
+        );
+        await Notify.driverAssigned(req.io, order.customer_id, driverInfo[0]?.name || 'السائق', order.id);
+      } catch (notifErr) {
+        console.error('accept notification error (non-fatal):', notifErr.message);
+      }
+    }
+
+    res.json({ success: true, order_id: order.id });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }

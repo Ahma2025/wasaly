@@ -18,15 +18,23 @@ const upload = multer({
   }
 });
 
+function getBaseUrl(req) {
+  // Use ngrok host if request comes through it, otherwise fallback to env or localhost
+  const host = req.headers['x-forwarded-host'] || req.headers['host'] || 'localhost:5000';
+  const proto = req.headers['x-forwarded-proto'] || (host.includes('ngrok') ? 'https' : 'http');
+  return process.env.API_URL || `${proto}://${host}`;
+}
+
 router.post('/', auth, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: 'No file' });
-  const url = `${process.env.API_URL || 'http://localhost:5000'}/uploads/${req.file.filename}`;
+  const url = `${getBaseUrl(req)}/uploads/${req.file.filename}`;
   res.json({ success: true, url });
 });
 
 router.post('/multiple', auth, upload.array('files', 5), (req, res) => {
   if (!req.files?.length) return res.status(400).json({ success: false, message: 'No files' });
-  const urls = req.files.map(f => `${process.env.API_URL || 'http://localhost:5000'}/uploads/${f.filename}`);
+  const base = getBaseUrl(req);
+  const urls = req.files.map(f => `${base}/uploads/${f.filename}`);
   res.json({ success: true, urls });
 });
 

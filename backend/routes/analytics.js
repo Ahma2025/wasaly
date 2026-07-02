@@ -16,7 +16,7 @@ router.get('/overview', auth, adminOnly, async (req, res) => {
     ]);
 
     const hourly = await pool.query(
-      `SELECT EXTRACT(HOUR FROM created_at) as hour, COUNT(*) as orders FROM orders WHERE created_at BETWEEN $1 AND $2 GROUP BY hour ORDER BY hour`,
+      `SELECT CAST(strftime('%H', created_at) AS INTEGER) as hour, COUNT(*) as orders FROM orders WHERE created_at BETWEEN $1 AND $2 GROUP BY hour ORDER BY hour`,
       [start, end]
     );
 

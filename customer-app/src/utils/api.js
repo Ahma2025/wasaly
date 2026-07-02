@@ -1,9 +1,9 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-const API_URL = 'https://snareless-diatonic-emmalynn.ngrok-free.dev/api';
+const API_URL = 'https://burger-app-production.up.railway.app/api';
 
-const api = axios.create({ baseURL: API_URL, timeout: 15000, headers: { 'ngrok-skip-browser-warning': '1' } });
+const api = axios.create({ baseURL: API_URL, timeout: 15000 });
 
 api.interceptors.request.use(async (config) => {
   const token = await SecureStore.getItemAsync('token');
@@ -22,3 +22,4 @@ api.interceptors.response.use(
 );
 
 export default api;
+

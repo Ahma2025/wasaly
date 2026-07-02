@@ -5,7 +5,7 @@ const { auth, adminOnly, restaurantOnly } = require('../middleware/auth');
 // Get all restaurants (with filters)
 router.get('/', async (req, res) => {
   try {
-    const { lat, lng, category_id, search, sort, limit = 20, offset = 0, city } = req.query;
+    const { lat, lng, category_id, search, sort, limit = 20, offset = 0, city, owner_id } = req.query;
 
     let query = `
       SELECT r.*, c.name_ar as category_name, c.icon as category_icon,
@@ -19,6 +19,7 @@ router.get('/', async (req, res) => {
     const params = [lat || null, lng || null];
     let paramIdx = 3;
 
+    if (owner_id) { query += ` AND r.owner_id = $${paramIdx++}`; params.push(owner_id); }
     if (category_id) { query += ` AND r.category_id = $${paramIdx++}`; params.push(category_id); }
     if (city) { query += ` AND r.city = $${paramIdx++}`; params.push(city); }
     if (search) { query += ` AND (r.name_ar ILIKE $${paramIdx} OR r.name_en ILIKE $${paramIdx})`; params.push(`%${search}%`); paramIdx++; }
@@ -114,7 +115,7 @@ router.post('/', auth, adminOnly, async (req, res) => {
 // Update restaurant
 router.put('/:id', auth, restaurantOnly, async (req, res) => {
   try {
-    const allowed = ['name_ar','name_en','description_ar','description_en','phone','address','min_order','delivery_fee','delivery_time_min','delivery_time_max','is_open','opens_at','closes_at','tags'];
+    const allowed = ['name_ar','name_en','description_ar','description_en','phone','address','min_order','delivery_fee','delivery_time_min','delivery_time_max','is_open','opens_at','closes_at','tags','lat','lng','logo'];
     const updates = [];
     const values = [];
     let idx = 1;
@@ -125,7 +126,7 @@ router.put('/:id', auth, restaurantOnly, async (req, res) => {
         values.push(req.body[key]);
       }
     }
-    updates.push(`updated_at=NOW()`);
+    updates.push(`updated_at=datetime('now')`);
     values.push(req.params.id);
 
     const { rows } = await pool.query(
@@ -156,7 +157,15 @@ router.get('/:id/orders', auth, restaurantOnly, async (req, res) => {
     let q = `SELECT o.*, u.name as customer_name, u.phone as customer_phone FROM orders o
              LEFT JOIN users u ON o.customer_id = u.id WHERE o.restaurant_id=$1`;
     const params = [req.params.id];
-    if (status) { q += ` AND o.status=$2`; params.push(status); }
+    if (status) {
+      const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        q += ` AND o.status=$${params.length+1}`; params.push(statuses[0]);
+      } else if (statuses.length > 1) {
+        const placeholders = statuses.map((_, i) => `$${params.length + 1 + i}`).join(',');
+        q += ` AND o.status IN (${placeholders})`; params.push(...statuses);
+      }
+    }
     q += ` ORDER BY o.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`;
     params.push(limit, offset);
 

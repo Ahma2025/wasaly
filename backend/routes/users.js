@@ -2,6 +2,18 @@ const router = require('express').Router();
 const pool = require('../config/database');
 const { auth } = require('../middleware/auth');
 
+// Save FCM token for push notifications
+router.post('/fcm-token', auth, async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ success: false, message: 'token required' });
+    await pool.query('UPDATE users SET fcm_token=$1 WHERE id=$2', [token, req.user.id]);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 // Get profile
 router.get('/profile', auth, async (req, res) => {
   const { rows } = await pool.query('SELECT id,name,email,phone,avatar,wallet_balance,loyalty_points,loyalty_tier,referral_code FROM users WHERE id=$1', [req.user.id]);
@@ -21,21 +33,21 @@ router.put('/profile', auth, async (req, res) => {
 
 // Get addresses
 router.get('/addresses', auth, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM user_addresses WHERE user_id=$1 ORDER BY is_default DESC', [req.user.id]);
+  const { rows } = await pool.query('SELECT * FROM addresses WHERE user_id=$1 ORDER BY is_default DESC', [req.user.id]);
   res.json({ success: true, data: rows });
 });
 
 // Add address
 router.post('/addresses', auth, async (req, res) => {
   try {
-    const { label, title, address, lat, lng, building, floor, apartment, notes } = req.body;
+    const { label, title, address, lat, lng, floor, notes } = req.body;
     if (req.body.is_default) {
-      await pool.query('UPDATE user_addresses SET is_default=false WHERE user_id=$1', [req.user.id]);
+      await pool.query('UPDATE addresses SET is_default=0 WHERE user_id=$1', [req.user.id]);
     }
     const { rows } = await pool.query(
-      `INSERT INTO user_addresses (user_id, label, title, address, lat, lng, building, floor, apartment, notes, is_default)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [req.user.id, label, title, address, lat, lng, building, floor, apartment, notes, req.body.is_default || false]
+      `INSERT INTO addresses (user_id, label, title, address, lat, lng, floor, notes, is_default)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [req.user.id, label || 'منزل', title || address, address, lat || null, lng || null, floor || null, notes || null, req.body.is_default ? 1 : 0]
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (e) {
@@ -46,12 +58,12 @@ router.post('/addresses', auth, async (req, res) => {
 // Update address
 router.put('/addresses/:id', auth, async (req, res) => {
   try {
-    const { label, title, address, lat, lng, building, floor, apartment, notes, is_default } = req.body;
-    if (is_default) await pool.query('UPDATE user_addresses SET is_default=false WHERE user_id=$1', [req.user.id]);
+    const { label, title, address, lat, lng, floor, notes, is_default } = req.body;
+    if (is_default) await pool.query('UPDATE addresses SET is_default=0 WHERE user_id=$1', [req.user.id]);
     const { rows } = await pool.query(
-      `UPDATE user_addresses SET label=$1, title=$2, address=$3, lat=$4, lng=$5, building=$6, floor=$7, apartment=$8, notes=$9, is_default=$10
-       WHERE id=$11 AND user_id=$12 RETURNING *`,
-      [label, title, address, lat, lng, building, floor, apartment, notes, is_default, req.params.id, req.user.id]
+      `UPDATE addresses SET label=$1, title=$2, address=$3, lat=$4, lng=$5, floor=$6, notes=$7, is_default=$8
+       WHERE id=$9 AND user_id=$10 RETURNING *`,
+      [label, title, address, lat, lng, floor, notes, is_default ? 1 : 0, req.params.id, req.user.id]
     );
     res.json({ success: true, data: rows[0] });
   } catch (e) {
@@ -61,7 +73,7 @@ router.put('/addresses/:id', auth, async (req, res) => {
 
 // Delete address
 router.delete('/addresses/:id', auth, async (req, res) => {
-  await pool.query('DELETE FROM user_addresses WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+  await pool.query('DELETE FROM addresses WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
   res.json({ success: true });
 });
 

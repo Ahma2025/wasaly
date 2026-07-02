@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView, Animated, ActivityIndicator } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
@@ -156,7 +156,7 @@ export default function OrderTrackingScreen() {
     try {
       const token = await SecureStore.getItemAsync('token');
       if (!token) return;
-      const socket = io('https://snareless-diatonic-emmalynn.ngrok-free.dev', {
+      const socket = io('https://burger-app-production.up.railway.app', {
         auth: { token }, transports: ['websocket']
       });
       socketRef.current = socket;
@@ -394,3 +394,4 @@ const styles = StyleSheet.create({
   rateBtn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, alignItems: 'center', elevation: 3 },
   rateBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
 });
+

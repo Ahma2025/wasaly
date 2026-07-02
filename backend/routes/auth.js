@@ -65,15 +65,15 @@ router.post('/verify-otp', async (req, res) => {
 // Register with email/password
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, phone, password } = req.body;
-    const existing = await pool.query('SELECT id FROM users WHERE email=$1 OR phone=$2', [email, phone]);
-    if (existing.rows[0]) return res.status(400).json({ success: false, message: 'User already exists' });
+    const { name, email, phone, password, city } = req.body;
+    const existing = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
+    if (existing.rows[0]) return res.status(400).json({ success: false, message: 'رقم الهاتف مسجل مسبقاً' });
 
     const hash = await bcrypt.hash(password, 12);
     const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     const { rows } = await pool.query(
-      `INSERT INTO users (name, email, phone, password_hash, referral_code, role) VALUES ($1,$2,$3,$4,$5,'customer') RETURNING *`,
-      [name, email, phone, hash, referralCode]
+      `INSERT INTO users (name, email, phone, password_hash, referral_code, role, city, is_verified) VALUES ($1,$2,$3,$4,$5,'customer',$6,true) RETURNING *`,
+      [name, email || null, phone, hash, referralCode, city || null]
     );
     const user = rows[0];
     res.status(201).json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
@@ -82,11 +82,33 @@ router.post('/register', async (req, res) => {
   }
 });
 
+// Login with phone/password (for customer & driver apps)
+router.post('/login-password', async (req, res) => {
+  try {
+    const { phone, password, role } = req.body;
+    // If role provided, match exact role — allows same phone for multiple roles
+    const query = role
+      ? 'SELECT * FROM users WHERE phone=$1 AND role=$2 AND is_active=1'
+      : 'SELECT * FROM users WHERE phone=$1 AND is_active=1';
+    const params = role ? [phone, role] : [phone];
+    const { rows } = await pool.query(query, params);
+    const user = rows[0];
+    if (!user || !user.password_hash) return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' });
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' });
+    if (user.is_blocked) return res.status(403).json({ success: false, message: 'الحساب محظور' });
+    res.json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 // Login with email/password
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const { rows } = await pool.query('SELECT * FROM users WHERE (email=$1 OR phone=$1) AND is_active=true', [email]);
+    const { email, phone, password } = req.body;
+    const identifier = email || phone;
+    const { rows } = await pool.query('SELECT * FROM users WHERE (email=$1 OR phone=$1) AND is_active=true', [identifier]);
     const user = rows[0];
     if (!user || !user.password_hash) return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
@@ -117,6 +139,26 @@ router.post('/social', async (req, res) => {
     }
 
     res.json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// Admin: Create driver or restaurant account
+router.post('/admin/create-user', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'غير مصرح' });
+    const { name, phone, password, role, city } = req.body;
+    if (!name || !phone || !password || !role) return res.status(400).json({ success: false, message: 'أدخل جميع البيانات' });
+    const existing = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
+    if (existing.rows[0]) return res.status(400).json({ success: false, message: 'رقم الهاتف مسجل مسبقاً' });
+    const hash = await bcrypt.hash(password, 10);
+    const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const { rows } = await pool.query(
+      `INSERT INTO users (name, phone, password_hash, role, city, referral_code, is_verified) VALUES ($1,$2,$3,$4,$5,$6,1) RETURNING *`,
+      [name, phone, hash, role, city || null, referralCode]
+    );
+    res.status(201).json({ success: true, user: sanitizeUser(rows[0]) });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }

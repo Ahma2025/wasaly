@@ -1,5 +1,6 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { setupBrowserNotifications } from './utils/pushNotifications';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import Dashboard from './pages/Dashboard';
 import Orders from './pages/Orders';
@@ -7,51 +8,63 @@ import Menu from './pages/Menu';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 
-function Layout() {
+const NAV = [
+  { to: '/', icon: '📊', label: 'الرئيسية' },
+  { to: '/orders', icon: '📦', label: 'الطلبات' },
+  { to: '/menu', icon: '🍽️', label: 'المنيو' },
+  { to: '/settings', icon: '⚙️', label: 'الإعدادات' },
+];
+
+function BottomNav() {
   const navigate = useNavigate();
-  const restaurant = JSON.parse(localStorage.getItem('restaurant') || '{}');
+  const { pathname } = useLocation();
   const logout = () => { localStorage.clear(); navigate('/login'); };
 
-  const links = [
-    { to: '/', label: 'لوحة التحكم', icon: '📊' },
-    { to: '/orders', label: 'الطلبات', icon: '📦' },
-    { to: '/menu', label: 'المنيو', icon: '🍽️' },
-    { to: '/settings', label: 'الإعدادات', icon: '⚙️' }
-  ];
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex z-50"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      {NAV.map(item => {
+        const active = item.to === '/' ? pathname === '/' : pathname.startsWith(item.to);
+        return (
+          <button key={item.to} onClick={() => navigate(item.to)}
+            className={`flex-1 flex flex-col items-center py-2 gap-0.5 transition-colors ${active ? 'text-orange-500' : 'text-gray-400'}`}>
+            <span className="text-xl">{item.icon}</span>
+            <span className="text-[10px] font-semibold">{item.label}</span>
+          </button>
+        );
+      })}
+      <button onClick={logout} className="flex-1 flex flex-col items-center py-2 gap-0.5 text-gray-400">
+        <span className="text-xl">🚪</span>
+        <span className="text-[10px] font-semibold">خروج</span>
+      </button>
+    </nav>
+  );
+}
+
+function Layout() {
+  const restaurant = JSON.parse(localStorage.getItem('restaurant') || '{}');
+
+  useEffect(() => {
+    // Ask for browser notification permission once logged in
+    setupBrowserNotifications();
+  }, []);
 
   return (
-    <div className="flex h-screen bg-gray-50" dir="rtl">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white border-l shadow-sm flex flex-col">
-        <div className="p-6 border-b">
-          <div className="flex items-center gap-3">
-            {restaurant.logo && <img src={restaurant.logo} className="w-10 h-10 rounded-xl" />}
-            <div>
-              <p className="font-bold text-gray-900 text-sm">{restaurant.name_ar}</p>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${restaurant.is_open ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                {restaurant.is_open ? 'مفتوح' : 'مغلق'}
-              </span>
-            </div>
-          </div>
+    <div className="min-h-screen bg-gray-50" dir="rtl">
+      {/* Header */}
+      <header className="sticky top-0 z-40 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3">
+        <div className="w-9 h-9 rounded-xl bg-orange-100 flex items-center justify-center text-lg">
+          {restaurant.logo ? <img src={restaurant.logo} className="w-9 h-9 rounded-xl object-cover" /> : '🏪'}
         </div>
-
-        <nav className="flex-1 p-4 space-y-1">
-          {links.map(link => (
-            <NavLink key={link.to} to={link.to} end={link.to === '/'} className={({ isActive }) => `flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${isActive ? 'bg-orange-500 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
-              <span>{link.icon}</span>{link.label}
-            </NavLink>
-          ))}
-        </nav>
-
-        <div className="p-4 border-t">
-          <button onClick={logout} className="w-full text-red-500 hover:bg-red-50 py-2 rounded-xl text-sm font-medium">
-            🚪 تسجيل الخروج
-          </button>
+        <div>
+          <p className="font-bold text-gray-900 leading-none text-sm">{restaurant.name_ar || 'المطعم'}</p>
+          <span className={`text-[10px] font-semibold ${restaurant.is_open ? 'text-green-600' : 'text-red-500'}`}>
+            {restaurant.is_open ? '● مفتوح' : '● مغلق'}
+          </span>
         </div>
-      </aside>
+      </header>
 
-      {/* Main */}
-      <main className="flex-1 overflow-auto p-6">
+      <main className="pb-20">
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/orders" element={<Orders />} />
@@ -59,13 +72,14 @@ function Layout() {
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
+
+      <BottomNav />
     </div>
   );
 }
 
 function ProtectedRoute({ children }) {
-  const token = localStorage.getItem('token');
-  return token ? children : <Navigate to="/login" />;
+  return localStorage.getItem('token') ? children : <Navigate to="/login" />;
 }
 
 export default function App() {

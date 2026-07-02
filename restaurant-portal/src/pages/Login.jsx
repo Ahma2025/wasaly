@@ -5,25 +5,28 @@ import toast from 'react-hot-toast';
 
 export default function Login() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ email: '', password: '' });
+  const [form, setForm] = useState({ phone: '', password: '' });
   const [loading, setLoading] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const data = await api.post('/auth/login', form);
-      if (!['restaurant', 'admin'].includes(data.user.role)) {
+      const data = await api.post('/auth/login-password', { ...form, role: 'restaurant' });
+      if (!['restaurant', 'admin'].includes(data.user?.role)) {
         toast.error('هذا الحساب ليس حساب مطعم');
         return;
       }
       localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
       if (data.user.role === 'restaurant') {
-        const rData = await api.get(`/restaurants?owner_id=${data.user.id}`);
-        if (rData.data?.[0]) localStorage.setItem('restaurant', JSON.stringify(rData.data[0]));
+        try {
+          const rData = await api.get(`/restaurants?owner_id=${data.user.id}`);
+          if (rData.data?.[0]) localStorage.setItem('restaurant', JSON.stringify(rData.data[0]));
+        } catch {}
       }
       navigate('/');
-    } catch (e) { toast.error(e.message || 'خطأ في تسجيل الدخول'); }
+    } catch (e) { toast.error(e.message || 'بيانات خاطئة'); }
     finally { setLoading(false); }
   };
 
@@ -38,16 +41,17 @@ export default function Login() {
 
         <form onSubmit={submit} className="space-y-4">
           <div>
-            <label className="text-sm font-medium text-gray-700">البريد الإلكتروني</label>
-            <input type="email" className="w-full border rounded-xl p-3 mt-1 focus:outline-none focus:ring-2 focus:ring-orange-400" value={form.email} onChange={e => setForm({...form, email: e.target.value})} required />
+            <label className="text-sm font-medium text-gray-700">رقم الهاتف</label>
+            <input type="tel" className="w-full border rounded-xl p-3 mt-1 focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="05XXXXXXXX" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} required />
           </div>
           <div>
             <label className="text-sm font-medium text-gray-700">كلمة المرور</label>
-            <input type="password" className="w-full border rounded-xl p-3 mt-1 focus:outline-none focus:ring-2 focus:ring-orange-400" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
+            <input type="password" className="w-full border rounded-xl p-3 mt-1 focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="••••••" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
           </div>
           <button type="submit" disabled={loading} className="w-full bg-orange-500 text-white py-3 rounded-xl font-bold hover:bg-orange-600 disabled:opacity-70 mt-2">
             {loading ? 'جاري الدخول...' : 'دخول'}
           </button>
+          <p className="text-center text-sm text-gray-500 mt-4">يتم إنشاء حسابات المطاعم عبر لوحة الإدارة</p>
         </form>
       </div>
     </div>

@@ -5,25 +5,25 @@ const { auth, adminOnly } = require('../middleware/auth');
 // Validate coupon
 router.post('/validate', auth, async (req, res) => {
   try {
-    const { code, subtotal, restaurant_id } = req.body;
+    const { code, subtotal } = req.body;
     const { rows } = await pool.query(
-      `SELECT * FROM coupons WHERE code=$1 AND is_active=true AND (expires_at IS NULL OR expires_at > NOW())
-       AND (usage_limit IS NULL OR usage_count < usage_limit) AND min_order <= $2
-       AND (restaurant_id IS NULL OR restaurant_id=$3)`,
-      [code, subtotal, restaurant_id]
+      `SELECT * FROM coupons WHERE code=$1 AND is_active=1
+       AND (expires_at IS NULL OR expires_at > datetime('now'))
+       AND (max_uses IS NULL OR uses_count < max_uses)
+       AND min_order <= $2`,
+      [code, subtotal || 0]
     );
-    if (!rows[0]) return res.status(400).json({ success: false, message: 'Invalid or expired coupon' });
+    if (!rows[0]) return res.status(400).json({ success: false, message: 'الكوبون غير صالح أو منتهي' });
 
-    const used = await pool.query('SELECT COUNT(*) FROM coupon_usage WHERE coupon_id=$1 AND user_id=$2', [rows[0].id, req.user.id]);
-    if (parseInt(used.rows[0].count) >= (rows[0].user_usage_limit || 1)) {
-      return res.status(400).json({ success: false, message: 'Coupon already used' });
+    const used = await pool.query('SELECT COUNT(*) as c FROM coupon_usage WHERE coupon_id=$1 AND user_id=$2', [rows[0].id, req.user.id]);
+    if (parseInt(used.rows[0].c) >= 1) {
+      return res.status(400).json({ success: false, message: 'استخدمت هذا الكوبون مسبقاً' });
     }
 
     const coupon = rows[0];
     let discount = 0;
-    if (coupon.type === 'percentage') discount = Math.min(subtotal * coupon.value / 100, coupon.max_discount || Infinity);
-    else if (coupon.type === 'fixed') discount = Math.min(coupon.value, subtotal);
-    else if (coupon.type === 'free_delivery') discount = null; // handled at order level
+    if (coupon.type === 'percentage') discount = Math.min(subtotal * coupon.value / 100, coupon.max_discount || subtotal);
+    else discount = Math.min(coupon.value, subtotal);
 
     res.json({ success: true, data: { ...coupon, discount } });
   } catch (e) {
@@ -48,8 +48,12 @@ router.post('/', auth, adminOnly, async (req, res) => {
 
 // Get all coupons (admin)
 router.get('/', auth, adminOnly, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM coupons ORDER BY created_at DESC');
-  res.json({ success: true, data: rows });
+  try {
+    const { rows } = await pool.query('SELECT * FROM coupons ORDER BY id DESC');
+    res.json({ success: true, data: rows });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
 });
 
 // Delete coupon

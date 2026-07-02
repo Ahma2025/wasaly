@@ -12,7 +12,7 @@ export default function Notifications() {
     setSending(true);
     try {
       const data = await api.post('/admin/notifications/broadcast', form);
-      setSent(data);
+      setSent({ recipients: data.recipients });
       toast.success('تم الإرسال');
     } catch { toast.error('خطأ في الإرسال'); }
     finally { setSending(false); }
@@ -25,10 +25,10 @@ export default function Notifications() {
   ];
 
   return (
-    <div className="space-y-6 p-6" dir="rtl">
-      <h1 className="text-2xl font-bold">إرسال إشعارات</h1>
+    <div className="space-y-4 p-4" dir="rtl">
+      <h1 className="text-xl font-bold text-gray-900">إرسال إشعارات</h1>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-4">
         {/* Compose */}
         <div className="bg-white rounded-2xl border p-6 shadow-sm">
           <h2 className="font-bold text-lg mb-4">إنشاء إشعار</h2>

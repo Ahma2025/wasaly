@@ -1,0 +1,8 @@
+node_modules/
+.env
+uploads/
+wasaly.db
+wasaly.db-shm
+wasaly.db-wal
+firebase-service-account.json
+glamora_backup.json

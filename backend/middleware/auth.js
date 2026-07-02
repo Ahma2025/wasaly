@@ -23,7 +23,7 @@ const adminOnly = (req, res, next) => {
 };
 
 const restaurantOnly = (req, res, next) => {
-  if (!['restaurant', 'admin'].includes(req.user.role)) return res.status(403).json({ success: false, message: 'Restaurant only' });
+  if (!['restaurant', 'restaurant_owner', 'admin'].includes(req.user.role)) return res.status(403).json({ success: false, message: 'Restaurant only' });
   next();
 };
 

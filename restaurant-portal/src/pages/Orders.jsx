@@ -1,106 +1,328 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
+import OrderMap from '../components/OrderMap';
+import { showBrowserNotification } from '../utils/pushNotifications';
 
-const STATUS = {
-  pending: { label: 'جديد', next: 'confirmed', nextLabel: 'قبول', color: 'border-yellow-400 bg-yellow-50' },
-  confirmed: { label: 'مؤكد', next: 'preparing', nextLabel: 'بدء التحضير', color: 'border-blue-400 bg-blue-50' },
-  preparing: { label: 'يُحضَّر', next: 'ready', nextLabel: 'جاهز', color: 'border-purple-400 bg-purple-50' },
-  ready: { label: 'جاهز', next: null, nextLabel: null, color: 'border-green-400 bg-green-50' },
-  delivered: { label: 'مُسلَّم', color: 'border-gray-200 bg-gray-50' },
-  cancelled: { label: 'ملغى', color: 'border-red-200 bg-red-50' }
+const STATUS_LABELS = {
+  pending: 'قيد الانتظار',
+  confirmed: 'تم القبول',
+  preparing: 'قيد التحضير',
+  on_the_way: 'في الطريق',
+  delivered: 'تم التوصيل',
+  cancelled: 'ملغي'
+};
+
+const STATUS_COLORS = {
+  pending:    'bg-yellow-100 text-yellow-700 border-yellow-200',
+  confirmed:  'bg-blue-100 text-blue-700 border-blue-200',
+  preparing:  'bg-orange-100 text-orange-700 border-orange-200',
+  on_the_way: 'bg-purple-100 text-purple-700 border-purple-200',
+  delivered:  'bg-green-100 text-green-700 border-green-200',
+  cancelled:  'bg-red-100 text-red-600 border-red-200'
 };
 
 export default function Orders() {
   const [orders, setOrders] = useState([]);
-  const [filter, setFilter] = useState('active');
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('active');
+  const [selected, setSelected] = useState(null);
+  const socketRef = useRef(null);
   const restaurant = JSON.parse(localStorage.getItem('restaurant') || '{}');
 
   useEffect(() => {
     fetchOrders();
-    const socket = io('http://localhost:5000', { auth: { token: localStorage.getItem('token') } });
-    socket.on('new_order', () => { fetchOrders(); toast.success('🔔 طلب جديد!'); });
+    const socket = io('https://burger-app-production.up.railway.app', {
+      auth: { token: localStorage.getItem('token') }
+    });
+    socketRef.current = socket;
+    socket.on('new_order', (order) => {
+      if (order.restaurant_id === restaurant.id) {
+        toast('🔔 طلب جديد!', { icon: '🛍️', duration: 6000 });
+        showBrowserNotification('🛎️ طلب جديد!', `طلب #${order.order_number || ''} ينتظر موافقتك`, { order_id: order.order_id });
+        fetchOrders();
+      }
+    });
+    socket.on('order_updated', () => fetchOrders());
     return () => socket.disconnect();
   }, [filter]);
 
   const fetchOrders = async () => {
+    if (!restaurant.id) return setLoading(false);
     try {
-      const statuses = filter === 'active' ? 'pending,confirmed,preparing,ready' : filter === 'done' ? 'delivered' : 'cancelled';
-      const data = await api.get(`/restaurants/${restaurant.id}/orders?limit=50`);
-      const filtered = filter === 'active'
-        ? data.data.filter(o => ['pending','confirmed','preparing','ready'].includes(o.status))
-        : filter === 'done' ? data.data.filter(o => o.status === 'delivered')
-        : data.data.filter(o => o.status === 'cancelled');
-      setOrders(filtered);
-    } catch { toast.error('خطأ في تحميل الطلبات'); }
+      const statusMap = {
+        active: 'pending,confirmed,preparing',
+        on_the_way: 'on_the_way',
+        past: 'delivered,cancelled'
+      };
+      const statusParam = statusMap[filter] || '';
+      const r = await api.get(`/restaurants/${restaurant.id}/orders${statusParam ? `?status=${statusParam}` : ''}`);
+      setOrders(r.data || []);
+    } catch { toast.error('فشل تحميل الطلبات'); }
     finally { setLoading(false); }
   };
 
-  const updateStatus = async (orderId, status) => {
+  // Accept order → calls /confirm which auto-assigns driver for delivery orders
+  const acceptOrder = async (orderId) => {
     try {
-      await api.patch(`/orders/${orderId}/status`, { status });
-      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
-      toast.success('تم تحديث حالة الطلب');
-    } catch { toast.error('خطأ في التحديث'); }
+      await api.patch(`/orders/${orderId}/confirm`);
+      toast.success('✅ تم قبول الطلب وبدأ البحث عن سائق');
+      fetchOrders();
+    } catch (e) { toast.error(e.message || 'فشل القبول'); }
   };
 
-  return (
-    <div className="space-y-6" dir="rtl">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">الطلبات</h1>
-        <button onClick={fetchOrders} className="text-orange-500 hover:text-orange-600 text-sm font-medium">🔄 تحديث</button>
-      </div>
+  const updateStatus = async (orderId, newStatus) => {
+    try {
+      await api.patch(`/orders/${orderId}/status`, { status: newStatus });
+      const msgs = {
+        preparing: 'جاري التحضير 🍳',
+        on_the_way: 'الطلب في الطريق إلى الزبون 🛵',
+        delivered: 'تم التوصيل بنجاح ✅'
+      };
+      toast.success(msgs[newStatus] || 'تم تحديث الحالة');
+      fetchOrders();
+      if (selected?.id === orderId) setSelected(s => ({ ...s, status: newStatus }));
+    } catch (e) { toast.error(e.message || 'فشل'); }
+  };
 
-      {/* Filters */}
-      <div className="flex gap-3">
-        {[{ id: 'active', label: 'النشطة' }, { id: 'done', label: 'المكتملة' }, { id: 'cancelled', label: 'الملغاة' }].map(f => (
-          <button key={f.id} onClick={() => setFilter(f.id)} className={`px-4 py-2 rounded-xl font-semibold text-sm transition-all ${filter === f.id ? 'bg-orange-500 text-white' : 'bg-white text-gray-600 border'}`}>
+  const cancelOrder = async (orderId) => {
+    if (!confirm('هل تريد إلغاء هذا الطلب؟')) return;
+    try {
+      await api.patch(`/orders/${orderId}/status`, { status: 'cancelled' });
+      toast.success('تم إلغاء الطلب');
+      fetchOrders();
+      setSelected(null);
+    } catch (e) { toast.error(e.message || 'فشل الإلغاء'); }
+  };
+
+  const FILTERS = [
+    { key: 'active', label: '🔥 نشط' },
+    { key: 'on_the_way', label: '🛵 في الطريق' },
+    { key: 'past', label: '📋 السابقة' }
+  ];
+
+  return (
+    <div className="p-4 space-y-4" dir="rtl">
+      <h1 className="text-lg font-black text-gray-900">الطلبات</h1>
+
+      <div className="flex gap-2">
+        {FILTERS.map(f => (
+          <button key={f.key} onClick={() => { setFilter(f.key); setLoading(true); }}
+            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${filter === f.key ? 'bg-orange-500 text-white' : 'bg-white text-gray-500 border border-gray-200'}`}>
             {f.label}
           </button>
         ))}
       </div>
 
-      {loading ? <div className="text-center py-10">جاري التحميل...</div> : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {orders.length === 0 && <p className="text-gray-400 col-span-3 text-center py-10">لا توجد طلبات</p>}
-          {orders.map(order => {
-            const s = STATUS[order.status];
-            return (
-              <div key={order.id} className={`rounded-2xl border-2 p-4 space-y-3 ${s?.color}`}>
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-bold text-gray-900">#{order.order_number}</p>
-                    <p className="text-sm text-gray-500">{order.customer_name} • {order.customer_phone}</p>
-                  </div>
-                  <span className="text-lg font-bold text-orange-600">{parseFloat(order.total).toFixed(2)}₪</span>
-                </div>
-
-                <div className="text-sm text-gray-600">
-                  <p>📍 {order.delivery_address}</p>
-                  {order.notes && <p className="mt-1 text-orange-600">💬 {order.notes}</p>}
-                </div>
-
-                <div className="text-xs text-gray-400">{new Date(order.created_at).toLocaleString('ar')}</div>
-
-                {s?.next && (
-                  <div className="flex gap-2">
-                    <button onClick={() => updateStatus(order.id, s.next)} className="flex-1 bg-orange-500 text-white rounded-xl py-2 text-sm font-bold hover:bg-orange-600 transition-colors">
-                      {s.nextLabel}
-                    </button>
-                    {order.status === 'pending' && (
-                      <button onClick={() => updateStatus(order.id, 'cancelled')} className="px-3 bg-red-100 text-red-600 rounded-xl text-sm font-bold hover:bg-red-200">
-                        رفض
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+      {loading ? (
+        <div className="flex justify-center py-12"><div className="animate-spin h-8 w-8 rounded-full border-b-2 border-orange-500" /></div>
+      ) : orders.length === 0 ? (
+        <div className="text-center py-16 text-gray-400">
+          <p className="text-5xl mb-3">📭</p>
+          <p className="font-semibold">لا توجد طلبات</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {orders.map(order => (
+            <OrderCard
+              key={order.id}
+              order={order}
+              token={localStorage.getItem('token')}
+              isExpanded={selected?.id === order.id}
+              onToggle={() => setSelected(selected?.id === order.id ? null : order)}
+              onAccept={acceptOrder}
+              onUpdateStatus={updateStatus}
+              onCancel={cancelOrder}
+            />
+          ))}
         </div>
       )}
     </div>
   );
 }
+
+function OrderCard({ order, token, isExpanded, onToggle, onAccept, onUpdateStatus, onCancel }) {
+  const restaurant = JSON.parse(localStorage.getItem('restaurant') || '{}');
+  const isDelivery = order.order_type === 'delivery';
+
+  // Determine next action based on status + type
+  const getActions = () => {
+    if (order.status === 'pending') return [{
+      label: '✅ قبول الطلب وبدء التحضير',
+      color: 'bg-orange-500 text-white',
+      onClick: () => onAccept(order.id)
+    }];
+    if (order.status === 'confirmed') return [{
+      label: '🍳 بدء التحضير',
+      color: 'bg-blue-500 text-white',
+      onClick: () => onUpdateStatus(order.id, 'preparing')
+    }];
+    if (order.status === 'preparing') {
+      if (isDelivery) return [{
+        label: '🛵 السائق أخذ الطلب - في الطريق',
+        color: 'bg-purple-500 text-white',
+        onClick: () => onUpdateStatus(order.id, 'on_the_way')
+      }];
+      else return [{
+        label: '✅ تم استلام الطلب من المحل',
+        color: 'bg-green-500 text-white',
+        onClick: () => onUpdateStatus(order.id, 'delivered')
+      }];
+    }
+    return [];
+  };
+
+  const actions = getActions();
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      {/* Card Header */}
+      <div className="p-4 cursor-pointer" onClick={onToggle}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="font-black text-gray-900">#{order.id}</p>
+              <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${STATUS_COLORS[order.status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+                {STATUS_LABELS[order.status] || order.status}
+              </span>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${isDelivery ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600'}`}>
+                {isDelivery ? '🛵 توصيل' : '🏃 استلام'}
+              </span>
+            </div>
+            <p className="text-sm font-semibold text-gray-700 mt-1">{order.customer_name || 'زبون'}</p>
+            {order.customer_phone && (
+              <a href={`tel:${order.customer_phone}`} className="text-xs text-blue-500 font-semibold" onClick={e => e.stopPropagation()}>
+                📞 {order.customer_phone}
+              </a>
+            )}
+          </div>
+          <div className="text-left flex-shrink-0">
+            <p className="font-black text-orange-500 text-lg">{parseFloat(order.total || 0).toFixed(0)}₪</p>
+            <p className="text-xs text-gray-400">{new Date(order.created_at).toLocaleTimeString('ar', { hour: '2-digit', minute: '2-digit' })}</p>
+            <p className="text-lg mt-1">{isExpanded ? '▲' : '▼'}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded Details */}
+      {isExpanded && (
+        <div className="border-t border-gray-100 bg-gray-50 p-4 space-y-3">
+
+          {/* Live Map */}
+          <OrderMap
+            token={token}
+            order={{
+              ...order,
+              restaurant_lat: restaurant.lat,
+              restaurant_lng: restaurant.lng,
+              restaurant_name: restaurant.name_ar,
+            }}
+          />
+
+          {/* Customer Info */}
+          <div className="bg-white rounded-xl p-3 space-y-1.5">
+            <p className="text-xs font-bold text-gray-500 uppercase">معلومات الزبون</p>
+            <p className="text-sm font-bold text-gray-800">{order.customer_name}</p>
+            <a href={`tel:${order.customer_phone}`} className="text-sm text-blue-600 font-semibold block">
+              📞 {order.customer_phone}
+            </a>
+            {order.delivery_address && (
+              <p className="text-xs text-gray-600">📍 {order.delivery_address}</p>
+            )}
+            <p className="text-xs text-gray-500">{order.payment_method === 'cash' ? '💵 دفع نقداً' : '💳 دفع بطاقة'}</p>
+          </div>
+
+          {/* Order Items */}
+          <OrderItems orderId={order.id} />
+
+          {/* Price Summary */}
+          <div className="bg-white rounded-xl p-3 space-y-1">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">المجموع الفرعي</span>
+              <span className="font-semibold">{parseFloat(order.subtotal || 0).toFixed(2)}₪</span>
+            </div>
+            {isDelivery && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">رسوم التوصيل</span>
+                <span className="font-semibold">{parseFloat(order.delivery_fee || 0).toFixed(2)}₪</span>
+              </div>
+            )}
+            {order.discount > 0 && (
+              <div className="flex justify-between text-sm text-green-600">
+                <span>خصم</span>
+                <span>-{parseFloat(order.discount).toFixed(2)}₪</span>
+              </div>
+            )}
+            <div className="flex justify-between font-black text-base border-t pt-1 mt-1">
+              <span>الإجمالي</span>
+              <span className="text-orange-500">{parseFloat(order.total || 0).toFixed(2)}₪</span>
+            </div>
+          </div>
+
+          {/* Notes */}
+          {order.notes && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3">
+              <p className="text-xs font-bold text-yellow-700">ملاحظات الزبون:</p>
+              <p className="text-sm text-yellow-800 mt-0.5">{order.notes}</p>
+            </div>
+          )}
+
+          {/* Driver info */}
+          {order.status === 'preparing' && isDelivery && (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+              <p className="text-xs font-bold text-blue-700">
+                {order.driver_id ? '🛵 تم تعيين سائق - في انتظار الوصول للمطعم' : '⏳ جاري البحث عن سائق...'}
+              </p>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="space-y-2">
+            {actions.map((action, i) => (
+              <button key={i} onClick={action.onClick}
+                className={`w-full py-3 rounded-xl font-bold text-sm ${action.color}`}>
+                {action.label}
+              </button>
+            ))}
+            {['pending', 'confirmed', 'preparing'].includes(order.status) && (
+              <button onClick={() => onCancel(order.id)}
+                className="w-full bg-red-50 text-red-500 border border-red-200 py-2.5 rounded-xl font-bold text-sm">
+                ❌ إلغاء الطلب
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrderItems({ orderId }) {
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    api.get(`/orders/${orderId}`).then(r => setItems(r.data?.items || [])).catch(() => {});
+  }, [orderId]);
+
+  if (!items.length) return null;
+
+  return (
+    <div className="bg-white rounded-xl p-3">
+      <p className="text-xs font-bold text-gray-500 mb-2 uppercase">الأصناف</p>
+      <div className="space-y-2">
+        {items.map((item, i) => (
+          <div key={i} className="flex justify-between items-start">
+            <div className="flex-1">
+              <span className="text-sm text-gray-800 font-semibold">{item.quantity}× {item.name_ar}</span>
+              {item.options_text && (
+                <p className="text-xs text-gray-400 mt-0.5">{item.options_text}</p>
+              )}
+            </div>
+            <span className="text-sm font-bold text-gray-700">{parseFloat(item.subtotal || item.price * item.quantity || 0).toFixed(2)}₪</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Switch, Alert, Vibration, ScrollView, Modal } from 'react-native';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
@@ -128,7 +128,7 @@ export default function DriverHome() {
   const setupSocket = async () => {
     try {
       const token = await AsyncStorage.getItem('driver_token');
-      const socket = io('https://snareless-diatonic-emmalynn.ngrok-free.dev', {
+      const socket = io('https://burger-app-production.up.railway.app', {
         auth: { token }, transports: ['websocket']
       });
       socketRef.current = socket;
@@ -434,3 +434,4 @@ const styles = StyleSheet.create({
   quickBtn: { flex: 1, backgroundColor: '#FFF', borderRadius: 16, padding: 16, alignItems: 'center', gap: 6, elevation: 1 },
   quickLabel: { fontSize: 12, fontWeight: '700', color: COLORS.text },
 });
+

@@ -1,4 +1,6 @@
 require('dotenv').config();
+process.on('unhandledRejection', (err) => { console.error('UnhandledRejection:', err?.message || err); });
+process.on('uncaughtException', (err) => { console.error('UncaughtException:', err?.message || err); });
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -50,8 +52,16 @@ app.use('/api/search', require('./routes/search'));
 app.use('/api/upload', require('./routes/upload'));
 app.use('/api/payments', require('./routes/payments'));
 app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/delivery-zones', require('./routes/delivery-zones'));
+app.use('/api/webpush', require('./routes/webpush').router);
 
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
+
+// Serve restaurant portal frontend
+const portalDist = path.join(__dirname, '../restaurant-portal/dist');
+app.use('/portal', express.static(portalDist));
+app.use('/portal/sw.js', express.static(path.join(portalDist, 'sw.js')));
+app.get('/portal/*', (req, res) => res.sendFile(path.join(portalDist, 'index.html')));
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

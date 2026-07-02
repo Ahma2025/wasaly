@@ -10,8 +10,8 @@ export default function Login({ onLogin }) {
     e.preventDefault();
     setLoading(true);
     try {
-      const data = await api.post('/auth/login', { ...form, role: 'admin' });
-      if (data.user?.role !== 'admin') return toast.error('غير مصرح');
+      const data = await api.post('/auth/login-password', { ...form, role: 'admin' });
+      if (data.user?.role !== 'admin') return toast.error('غير مصرح - هذا الحساب ليس حساب مدير');
       localStorage.setItem('admin_token', data.token);
       onLogin(data.user);
     } catch { toast.error('بيانات خاطئة'); }

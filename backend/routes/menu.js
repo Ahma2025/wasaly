@@ -26,6 +26,15 @@ router.put('/categories/:id', auth, restaurantOnly, async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+// Delete category
+router.delete('/categories/:id', auth, restaurantOnly, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM menu_items WHERE category_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM menu_categories WHERE id=$1', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 // Add menu item
 router.post('/items', auth, restaurantOnly, async (req, res) => {
   try {
@@ -33,7 +42,15 @@ router.post('/items', auth, restaurantOnly, async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO menu_items (restaurant_id, category_id, name_ar, name_en, description_ar, description_en, image, price, discount_price, calories, is_spicy, is_vegetarian, is_vegan, preparation_time)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
-      [restaurant_id, category_id, name_ar, name_en, description_ar, description_en, image, price, discount_price, calories, is_spicy, is_vegetarian, is_vegan, preparation_time]
+      [
+        restaurant_id, category_id, name_ar, name_en || null,
+        description_ar || null, description_en || null,
+        image || null, parseFloat(price) || 0,
+        discount_price ? parseFloat(discount_price) : null,
+        calories ? parseInt(calories) : null,
+        is_spicy ? 1 : 0, is_vegetarian ? 1 : 0, is_vegan ? 1 : 0,
+        parseInt(preparation_time) || 15
+      ]
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -71,12 +88,36 @@ router.post('/items/:id/options', auth, restaurantOnly, async (req, res) => {
     const { name_ar, name_en, type, is_required, max_selections, values } = req.body;
     const { rows: option } = await pool.query(
       'INSERT INTO item_options (item_id, name_ar, name_en, type, is_required, max_selections) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [req.params.id, name_ar, name_en, type, is_required, max_selections]
+      [req.params.id, name_ar || '', name_en || null, type || 'single', is_required ? 1 : 0, max_selections || 1]
     );
     for (const v of (values || [])) {
-      await pool.query('INSERT INTO item_option_values (option_id, name_ar, name_en, extra_price) VALUES ($1,$2,$3,$4)', [option[0].id, v.name_ar, v.name_en, v.extra_price]);
+      await pool.query(
+        'INSERT INTO item_option_values (option_id, name_ar, name_en, extra_price) VALUES ($1,$2,$3,$4)',
+        [option[0].id, v.name_ar || '', v.name_en || null, parseFloat(v.extra_price) || 0]
+      );
     }
     res.status(201).json({ success: true, data: option[0] });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// Get item options
+router.get('/items/:id/options', auth, async (req, res) => {
+  try {
+    const { rows: options } = await pool.query('SELECT * FROM item_options WHERE item_id=$1', [req.params.id]);
+    for (const opt of options) {
+      const { rows: vals } = await pool.query('SELECT * FROM item_option_values WHERE option_id=$1', [opt.id]);
+      opt.values = vals;
+    }
+    res.json({ success: true, data: options });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// Delete item option
+router.delete('/options/:id', auth, restaurantOnly, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM item_option_values WHERE option_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM item_options WHERE id=$1', [req.params.id]);
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
