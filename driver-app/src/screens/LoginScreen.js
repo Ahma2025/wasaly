@@ -6,44 +6,23 @@ import { useAuth } from '../context/AuthContext';
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
 
 export default function LoginScreen() {
-  const [step, setStep] = useState('phone');
   const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
-  const [name, setName] = useState('');
-  const [vehicleType, setVehicleType] = useState('دراجة');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isNew, setIsNew] = useState(false);
   const { login } = useAuth();
 
-  const sendOtp = async () => {
-    if (phone.length < 10) return Alert.alert('خطأ', 'أدخل رقم هاتف صحيح');
+  const handleLogin = async () => {
+    if (!phone || !password) return Alert.alert('خطأ', 'أدخل رقم الهاتف وكلمة المرور');
     setLoading(true);
     try {
-      await api.post('/auth/otp/send', { phone });
-      setStep('otp');
-    } catch { Alert.alert('خطأ', 'تعذر إرسال الرمز'); }
-    finally { setLoading(false); }
-  };
-
-  const verifyOtp = async () => {
-    if (otp.length < 4) return Alert.alert('خطأ', 'أدخل رمز التحقق');
-    setLoading(true);
-    try {
-      const data = await api.post('/auth/otp/verify', { phone, otp, role: 'driver' });
-      if (data.isNew) { setIsNew(true); setStep('info'); }
-      else { login(data.token, data.user); }
-    } catch { Alert.alert('خطأ', 'رمز خاطئ'); }
-    finally { setLoading(false); }
-  };
-
-  const register = async () => {
-    if (!name) return Alert.alert('خطأ', 'أدخل اسمك');
-    setLoading(true);
-    try {
-      const data = await api.post('/auth/register', { phone, otp, name, role: 'driver', vehicle_type: vehicleType });
-      login(data.token, data.user);
-    } catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }
-    finally { setLoading(false); }
+      const res = await api.post('/auth/login-password', { phone, password, role: 'driver' });
+      if (res.user.role !== 'driver') return Alert.alert('خطأ', 'هذا الحساب ليس حساب مندوب');
+      await login(res.token, res.user);
+      // Set driver online automatically after login
+      try { await api.patch('/drivers/status', { is_online: true }); } catch {}
+    } catch (e) {
+      Alert.alert('خطأ', e.message || 'رقم الهاتف أو كلمة المرور غير صحيحة');
+    } finally { setLoading(false); }
   };
 
   return (
@@ -53,44 +32,19 @@ export default function LoginScreen() {
         <Text style={styles.title}>وصلّي</Text>
         <Text style={styles.subtitle}>تطبيق المناديب</Text>
 
-        {step === 'phone' && (
-          <>
-            <Text style={styles.label}>رقم الهاتف</Text>
-            <TextInput style={styles.input} placeholder="+970..." keyboardType="phone-pad" value={phone} onChangeText={setPhone} textAlign="right" />
-            <TouchableOpacity style={styles.btn} onPress={sendOtp} disabled={loading}>
-              <Text style={styles.btnText}>{loading ? 'جاري الإرسال...' : 'إرسال رمز التحقق'}</Text>
-            </TouchableOpacity>
-          </>
-        )}
+        <Text style={styles.label}>رقم الهاتف</Text>
+        <TextInput style={styles.input} placeholder="05XXXXXXXX" keyboardType="phone-pad"
+          value={phone} onChangeText={setPhone} textAlign="right" />
 
-        {step === 'otp' && (
-          <>
-            <Text style={styles.label}>رمز التحقق</Text>
-            <TextInput style={[styles.input, { letterSpacing: 8, textAlign: 'center', fontSize: 24 }]} placeholder="• • • •" keyboardType="number-pad" maxLength={6} value={otp} onChangeText={setOtp} />
-            <TouchableOpacity style={styles.btn} onPress={verifyOtp} disabled={loading}>
-              <Text style={styles.btnText}>{loading ? 'جاري التحقق...' : 'تحقق'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setStep('phone')}><Text style={styles.back}>← تغيير الرقم</Text></TouchableOpacity>
-          </>
-        )}
+        <Text style={styles.label}>كلمة المرور</Text>
+        <TextInput style={styles.input} placeholder="••••••" secureTextEntry
+          value={password} onChangeText={setPassword} textAlign="right" />
 
-        {step === 'info' && (
-          <>
-            <Text style={styles.label}>الاسم الكامل</Text>
-            <TextInput style={styles.input} placeholder="اسمك الكامل" value={name} onChangeText={setName} textAlign="right" />
-            <Text style={styles.label}>نوع المركبة</Text>
-            <View style={styles.vehicleRow}>
-              {['دراجة', 'سيارة', 'دراجة هوائية'].map(v => (
-                <TouchableOpacity key={v} style={[styles.vehicleBtn, vehicleType === v && styles.vehicleBtnActive]} onPress={() => setVehicleType(v)}>
-                  <Text style={[styles.vehicleBtnText, vehicleType === v && { color: '#FFF' }]}>{v}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TouchableOpacity style={styles.btn} onPress={register} disabled={loading}>
-              <Text style={styles.btnText}>{loading ? 'جاري التسجيل...' : 'ابدأ التوصيل'}</Text>
-            </TouchableOpacity>
-          </>
-        )}
+        <TouchableOpacity style={[styles.btn, loading && { opacity: 0.7 }]} onPress={handleLogin} disabled={loading}>
+          <Text style={styles.btnText}>{loading ? 'جاري الدخول...' : 'دخول'}</Text>
+        </TouchableOpacity>
+
+        <Text style={styles.note}>يتم إنشاء حسابات المناديب عبر لوحة الإدارة</Text>
       </View>
     </KeyboardAvoidingView>
   );
@@ -106,9 +60,5 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 14, padding: 14, fontSize: 16, backgroundColor: '#FFF', marginBottom: 16 },
   btn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, alignItems: 'center', marginTop: 8 },
   btnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
-  back: { textAlign: 'center', color: COLORS.gray, marginTop: 16, fontWeight: '600' },
-  vehicleRow: { flexDirection: 'row', gap: 8, marginBottom: 20 },
-  vehicleBtn: { flex: 1, padding: 10, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E5EA', alignItems: 'center', backgroundColor: '#FFF' },
-  vehicleBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  vehicleBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.text },
+  note: { textAlign: 'center', color: COLORS.gray, marginTop: 24, fontSize: 13 },
 });

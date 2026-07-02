@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, FlatList, Animated, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import api from '../utils/api';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -11,8 +11,9 @@ import CartBar from '../components/CartBar';
 const COLORS = { primary: '#FF6B00', bg: '#F8F9FA', card: '#FFF', text: '#1A1A2E', gray: '#8E8E93' };
 
 export default function RestaurantScreen() {
-  const { id } = useLocalSearchParams();
-  const router = useRouter();
+  const route = useRoute();
+  const id = route.params?.restaurantId;
+  const navigation = useNavigation();
   const { user } = useAuth();
   const { addItem, count, total, restaurantId, clearAndAdd } = useCart();
   const [restaurant, setRestaurant] = useState(null);
@@ -61,7 +62,7 @@ export default function RestaurantScreen() {
       {/* Cover */}
       <Animated.View style={[styles.cover, { height: headerHeight }]}>
         <Image source={{ uri: restaurant.cover_image }} style={styles.coverImg} />
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={22} color="#FFF" />
         </TouchableOpacity>
         <TouchableOpacity style={styles.favBtn} onPress={toggleFavorite}>
@@ -99,14 +100,14 @@ export default function RestaurantScreen() {
           <View style={styles.menuSection}>
             <Text style={styles.catTitle}>{menu[activeCategory].name_ar}</Text>
             {menu[activeCategory].items?.map(item => (
-              <ItemCard key={item.id} item={item} onAdd={() => handleAddItem(item)} onPress={() => router.push({ pathname: '/item', params: { item: JSON.stringify(item), restaurant: JSON.stringify({ id: restaurant.id, name_ar: restaurant.name_ar }) } })} />
+              <ItemCard key={item.id} item={item} onAdd={() => handleAddItem(item)} onPress={() => handleAddItem(item)} />
             ))}
           </View>
         )}
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {count > 0 && <CartBar count={count} total={total} onPress={() => router.push('/cart')} />}
+      {count > 0 && <CartBar count={count} total={total} onPress={() => navigation.navigate('سلتي')} />}
     </View>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -13,7 +13,7 @@ export default function SearchScreen() {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const navigation = useNavigation();
-  let timer = null;
+  const timerRef = useRef(null);
 
   const search = async (q) => {
     if (!q.trim()) { setResults(null); return; }
@@ -26,16 +26,16 @@ export default function SearchScreen() {
 
   const onChangeText = (text) => {
     setQuery(text);
-    clearTimeout(timer);
-    timer = setTimeout(() => search(text), 400);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => search(text), 400);
   };
 
   const RestaurantItem = ({ item }) => (
     <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Restaurant', { restaurantId: item.id })}>
       <View style={styles.logo}><Text style={{ fontSize: 28 }}>🏪</Text></View>
       <View style={styles.cardInfo}>
-        <Text style={styles.cardName}>{item.name}</Text>
-        <Text style={styles.cardSub}>{item.cuisine_type} • {item.delivery_time_min}-{item.delivery_time_max} دقيقة</Text>
+        <Text style={styles.cardName}>{item.name_ar || item.name}</Text>
+        <Text style={styles.cardSub}>{item.delivery_time_min}-{item.delivery_time_max} دقيقة</Text>
         <View style={styles.cardMeta}>
           <Text style={styles.rating}>⭐ {parseFloat(item.rating || 0).toFixed(1)}</Text>
           <Text style={styles.fee}>🛵 {item.delivery_fee}₪</Text>
@@ -48,7 +48,7 @@ export default function SearchScreen() {
     <TouchableOpacity style={styles.itemCard} onPress={() => navigation.navigate('Restaurant', { restaurantId: item.restaurant_id })}>
       <View style={styles.itemEmoji}><Text style={{ fontSize: 24 }}>🍽️</Text></View>
       <View style={styles.cardInfo}>
-        <Text style={styles.cardName}>{item.name}</Text>
+        <Text style={styles.cardName}>{item.name_ar || item.name}</Text>
         <Text style={styles.cardSub}>{item.restaurant_name}</Text>
         <Text style={styles.itemPrice}>{item.price}₪</Text>
       </View>

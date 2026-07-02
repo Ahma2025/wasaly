@@ -9,7 +9,7 @@ export default function RestaurantCard({ restaurant: r, onPress }) {
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
       <Image source={{ uri: r.cover_image || r.logo }} style={styles.image} />
       {!r.is_open && <View style={styles.closedOverlay}><Text style={styles.closedText}>مغلق</Text></View>}
-      {r.is_featured && <View style={styles.featuredBadge}><Text style={styles.featuredText}>⭐ مميز</Text></View>}
+      {!!r.is_featured && <View style={styles.featuredBadge}><Text style={styles.featuredText}>⭐ مميز</Text></View>}
 
       <View style={styles.info}>
         <View style={styles.row}>
@@ -18,22 +18,24 @@ export default function RestaurantCard({ restaurant: r, onPress }) {
             <Text style={styles.name}>{r.name_ar}</Text>
             <Text style={styles.category}>{r.category_name}</Text>
           </View>
-          {r.discount_available && <View style={styles.discountBadge}><Text style={styles.discountText}>خصم</Text></View>}
+          {!!r.discount_available && <View style={styles.discountBadge}><Text style={styles.discountText}>خصم</Text></View>}
         </View>
 
         <View style={styles.stats}>
-          <View style={styles.stat}><Ionicons name="star" size={13} color="#FFD700" /><Text style={styles.statText}>{r.rating?.toFixed(1)} ({r.rating_count})</Text></View>
+          <View style={styles.stat}><Ionicons name="star" size={13} color="#FFD700" /><Text style={styles.statText}>{r.rating ? r.rating.toFixed(1) : '0.0'}{r.rating_count ? ` (${r.rating_count})` : ''}</Text></View>
           <Text style={styles.dot}>•</Text>
-          <View style={styles.stat}><Ionicons name="time-outline" size={13} color={COLORS.gray} /><Text style={styles.statText}>{r.delivery_time_min}-{r.delivery_time_max} د</Text></View>
+          <View style={styles.stat}><Ionicons name="time-outline" size={13} color={COLORS.gray} /><Text style={styles.statText}>{r.delivery_time_min || 20}-{r.delivery_time_max || 40} د</Text></View>
           <Text style={styles.dot}>•</Text>
           <View style={styles.stat}>
             <Ionicons name="bicycle-outline" size={13} color={COLORS.gray} />
-            <Text style={styles.statText}>{r.delivery_fee === 0 ? 'مجاني' : `${r.delivery_fee}₪`}</Text>
+            <Text style={styles.statText}>{r.delivery_fee === 0 ? 'مجاني' : `${r.delivery_fee || 0}₪`}</Text>
           </View>
-          {r.distance_km && <>
-            <Text style={styles.dot}>•</Text>
-            <Text style={styles.statText}>{r.distance_km} كم</Text>
-          </>}
+          {!!r.distance_km && (
+            <>
+              <Text style={styles.dot}>•</Text>
+              <Text style={styles.statText}>{r.distance_km} كم</Text>
+            </>
+          )}
         </View>
       </View>
     </TouchableOpacity>

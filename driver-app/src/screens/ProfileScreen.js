@@ -10,18 +10,20 @@ export default function ProfileScreen({ navigation }) {
   const { user, logout } = useAuth();
   const [profile, setProfile] = useState(null);
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ name: '', vehicle_type: '', vehicle_number: '' });
+  const [form, setForm] = useState({ name: '', vehicle_type: '', vehicle_plate: '' });
 
   useEffect(() => {
-    api.get('/users/profile').then(d => {
-      setProfile(d.data);
-      setForm({ name: d.data.name, vehicle_type: d.data.vehicle_type || '', vehicle_number: d.data.vehicle_number || '' });
-    });
+    api.get('/drivers/me').then(d => {
+      const data = d.data;
+      setProfile(data);
+      setForm({ name: data.name || '', vehicle_type: data.vehicle_type || '', vehicle_plate: data.vehicle_plate || '' });
+    }).catch(() => {});
   }, []);
 
   const save = async () => {
     try {
-      await api.patch('/users/profile', form);
+      // Update user name
+      await api.put('/users/profile', { name: form.name });
       setProfile(p => ({ ...p, ...form }));
       setEditing(false);
     } catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }
@@ -45,9 +47,6 @@ export default function ProfileScreen({ navigation }) {
         </View>
         <Text style={styles.name}>{profile?.name}</Text>
         <Text style={styles.phone}>{profile?.phone}</Text>
-        <View style={[styles.tierBadge, { backgroundColor: tierColors[tier] }]}>
-          <Text style={styles.tierText}>{tier.toUpperCase()}</Text>
-        </View>
       </View>
 
       {/* Stats */}
@@ -55,6 +54,7 @@ export default function ProfileScreen({ navigation }) {
         {[
           { label: 'الرصيد', value: `${parseFloat(profile?.wallet_balance || 0).toFixed(2)}₪`, icon: '💰' },
           { label: 'التقييم', value: parseFloat(profile?.rating || 0).toFixed(1), icon: '⭐' },
+          { label: 'التوصيلات', value: profile?.total_deliveries || 0, icon: '📦' },
         ].map((s, i) => (
           <View key={i} style={styles.statCard}>
             <Text style={styles.statIcon}>{s.icon}</Text>
@@ -75,12 +75,12 @@ export default function ProfileScreen({ navigation }) {
 
         {[
           { label: 'الاسم', key: 'name' },
-          { label: 'نوع المركبة', key: 'vehicle_type', placeholder: 'دراجة / سيارة' },
-          { label: 'رقم المركبة', key: 'vehicle_number' },
+          { label: 'نوع المركبة', key: 'vehicle_type', placeholder: 'دراجة / سيارة', editable: false },
+          { label: 'رقم المركبة', key: 'vehicle_plate', editable: false },
         ].map(f => (
           <View key={f.key} style={styles.field}>
             <Text style={styles.fieldLabel}>{f.label}</Text>
-            {editing ? (
+            {editing && f.editable !== false ? (
               <TextInput style={styles.fieldInput} value={form[f.key]} onChangeText={v => setForm(p => ({ ...p, [f.key]: v }))} placeholder={f.placeholder} />
             ) : (
               <Text style={styles.fieldValue}>{form[f.key] || '-'}</Text>
@@ -104,13 +104,11 @@ const styles = StyleSheet.create({
   avatarText: { fontSize: 32, fontWeight: '900', color: '#FFF' },
   name: { fontSize: 20, fontWeight: '800', color: COLORS.text },
   phone: { fontSize: 14, color: COLORS.gray, marginTop: 4 },
-  tierBadge: { marginTop: 8, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20 },
-  tierText: { fontSize: 11, fontWeight: '900', color: '#FFF' },
-  statsRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
-  statCard: { flex: 1, backgroundColor: '#FFF', borderRadius: 16, padding: 16, alignItems: 'center', elevation: 2 },
-  statIcon: { fontSize: 22, marginBottom: 4 },
-  statValue: { fontSize: 20, fontWeight: '900', color: COLORS.text },
-  statLabel: { fontSize: 11, color: COLORS.gray, marginTop: 2 },
+  statsRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  statCard: { flex: 1, backgroundColor: '#FFF', borderRadius: 16, padding: 12, alignItems: 'center', elevation: 2 },
+  statIcon: { fontSize: 20, marginBottom: 4 },
+  statValue: { fontSize: 17, fontWeight: '900', color: COLORS.text },
+  statLabel: { fontSize: 10, color: COLORS.gray, marginTop: 2 },
   section: { backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text },

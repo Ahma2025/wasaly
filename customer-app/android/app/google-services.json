@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "573612310538",
+    "project_id": "wasaly-delivery-app",
+    "storage_bucket": "wasaly-delivery-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:573612310538:android:85e3d9ccaabc89985f9ff3",
+        "android_client_info": {
+          "package_name": "com.wasaly.customer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAXX_V5q5zxFKu_WDbTAJ8I1WQCZ5OqEkY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

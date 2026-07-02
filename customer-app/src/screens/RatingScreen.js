@@ -28,7 +28,7 @@ export default function RatingScreen({ route, navigation }) {
     setSaving(true);
     try {
       await api.post(`/orders/${orderId}/rate`, { food_rating: foodRating, driver_rating: driverRating, comment });
-      Alert.alert('شكراً!', 'تم إرسال تقييمك', [{ text: 'حسناً', onPress: () => navigation.navigate('Home') }]);
+      Alert.alert('شكراً!', 'تم إرسال تقييمك', [{ text: 'حسناً', onPress: () => navigation.navigate('Main', { screen: 'الرئيسية' }) }]);
     } catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }
     finally { setSaving(false); }
   };
@@ -68,7 +68,7 @@ export default function RatingScreen({ route, navigation }) {
           <Text style={styles.submitText}>{saving ? 'جاري الإرسال...' : 'إرسال التقييم'}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => navigation.navigate('Home')} style={styles.skipBtn}>
+        <TouchableOpacity onPress={() => navigation.navigate('Main', { screen: 'الرئيسية' })} style={styles.skipBtn}>
           <Text style={styles.skipText}>تخطي</Text>
         </TouchableOpacity>
       </View>

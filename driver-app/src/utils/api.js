@@ -1,7 +1,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const api = axios.create({ baseURL: 'http://localhost:5000/api', timeout: 15000 });
+const api = axios.create({ baseURL: 'https://snareless-diatonic-emmalynn.ngrok-free.dev/api', timeout: 15000, headers: { 'ngrok-skip-browser-warning': '1' } });
 
 api.interceptors.request.use(async config => {
   const token = await AsyncStorage.getItem('driver_token');

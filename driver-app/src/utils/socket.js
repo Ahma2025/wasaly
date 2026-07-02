@@ -11,7 +11,7 @@ export function useSocket() {
     AsyncStorage.getItem('driver_token').then(token => {
       if (!token) return;
       if (!socketInstance) {
-        socketInstance = io('http://localhost:5000', { auth: { token }, transports: ['websocket'] });
+        socketInstance = io('https://snareless-diatonic-emmalynn.ngrok-free.dev', { auth: { token }, transports: ['websocket'] });
       }
       socketRef.current = socketInstance;
     });

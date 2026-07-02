@@ -20,7 +20,7 @@ export default function ProfileScreen({ navigation }) {
   }, []);
 
   const save = async () => {
-    try { await api.patch('/users/profile', { name }); setProfile(p => ({ ...p, name })); setEditing(false); }
+    try { await api.put('/users/profile', { name }); setProfile(p => ({ ...p, name })); setEditing(false); }
     catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }
   };
 
@@ -28,11 +28,10 @@ export default function ProfileScreen({ navigation }) {
   const tierMeta = TIER_META[tier];
 
   const MENU = [
-    { icon: 'location-outline', label: 'عناويني', onPress: () => navigation.navigate('Addresses') },
-    { icon: 'heart-outline', label: 'المفضلة', onPress: () => navigation.navigate('Favorites') },
+    { icon: 'location-outline', label: 'عناويني', onPress: () => navigation.navigate('AddAddress') },
     { icon: 'receipt-outline', label: 'طلباتي', onPress: () => navigation.navigate('OrdersHistory') },
     { icon: 'notifications-outline', label: 'الإشعارات', onPress: () => navigation.navigate('Notifications') },
-    { icon: 'help-circle-outline', label: 'الدعم', onPress: () => {} },
+    { icon: 'help-circle-outline', label: 'الدعم', onPress: () => Alert.alert('الدعم', 'تواصل معنا على الرقم: 0599039704') },
   ];
 
   return (

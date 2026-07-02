@@ -8,13 +8,16 @@ export default function OrdersHistoryScreen() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
 
   useEffect(() => { fetchOrders(); }, [page]);
 
   const fetchOrders = async () => {
     try {
       const data = await api.get(`/drivers/orders?page=${page}&limit=20`);
-      setOrders(prev => page === 1 ? data.data : [...prev, ...data.data]);
+      const newOrders = data.data || [];
+      setOrders(prev => page === 1 ? newOrders : [...prev, ...newOrders]);
+      if (newOrders.length < 20) setHasMore(false);
     } catch {} finally { setLoading(false); }
   };
 
@@ -40,10 +43,10 @@ export default function OrdersHistoryScreen() {
       <View style={styles.header}><Text style={styles.title}>سجل التوصيلات</Text></View>
       <FlatList
         data={orders}
-        keyExtractor={i => i.id}
+        keyExtractor={i => String(i.id)}
         renderItem={renderItem}
         contentContainerStyle={{ padding: 16, gap: 10 }}
-        onEndReached={() => setPage(p => p + 1)}
+        onEndReached={() => hasMore && setPage(p => p + 1)}
         onEndReachedThreshold={0.5}
         ListEmptyComponent={!loading && <View style={styles.empty}><Text style={styles.emptyIcon}>📦</Text><Text style={styles.emptyText}>لا توجد توصيلات بعد</Text></View>}
       />

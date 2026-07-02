@@ -9,16 +9,16 @@ export default function ItemCard({ item, onAdd, onPress }) {
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
       <View style={styles.info}>
         <View style={styles.badges}>
-          {item.is_new && <View style={styles.badge}><Text style={styles.badgeText}>جديد</Text></View>}
-          {item.is_spicy && <Text>🌶️</Text>}
-          {item.is_vegetarian && <Text>🌿</Text>}
+          {!!item.is_new && <View style={styles.badge}><Text style={styles.badgeText}>جديد</Text></View>}
+          {!!item.is_spicy && <Text>🌶️</Text>}
+          {!!item.is_vegetarian && <Text>🌿</Text>}
         </View>
         <Text style={styles.name}>{item.name_ar}</Text>
-        {item.description_ar && <Text style={styles.desc} numberOfLines={2}>{item.description_ar}</Text>}
-        {item.calories && <Text style={styles.calories}>{item.calories} سعرة</Text>}
+        {!!item.description_ar && <Text style={styles.desc} numberOfLines={2}>{item.description_ar}</Text>}
+        {!!item.calories && <Text style={styles.calories}>{item.calories} سعرة</Text>}
         <View style={styles.priceRow}>
           <Text style={styles.price}>{(item.discount_price || item.price).toFixed(2)}₪</Text>
-          {item.discount_price && <Text style={styles.originalPrice}>{item.price.toFixed(2)}₪</Text>}
+          {!!item.discount_price && <Text style={styles.originalPrice}>{item.price.toFixed(2)}₪</Text>}
         </View>
       </View>
       <View style={styles.imageWrap}>

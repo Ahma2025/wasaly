@@ -11,19 +11,19 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/users/notifications').then(d => setNotifications(d.data)).catch(() => {}).finally(() => setLoading(false));
+    api.get('/notifications').then(d => setNotifications(d.data)).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const markRead = async (id) => {
     try {
-      await api.patch(`/users/notifications/${id}/read`);
+      await api.patch(`/notifications/${id}/read`);
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
     } catch {}
   };
 
   const markAllRead = async () => {
     try {
-      await api.patch('/users/notifications/read-all');
+      await api.patch('/notifications/read-all');
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
     } catch {}
   };
@@ -54,7 +54,7 @@ export default function NotificationsScreen() {
         keyExtractor={i => i.id}
         renderItem={renderItem}
         contentContainerStyle={{ padding: 16, gap: 10 }}
-        onRefresh={() => api.get('/users/notifications').then(d => setNotifications(d.data))}
+        onRefresh={() => api.get('/notifications').then(d => setNotifications(d.data))}
         refreshing={loading}
         ListEmptyComponent={!loading && (
           <View style={styles.empty}>

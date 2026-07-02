@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, FlatList, Image, RefreshControl, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import RestaurantCard from '../components/RestaurantCard';
@@ -13,7 +13,7 @@ const COLORS = { primary: '#FF6B00', bg: '#F8F9FA', card: '#FFF', text: '#1A1A2E
 
 export default function HomeScreen() {
   const { user } = useAuth();
-  const router = useRouter();
+  const navigation = useNavigation();
   const [restaurants, setRestaurants] = useState([]);
   const [categories, setCategories] = useState([]);
   const [banners, setBanners] = useState([]);
@@ -52,7 +52,7 @@ export default function HomeScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.push('/address')} style={styles.locationRow}>
+        <TouchableOpacity onPress={() => navigation.navigate('AddAddress')} style={styles.locationRow}>
           <Ionicons name="location" size={20} color={COLORS.primary} />
           <View style={{ marginLeft: 6, flex: 1 }}>
             <Text style={styles.locationLabel}>التوصيل إلى</Text>
@@ -63,14 +63,14 @@ export default function HomeScreen() {
           <Ionicons name="chevron-down" size={16} color={COLORS.gray} />
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.notifBtn}>
+        <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={styles.notifBtn}>
           <Ionicons name="notifications-outline" size={24} color={COLORS.text} />
         </TouchableOpacity>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}>
         {/* Search Bar */}
-        <TouchableOpacity style={styles.searchBar} onPress={() => router.push('/search')}>
+        <TouchableOpacity style={styles.searchBar} onPress={() => navigation.navigate('بحث')}>
           <Ionicons name="search" size={20} color={COLORS.gray} />
           <Text style={styles.searchPlaceholder}>ابحث عن مطعم أو صنف...</Text>
         </TouchableOpacity>
@@ -116,7 +116,7 @@ export default function HomeScreen() {
             [1,2,3].map(i => <SkeletonCard key={i} />)
           ) : (
             restaurants.map(r => (
-              <RestaurantCard key={r.id} restaurant={r} onPress={() => router.push(`/restaurant/${r.id}`)} />
+              <RestaurantCard key={r.id} restaurant={r} onPress={() => navigation.navigate('Restaurant', { restaurantId: r.id })} />
             ))
           )}
           {!loading && restaurants.length === 0 && (

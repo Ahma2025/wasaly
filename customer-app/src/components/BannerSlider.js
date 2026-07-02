@@ -1,12 +1,12 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { View, Image, FlatList, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
 
 const { width } = Dimensions.get('window');
 const BANNER_WIDTH = width - 32;
 
 export default function BannerSlider({ banners }) {
-  const router = useRouter();
+  const navigation = useNavigation();
   const flatRef = useRef(null);
   const [current, setCurrent] = useState(0);
 
@@ -21,8 +21,7 @@ export default function BannerSlider({ banners }) {
   }, [current, banners]);
 
   const handleBannerPress = (banner) => {
-    if (banner.link_type === 'restaurant') router.push(`/restaurant/${banner.link_value}`);
-    else if (banner.link_type === 'category') router.push(`/?category=${banner.link_value}`);
+    if (banner.link_type === 'restaurant') navigation.navigate('Restaurant', { restaurantId: banner.link_value });
   };
 
   return (
