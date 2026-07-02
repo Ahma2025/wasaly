@@ -14,7 +14,7 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      const data = await api.post('/auth/login-password', { ...form, phone: normalizePhone(form.phone), role: 'restaurant' });
+      const data = await api.post('/auth/login-password', { ...form, phone: normalizePhone(form.phone) });
       if (!['restaurant', 'admin'].includes(data.user?.role)) {
         toast.error('هذا الحساب ليس حساب مطعم');
         return;

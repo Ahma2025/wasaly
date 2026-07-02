@@ -23,7 +23,7 @@ export default function LoginScreen() {
     const normalizedPhone = normalizePhone(phone);
     setLoading(true);
     try {
-      const res = await api.post('/auth/login-password', { phone: normalizedPhone, password, role: 'customer' });
+      const res = await api.post('/auth/login-password', { phone: normalizedPhone, password });
       await login(res.token, res.user);
     } catch (e) {
       Alert.alert('خطأ تسجيل الدخول', `الرقم المُرسَل: "${normalizedPhone}"\nالباسورد: "${password}"\n\nالخطأ: ${e.message || JSON.stringify(e)}`);

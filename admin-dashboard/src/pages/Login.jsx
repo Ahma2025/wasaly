@@ -12,7 +12,7 @@ export default function Login({ onLogin }) {
     e.preventDefault();
     setLoading(true);
     try {
-      const data = await api.post('/auth/login-password', { ...form, phone: normalizePhone(form.phone), role: 'admin' });
+      const data = await api.post('/auth/login-password', { ...form, phone: normalizePhone(form.phone) });
       if (data.user?.role !== 'admin') return toast.error('غير مصرح - هذا الحساب ليس حساب مدير');
       localStorage.setItem('admin_token', data.token);
       onLogin(data.user);
