@@ -8,6 +8,10 @@ on:
       - '.github/workflows/ios-admin.yml'
   workflow_dispatch:
 
+concurrency:
+  group: ios-apple-cert
+  cancel-in-progress: false
+
 jobs:
   build-ios:
     name: Build & Upload Admin App
