@@ -102,6 +102,7 @@ jobs:
           system("security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k wasaly123 build.keychain 2>/dev/null || true")
 
           puts "CERT_ID=#{cert_id}"
+          File.write('/tmp/cert_id.env', cert_id)
           File.open(ENV['GITHUB_ENV'],'a'){|f| f.puts "CERT_ID=#{cert_id}"}
           RUBYEOF
 
@@ -152,7 +153,7 @@ jobs:
           end
 
           t = token(key_id, issuer_id, pk)
-          cert_id = ENV['CERT_ID']
+          cert_id = File.read('/tmp/cert_id.env').strip
 
           # Get bundle record ID
           brid = api(t,'GET',"/v1/bundleIds?filter[identifier]=#{bundle_id}").dig('data',0,'id')
@@ -160,9 +161,12 @@ jobs:
 
           # Enable Push Notifications capability on bundle ID (required by expo-notifications)
           existing_caps = (api(t,'GET',"/v1/bundleIds/#{brid}/bundleIdCapabilities")['data']||[]).map{|c| c.dig('attributes','capabilityType')}
+          puts "Existing capabilities: #{existing_caps.inspect}"
           unless existing_caps.include?('PUSH_NOTIFICATIONS')
-            api(t,'POST','/v1/bundleIdCapabilities',{data:{type:'bundleIdCapabilities',attributes:{capabilityType:'PUSH_NOTIFICATIONS',settings:[]},relationships:{bundleId:{data:{type:'bundleIds',id:brid}}}}})
-            puts "Push Notifications enabled for #{bundle_id}"
+            resp = api(t,'POST','/v1/bundleIdCapabilities',{data:{type:'bundleIdCapabilities',attributes:{capabilityType:'PUSH_NOTIFICATIONS',settings:[]},relationships:{bundleId:{data:{type:'bundleIds',id:brid}}}}})
+            puts "Push Notifications enable response: #{resp.inspect[0..200]}"
+          else
+            puts "Push Notifications already enabled"
           end
 
           # Delete old profiles for this bundle
@@ -189,16 +193,17 @@ jobs:
             File.write(pbx, c)
           end
 
+          # Write to temp file for same-step bash access
           File.write('/tmp/cust_profile.env', "#{pu}\n#{pn}")
           File.open(ENV['GITHUB_ENV'],'a'){|f| f.puts "CUST_PROFILE_UUID=#{pu}"; f.puts "CUST_PROFILE_NAME=#{pn}"}
           puts "Profile created: #{pn} (#{pu})"
           RUBYEOF
 
-          # Read profile info from temp file (GITHUB_ENV not available in same step)
+          # Read profile from temp file (GITHUB_ENV not available in same step)
           CUST_PROFILE_UUID=$(sed -n '1p' /tmp/cust_profile.env)
           CUST_PROFILE_NAME=$(sed -n '2p' /tmp/cust_profile.env)
-          echo "Using profile UUID: $CUST_PROFILE_UUID"
-          echo "Using profile name: $CUST_PROFILE_NAME"
+          echo "Profile UUID: $CUST_PROFILE_UUID"
+          echo "Profile Name: $CUST_PROFILE_NAME"
 
           # Build & Archive
           security unlock-keychain -p wasaly123 build.keychain || true
@@ -208,7 +213,7 @@ jobs:
           xcodebuild archive \
             -workspace "$WS" -scheme "$SCHEME" \
             -configuration Release \
-            -archivePath ${{ env.ARCHIVE_PATH }} \
+            -archivePath /tmp/customer.xcarchive \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="iPhone Distribution" \
             PROVISIONING_PROFILE="$CUST_PROFILE_UUID" \
@@ -216,25 +221,27 @@ jobs:
             OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
             DEVELOPMENT_TEAM=RTYG6CS9G2 \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
+          cd ../..
 
           # Export & Upload
-          mkdir -p ${{ env.EXPORT_PATH }}
-          cat > /tmp/ExportCustomer.plist << PEOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>method</key><string>app-store</string>
-  <key>destination</key><string>upload</string>
-  <key>teamID</key><string>RTYG6CS9G2</string>
-  <key>signingStyle</key><string>manual</string>
-  <key>provisioningProfiles</key>
-  <dict><key>com.wasaly.customer</key><string>$CUST_PROFILE_UUID</string></dict>
-</dict></plist>
-PEOF
+          mkdir -p /tmp/build-customer
+          cat > /tmp/ExportCustomer.plist << 'PEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>RTYG6CS9G2</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict><key>com.wasaly.customer</key><string>CUST_PROFILE_UUID_PLACEHOLDER</string></dict>
+          </dict></plist>
+          PEOF
+          sed -i '' "s/CUST_PROFILE_UUID_PLACEHOLDER/$CUST_PROFILE_UUID/g" /tmp/ExportCustomer.plist
           xcodebuild -exportArchive \
-            -archivePath ${{ env.ARCHIVE_PATH }} \
+            -archivePath /tmp/customer.xcarchive \
             -exportOptionsPlist /tmp/ExportCustomer.plist \
-            -exportPath ${{ env.EXPORT_PATH }} \
+            -exportPath /tmp/build-customer \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$HOME/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8" \
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
@@ -293,16 +300,19 @@ PEOF
           end
 
           t = token(key_id, issuer_id, pk)
-          cert_id = ENV['CERT_ID']
+          cert_id = File.read('/tmp/cert_id.env').strip
 
           brid = api(t,'GET',"/v1/bundleIds?filter[identifier]=#{bundle_id}").dig('data',0,'id')
           abort "Bundle ID not found: #{bundle_id}" unless brid
 
           # Enable Push Notifications capability (required by expo-notifications)
           existing_caps = (api(t,'GET',"/v1/bundleIds/#{brid}/bundleIdCapabilities")['data']||[]).map{|c| c.dig('attributes','capabilityType')}
+          puts "Existing capabilities: #{existing_caps.inspect}"
           unless existing_caps.include?('PUSH_NOTIFICATIONS')
-            api(t,'POST','/v1/bundleIdCapabilities',{data:{type:'bundleIdCapabilities',attributes:{capabilityType:'PUSH_NOTIFICATIONS',settings:[]},relationships:{bundleId:{data:{type:'bundleIds',id:brid}}}}})
-            puts "Push Notifications enabled for #{bundle_id}"
+            resp = api(t,'POST','/v1/bundleIdCapabilities',{data:{type:'bundleIdCapabilities',attributes:{capabilityType:'PUSH_NOTIFICATIONS',settings:[]},relationships:{bundleId:{data:{type:'bundleIds',id:brid}}}}})
+            puts "Push Notifications enable response: #{resp.inspect[0..200]}"
+          else
+            puts "Push Notifications already enabled"
           end
 
           (api(t,'GET',"/v1/profiles?filter[bundleId]=#{brid}&filter[profileType]=IOS_APP_STORE&limit=10")['data']||[]).each {|p| api(t,'DELETE',"/v1/profiles/#{p['id']}")}
@@ -330,10 +340,9 @@ PEOF
           puts "Profile created: #{pn} (#{pu})"
           RUBYEOF
 
-          # Read profile info from temp file (GITHUB_ENV not available in same step)
           DRIV_PROFILE_UUID=$(sed -n '1p' /tmp/driv_profile.env)
           DRIV_PROFILE_NAME=$(sed -n '2p' /tmp/driv_profile.env)
-          echo "Using profile UUID: $DRIV_PROFILE_UUID"
+          echo "Profile UUID: $DRIV_PROFILE_UUID"
 
           security unlock-keychain -p wasaly123 build.keychain || true
           cd driver-app/ios
@@ -342,7 +351,7 @@ PEOF
           xcodebuild archive \
             -workspace "$WS" -scheme "$SCHEME" \
             -configuration Release \
-            -archivePath ${{ env.ARCHIVE_PATH }} \
+            -archivePath /tmp/driver.xcarchive \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="iPhone Distribution" \
             PROVISIONING_PROFILE="$DRIV_PROFILE_UUID" \
@@ -350,24 +359,26 @@ PEOF
             OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
             DEVELOPMENT_TEAM=RTYG6CS9G2 \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
+          cd ../..
 
-          mkdir -p ${{ env.EXPORT_PATH }}
-          cat > /tmp/ExportDriver.plist << PEOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>method</key><string>app-store</string>
-  <key>destination</key><string>upload</string>
-  <key>teamID</key><string>RTYG6CS9G2</string>
-  <key>signingStyle</key><string>manual</string>
-  <key>provisioningProfiles</key>
-  <dict><key>com.wasaly.driver</key><string>$DRIV_PROFILE_UUID</string></dict>
-</dict></plist>
-PEOF
+          mkdir -p /tmp/build-driver
+          cat > /tmp/ExportDriver.plist << 'PEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>RTYG6CS9G2</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict><key>com.wasaly.driver</key><string>DRIV_PROFILE_UUID_PLACEHOLDER</string></dict>
+          </dict></plist>
+          PEOF
+          sed -i '' "s/DRIV_PROFILE_UUID_PLACEHOLDER/$DRIV_PROFILE_UUID/g" /tmp/ExportDriver.plist
           xcodebuild -exportArchive \
-            -archivePath ${{ env.ARCHIVE_PATH }} \
+            -archivePath /tmp/driver.xcarchive \
             -exportOptionsPlist /tmp/ExportDriver.plist \
-            -exportPath ${{ env.EXPORT_PATH }} \
+            -exportPath /tmp/build-driver \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$HOME/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8" \
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
@@ -434,7 +445,7 @@ PEOF
           end
 
           t = token(key_id, issuer_id, pk)
-          cert_id = ENV['CERT_ID']
+          cert_id = File.read('/tmp/cert_id.env').strip
 
           brid = api(t,'GET',"/v1/bundleIds?filter[identifier]=#{bundle_id}").dig('data',0,'id')
           abort "Bundle ID not found: #{bundle_id}" unless brid
@@ -464,17 +475,16 @@ PEOF
           puts "Profile created: #{pn} (#{pu})"
           RUBYEOF
 
-          # Read profile info from temp file (GITHUB_ENV not available in same step)
           ADMIN_PROFILE_UUID=$(sed -n '1p' /tmp/admin_profile.env)
           ADMIN_PROFILE_NAME=$(sed -n '2p' /tmp/admin_profile.env)
-          echo "Using profile UUID: $ADMIN_PROFILE_UUID"
+          echo "Profile UUID: $ADMIN_PROFILE_UUID"
 
           security unlock-keychain -p wasaly123 build.keychain || true
           cd admin-dashboard/ios/App
           xcodebuild archive \
             -workspace App.xcworkspace -scheme App \
             -configuration Release \
-            -archivePath ${{ env.ARCHIVE_PATH }} \
+            -archivePath /tmp/admin.xcarchive \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="iPhone Distribution" \
             PROVISIONING_PROFILE="$ADMIN_PROFILE_UUID" \
@@ -482,24 +492,26 @@ PEOF
             OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
             DEVELOPMENT_TEAM=RTYG6CS9G2 \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
+          cd ../../..
 
-          mkdir -p ${{ env.EXPORT_PATH }}
-          cat > /tmp/ExportAdmin.plist << PEOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>method</key><string>app-store</string>
-  <key>destination</key><string>upload</string>
-  <key>teamID</key><string>RTYG6CS9G2</string>
-  <key>signingStyle</key><string>manual</string>
-  <key>provisioningProfiles</key>
-  <dict><key>com.wasaly.admin</key><string>$ADMIN_PROFILE_UUID</string></dict>
-</dict></plist>
-PEOF
+          mkdir -p /tmp/build-admin
+          cat > /tmp/ExportAdmin.plist << 'PEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>RTYG6CS9G2</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict><key>com.wasaly.admin</key><string>ADMIN_PROFILE_UUID_PLACEHOLDER</string></dict>
+          </dict></plist>
+          PEOF
+          sed -i '' "s/ADMIN_PROFILE_UUID_PLACEHOLDER/$ADMIN_PROFILE_UUID/g" /tmp/ExportAdmin.plist
           xcodebuild -exportArchive \
-            -archivePath ${{ env.ARCHIVE_PATH }} \
+            -archivePath /tmp/admin.xcarchive \
             -exportOptionsPlist /tmp/ExportAdmin.plist \
-            -exportPath ${{ env.EXPORT_PATH }} \
+            -exportPath /tmp/build-admin \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$HOME/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8" \
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
@@ -566,7 +578,7 @@ PEOF
           end
 
           t = token(key_id, issuer_id, pk)
-          cert_id = ENV['CERT_ID']
+          cert_id = File.read('/tmp/cert_id.env').strip
 
           brid = api(t,'GET',"/v1/bundleIds?filter[identifier]=#{bundle_id}").dig('data',0,'id')
           abort "Bundle ID not found: #{bundle_id}" unless brid
@@ -596,17 +608,16 @@ PEOF
           puts "Profile created: #{pn} (#{pu})"
           RUBYEOF
 
-          # Read profile info from temp file (GITHUB_ENV not available in same step)
           REST_PROFILE_UUID=$(sed -n '1p' /tmp/rest_profile.env)
           REST_PROFILE_NAME=$(sed -n '2p' /tmp/rest_profile.env)
-          echo "Using profile UUID: $REST_PROFILE_UUID"
+          echo "Profile UUID: $REST_PROFILE_UUID"
 
           security unlock-keychain -p wasaly123 build.keychain || true
           cd restaurant-portal/ios/App
           xcodebuild archive \
             -workspace App.xcworkspace -scheme App \
             -configuration Release \
-            -archivePath ${{ env.ARCHIVE_PATH }} \
+            -archivePath /tmp/restaurant.xcarchive \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="iPhone Distribution" \
             PROVISIONING_PROFILE="$REST_PROFILE_UUID" \
@@ -614,24 +625,26 @@ PEOF
             OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
             DEVELOPMENT_TEAM=RTYG6CS9G2 \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
+          cd ../../..
 
-          mkdir -p ${{ env.EXPORT_PATH }}
-          cat > /tmp/ExportRestaurant.plist << PEOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>method</key><string>app-store</string>
-  <key>destination</key><string>upload</string>
-  <key>teamID</key><string>RTYG6CS9G2</string>
-  <key>signingStyle</key><string>manual</string>
-  <key>provisioningProfiles</key>
-  <dict><key>com.wasaly.restaurant</key><string>$REST_PROFILE_UUID</string></dict>
-</dict></plist>
-PEOF
+          mkdir -p /tmp/build-restaurant
+          cat > /tmp/ExportRestaurant.plist << 'PEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>RTYG6CS9G2</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict><key>com.wasaly.restaurant</key><string>REST_PROFILE_UUID_PLACEHOLDER</string></dict>
+          </dict></plist>
+          PEOF
+          sed -i '' "s/REST_PROFILE_UUID_PLACEHOLDER/$REST_PROFILE_UUID/g" /tmp/ExportRestaurant.plist
           xcodebuild -exportArchive \
-            -archivePath ${{ env.ARCHIVE_PATH }} \
+            -archivePath /tmp/restaurant.xcarchive \
             -exportOptionsPlist /tmp/ExportRestaurant.plist \
-            -exportPath ${{ env.EXPORT_PATH }} \
+            -exportPath /tmp/build-restaurant \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$HOME/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8" \
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
