@@ -368,6 +368,23 @@ if (!process.env.DATABASE_URL) {
     }
   }
 
+  // Always ensure test accounts exist (runs every startup)
+  const testAccounts = [
+    ['أحمد المدير',   '0599039704', 'admin',      'ADMIN00'],
+    ['مطعم تجريبي',   '0599039705', 'restaurant', 'WREST1'],
+    ['مندوب تجريبي',  '0599039706', 'driver',     'WDRV01'],
+    ['زبون تجريبي',   '0599039707', 'customer',   'WCUST1'],
+  ];
+  const hash123456 = bcrypt.hashSync('123456', 10);
+  testAccounts.forEach(([name, phone, role, ref]) => {
+    const exists = db.prepare('SELECT id FROM users WHERE phone=?').get(phone);
+    if (!exists) {
+      db.prepare('INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)')
+        .run(name, phone, hash123456, role, ref);
+      console.log(`✅ Test account created: ${phone} / ${role}`);
+    }
+  });
+
   const pool = {
     query: (text, params = []) => {
       try {
