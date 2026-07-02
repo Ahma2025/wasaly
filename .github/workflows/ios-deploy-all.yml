@@ -158,6 +158,13 @@ jobs:
           brid = api(t,'GET',"/v1/bundleIds?filter[identifier]=#{bundle_id}").dig('data',0,'id')
           abort "Bundle ID not found: #{bundle_id}" unless brid
 
+          # Enable Push Notifications capability on bundle ID (required by expo-notifications)
+          existing_caps = (api(t,'GET',"/v1/bundleIds/#{brid}/bundleIdCapabilities")['data']||[]).map{|c| c.dig('attributes','capabilityType')}
+          unless existing_caps.include?('PUSH_NOTIFICATIONS')
+            api(t,'POST','/v1/bundleIdCapabilities',{data:{type:'bundleIdCapabilities',attributes:{capabilityType:'PUSH_NOTIFICATIONS',settings:[]},relationships:{bundleId:{data:{type:'bundleIds',id:brid}}}}})
+            puts "Push Notifications enabled for #{bundle_id}"
+          end
+
           # Delete old profiles for this bundle
           (api(t,'GET',"/v1/profiles?filter[bundleId]=#{brid}&filter[profileType]=IOS_APP_STORE&limit=10")['data']||[]).each {|p| api(t,'DELETE',"/v1/profiles/#{p['id']}")}
 
@@ -284,6 +291,13 @@ jobs:
 
           brid = api(t,'GET',"/v1/bundleIds?filter[identifier]=#{bundle_id}").dig('data',0,'id')
           abort "Bundle ID not found: #{bundle_id}" unless brid
+
+          # Enable Push Notifications capability (required by expo-notifications)
+          existing_caps = (api(t,'GET',"/v1/bundleIds/#{brid}/bundleIdCapabilities")['data']||[]).map{|c| c.dig('attributes','capabilityType')}
+          unless existing_caps.include?('PUSH_NOTIFICATIONS')
+            api(t,'POST','/v1/bundleIdCapabilities',{data:{type:'bundleIdCapabilities',attributes:{capabilityType:'PUSH_NOTIFICATIONS',settings:[]},relationships:{bundleId:{data:{type:'bundleIds',id:brid}}}}})
+            puts "Push Notifications enabled for #{bundle_id}"
+          end
 
           (api(t,'GET',"/v1/profiles?filter[bundleId]=#{brid}&filter[profileType]=IOS_APP_STORE&limit=10")['data']||[]).each {|p| api(t,'DELETE',"/v1/profiles/#{p['id']}")}
 
