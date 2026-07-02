@@ -108,12 +108,8 @@ router.post('/login-password', async (req, res) => {
     // Normalize phone: remove all non-digit chars, convert Arabic-Indic numerals
     if (phone) phone = phone.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
     console.log('[LOGIN] normalized phone:', phone);
-    // If role provided, match exact role — allows same phone for multiple roles
-    const query = role
-      ? 'SELECT * FROM users WHERE phone=$1 AND role=$2 AND is_active=1'
-      : 'SELECT * FROM users WHERE phone=$1 AND is_active=1';
-    const params = role ? [phone, role] : [phone];
-    const { rows } = await pool.query(query, params);
+    // Match by phone only — role check removed so any account can login to any app
+    const { rows } = await pool.query('SELECT * FROM users WHERE phone=$1 AND is_active=1', [phone]);
     const user = rows[0];
     if (!user || !user.password_hash) return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' });
     const valid = await bcrypt.compare(password, user.password_hash);
