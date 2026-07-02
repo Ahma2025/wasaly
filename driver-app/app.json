@@ -28,7 +28,9 @@
       ]
     },
     "ios": {
-      "bundleIdentifier": "com.wasaly.driver"
+      "bundleIdentifier": "com.wasaly.driver",
+      "icon": "./assets/icon.png",
+      "supportsTablet": false
     },
     "plugins": [
       ["expo-location", {

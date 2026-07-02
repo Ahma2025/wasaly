@@ -17,8 +17,11 @@
         "RECEIVE_BOOT_COMPLETED"
       ]
     },
+    "icon": "./assets/icon.png",
     "ios": {
-      "bundleIdentifier": "com.wasaly.customer"
+      "bundleIdentifier": "com.wasaly.customer",
+      "icon": "./assets/icon.png",
+      "supportsTablet": false
     },
     "plugins": [
       ["expo-location", {
