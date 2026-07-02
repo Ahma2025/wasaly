@@ -142,6 +142,10 @@ jobs:
             -scheme App \
             -configuration Release \
             -archivePath /tmp/admin.xcarchive \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="iPhone Distribution" \
+            PROVISIONING_PROFILE="${PROFILE_UUID}" \
+            PROVISIONING_PROFILE_SPECIFIER="${PROFILE_NAME}" \
             OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
             DEVELOPMENT_TEAM=RTYG6CS9G2 \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}

@@ -171,11 +171,17 @@ jobs:
         working-directory: customer-app/ios
         run: |
           security unlock-keychain -p wasaly123 build.keychain || true
+          SCHEME=$(xcodebuild -list -workspace *.xcworkspace 2>/dev/null | grep -A5 "Schemes:" | grep -v "Schemes:" | head -1 | xargs)
+          echo "Using scheme: $SCHEME"
           xcodebuild archive \
             -workspace *.xcworkspace \
-            -scheme main \
+            -scheme "$SCHEME" \
             -configuration Release \
             -archivePath /tmp/customer.xcarchive \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="iPhone Distribution" \
+            PROVISIONING_PROFILE="${PROFILE_UUID}" \
+            PROVISIONING_PROFILE_SPECIFIER="${PROFILE_NAME}" \
             OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
             DEVELOPMENT_TEAM=RTYG6CS9G2 \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
