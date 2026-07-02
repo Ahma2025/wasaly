@@ -65,7 +65,8 @@ router.post('/verify-otp', async (req, res) => {
 // Register with email/password
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, phone, password, city } = req.body;
+    let { name, email, phone, password, city } = req.body;
+    if (phone) phone = phone.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
     const existing = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
     if (existing.rows[0]) return res.status(400).json({ success: false, message: 'رقم الهاتف مسجل مسبقاً' });
 
@@ -85,7 +86,11 @@ router.post('/register', async (req, res) => {
 // Login with phone/password (for customer & driver apps)
 router.post('/login-password', async (req, res) => {
   try {
-    const { phone, password, role } = req.body;
+    let { phone, password, role } = req.body;
+    console.log('[LOGIN] raw phone:', JSON.stringify(phone), 'role:', role);
+    // Normalize phone: remove all non-digit chars, convert Arabic-Indic numerals
+    if (phone) phone = phone.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
+    console.log('[LOGIN] normalized phone:', phone);
     // If role provided, match exact role — allows same phone for multiple roles
     const query = role
       ? 'SELECT * FROM users WHERE phone=$1 AND role=$2 AND is_active=1'
