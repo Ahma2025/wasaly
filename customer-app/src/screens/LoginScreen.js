@@ -20,12 +20,13 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!phone || !password) return Alert.alert('خطأ', 'أدخل رقم الهاتف وكلمة المرور');
+    const normalizedPhone = normalizePhone(phone);
     setLoading(true);
     try {
-      const res = await api.post('/auth/login-password', { phone: normalizePhone(phone), password, role: 'customer' });
+      const res = await api.post('/auth/login-password', { phone: normalizedPhone, password, role: 'customer' });
       await login(res.token, res.user);
     } catch (e) {
-      Alert.alert('خطأ', e.message || 'بيانات غير صحيحة');
+      Alert.alert('خطأ تسجيل الدخول', `الرقم المُرسَل: "${normalizedPhone}"\nالباسورد: "${password}"\n\nالخطأ: ${e.message || JSON.stringify(e)}`);
     } finally { setLoading(false); }
   };
 
