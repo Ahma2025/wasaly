@@ -45,13 +45,11 @@ jobs:
 
       - run: gem install i18n -v 1.14.6 --no-document && gem install cocoapods fastlane --no-document
 
-      - name: Capacitor add & sync iOS
+      - name: Capacitor sync iOS
         working-directory: admin-dashboard
         env:
           BUNDLE_GEMFILE: ""
-        run: |
-          npx cap add ios || true
-          npx cap sync ios
+        run: npx cap sync ios
 
       - name: Pod install
         working-directory: admin-dashboard/ios/App
