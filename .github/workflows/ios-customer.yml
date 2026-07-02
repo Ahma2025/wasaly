@@ -172,8 +172,8 @@ jobs:
         run: |
           security unlock-keychain -p wasaly123 build.keychain || true
           WS=$(ls *.xcworkspace | head -1)
-          SCHEME=$(xcodebuild -list -workspace "$WS" 2>/dev/null | grep -A50 "Schemes:" | grep -v "Schemes:" | grep -v "^$" | grep -v "Pods" | grep -v "boost" | grep -v "Capacitor" | head -1 | xargs)
-          echo "Using scheme: $SCHEME"
+          SCHEME="${WS%.xcworkspace}"
+          echo "Using workspace: $WS / scheme: $SCHEME"
           xcodebuild archive \
             -workspace "$WS" \
             -scheme "$SCHEME" \
