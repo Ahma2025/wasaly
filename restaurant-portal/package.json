@@ -8,22 +8,30 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^5.7.8",
+    "@capacitor/cli": "^5.7.8",
+    "@capacitor/core": "^5.7.8",
+    "@capacitor/ios": "^5.7.8",
+    "@capacitor/push-notifications": "^5.1.2",
+    "axios": "^1.6.2",
+    "date-fns": "^3.0.6",
+    "firebase": "^12.15.0",
+    "leaflet": "^1.9.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.1",
-    "axios": "^1.6.2",
-    "socket.io-client": "^4.6.2",
-    "recharts": "^2.10.3",
     "react-hot-toast": "^2.4.1",
-    "date-fns": "^3.0.6",
-    "zustand": "^4.4.7",
-    "react-icons": "^5.0.1"
+    "react-icons": "^5.0.1",
+    "react-leaflet": "^5.0.0",
+    "react-router-dom": "^6.21.1",
+    "recharts": "^2.10.3",
+    "socket.io-client": "^4.8.3",
+    "zustand": "^4.4.7"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.0.8",
-    "tailwindcss": "^3.4.1",
     "autoprefixer": "^10.4.16",
-    "postcss": "^8.4.33"
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.0.8"
   }
 }
