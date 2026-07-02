@@ -21,7 +21,10 @@
     "ios": {
       "bundleIdentifier": "com.wasaly.customer",
       "icon": "./assets/icon.png",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "plugins": [
       ["expo-location", {

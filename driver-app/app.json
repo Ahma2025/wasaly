@@ -30,7 +30,10 @@
     "ios": {
       "bundleIdentifier": "com.wasaly.driver",
       "icon": "./assets/icon.png",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "plugins": [
       ["expo-location", {

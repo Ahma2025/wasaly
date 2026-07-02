@@ -402,7 +402,10 @@ jobs:
         working-directory: admin-dashboard
         env:
           BUNDLE_GEMFILE: ""
-        run: npx cap sync ios
+        run: |
+          npx cap sync ios
+          /usr/libexec/PlistBuddy -c "Delete :ITSAppUsesNonExemptEncryption" ios/App/App/Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool NO" ios/App/App/Info.plist
 
       - name: "[Admin] Pod install"
         working-directory: admin-dashboard/ios/App
@@ -535,7 +538,10 @@ jobs:
         working-directory: restaurant-portal
         env:
           BUNDLE_GEMFILE: ""
-        run: npx cap sync ios
+        run: |
+          npx cap sync ios
+          /usr/libexec/PlistBuddy -c "Delete :ITSAppUsesNonExemptEncryption" ios/App/App/Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool NO" ios/App/App/Info.plist
 
       - name: "[Restaurant] Pod install"
         working-directory: restaurant-portal/ios/App
