@@ -260,134 +260,37 @@ if (!process.env.DATABASE_URL) {
     console.log('✅ Delivery zones created');
   }
 
-  // Seed users/data only once
-  const adminExists = db.prepare("SELECT id FROM users WHERE phone='0599039704'").get();
-  if (!adminExists) {
-    db.prepare(`INSERT OR IGNORE INTO users (name,phone,password_hash,role,referral_code) VALUES (?,?,?,?,?)`)
-      .run('Ahmad Jamal', '0599039704', bcrypt.hashSync('123456', 10), 'admin', 'ADMIN00');
-    db.prepare(`INSERT OR IGNORE INTO users (name,phone,password_hash,role,referral_code) VALUES (?,?,?,?,?)`)
-      .run('مدير النظام', '0599000000', bcrypt.hashSync('admin123', 10), 'admin', 'ADMIN01');
-    console.log('✅ Admin users created');
+  // Clean slate: delete ALL old accounts and recreate only 4 clean ones
+  const hash123456_seed = bcrypt.hashSync('123456', 10);
+  db.prepare('DELETE FROM users').run();
+  console.log('🗑️ All users cleared');
+  db.prepare(`INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)`)
+    .run('Admin', '05999039704', hash123456_seed, 'admin', 'ADM001');
+  db.prepare(`INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)`)
+    .run('Customer', '05999039701', hash123456_seed, 'customer', 'CUST01');
+  db.prepare(`INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)`)
+    .run('Driver', '05999039702', hash123456_seed, 'driver', 'DRV001');
+  db.prepare(`INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)`)
+    .run('Restaurant', '05999039703', hash123456_seed, 'restaurant', 'REST001');
+  console.log('✅ 4 clean accounts created: 05999039701-704 / 123456');
 
+  // Seed categories if not exist
+  if (!db.prepare("SELECT id FROM categories LIMIT 1").get()) {
     const cats = [
-      ['برغر', 'Burger', '🍔'],
-      ['بيتزا', 'Pizza', '🍕'],
-      ['شاورما', 'Shawarma', '🌯'],
-      ['دجاج', 'Chicken', '🍗'],
-      ['مشاوي', 'Grills', '🥩'],
-      ['حلويات', 'Sweets', '🍰'],
-      ['مشروبات', 'Drinks', '🥤'],
-      ['سلطات', 'Salads', '🥗'],
-      ['ماركت', 'Market', '🛒'],
-      ['صيدلية', 'Pharmacy', '💊'],
+      ['برغر', 'Burger', '🍔'], ['بيتزا', 'Pizza', '🍕'], ['شاورما', 'Shawarma', '🌯'],
+      ['دجاج', 'Chicken', '🍗'], ['مشاوي', 'Grills', '🥩'], ['حلويات', 'Sweets', '🍰'],
+      ['مشروبات', 'Drinks', '🥤'], ['سلطات', 'Salads', '🥗'], ['ماركت', 'Market', '🛒'], ['صيدلية', 'Pharmacy', '💊'],
     ];
     cats.forEach(([name_ar, name_en, icon], i) => {
-      db.prepare(`INSERT OR IGNORE INTO categories (name_ar,name_en,icon,sort_order) VALUES (?,?,?,?)`)
-        .run(name_ar, name_en, icon, i);
+      db.prepare(`INSERT OR IGNORE INTO categories (name_ar,name_en,icon,sort_order) VALUES (?,?,?,?)`).run(name_ar, name_en, icon, i);
     });
-
-    db.prepare(`INSERT OR IGNORE INTO users (name,phone,password_hash,role,referral_code) VALUES (?,?,?,?,?)`)
-      .run('أبو أحمد', '0599111001', bcrypt.hashSync('rest123', 10), 'restaurant_owner', 'REST01');
-    const ownerRow = db.prepare("SELECT id FROM users WHERE phone='0599111001'").get();
-
-    db.prepare(`INSERT OR IGNORE INTO users (name,phone,password_hash,role,referral_code) VALUES (?,?,?,?,?)`)
-      .run('محمد السائق', '0599222001', bcrypt.hashSync('driver123', 10), 'driver', 'DRV01');
-    const driverRow = db.prepare("SELECT id FROM users WHERE phone='0599222001'").get();
-    if (driverRow) {
-      db.prepare(`INSERT OR IGNORE INTO drivers (user_id,vehicle_type,rating) VALUES (?,?,?)`)
-        .run(driverRow.id, 'دراجة', 4.8);
-    }
-
-    const catBurger = db.prepare("SELECT id FROM categories WHERE name_ar='برغر'").get();
-    const catPizza = db.prepare("SELECT id FROM categories WHERE name_ar='بيتزا'").get();
-    const catChicken = db.prepare("SELECT id FROM categories WHERE name_ar='دجاج'").get();
-
-    const sampleRestaurants = [
-      { name_ar: 'برغر وصلّي', desc: 'أشهى البرغر في المدينة', cat: catBurger?.id, city: 'رام الله', rating: 4.8, fee: 5, min: 15, featured: 1, lat: 31.9022, lng: 35.2097 },
-      { name_ar: 'بيتزا بالو', desc: 'بيتزا إيطالية أصيلة', cat: catPizza?.id, city: 'رام الله', rating: 4.5, fee: 8, min: 20, featured: 0, lat: 31.8990, lng: 35.2120 },
-      { name_ar: 'دجاج ماستر', desc: 'دجاج مقلي ومشوي', cat: catChicken?.id, city: 'نابلس', rating: 4.3, fee: 5, min: 15, featured: 0, lat: 31.9050, lng: 35.2060 },
-    ];
-
-    sampleRestaurants.forEach(r => {
-      const restId = db.prepare(
-        `INSERT INTO restaurants (name_ar,description_ar,category_id,city,address,rating,delivery_fee,min_order,is_featured,owner_id,delivery_time_min,delivery_time_max,lat,lng)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-      ).run(r.name_ar, r.desc, r.cat, r.city, 'شارع المطاعم', r.rating, r.fee, r.min, r.featured, ownerRow?.id, 20, 35, r.lat || 31.9, r.lng || 35.2).lastInsertRowid;
-
-      const catId = db.prepare(`INSERT INTO menu_categories (restaurant_id,name_ar,sort_order) VALUES (?,?,?)`)
-        .run(restId, 'الأصناف الرئيسية', 0).lastInsertRowid;
-
-      const items = r.name_ar.includes('برغر')
-        ? [['برغر كلاسيك', 25, null], ['برغر دبل', 35, 30], ['برغر تشيز', 30, null], ['برغر مشروم', 33, 28]]
-        : r.name_ar.includes('بيتزا')
-        ? [['بيتزا مارغريتا', 28, null], ['بيتزا بيبروني', 35, 30], ['بيتزا خضار', 30, null]]
-        : [['وجبة دجاج', 25, null], ['دجاج مقلي', 20, null], ['دجاج مشوي', 22, null]];
-
-      items.forEach(([name_ar, price, discount_price]) => {
-        const itemId = db.prepare(`INSERT INTO menu_items (restaurant_id,category_id,name_ar,price,discount_price) VALUES (?,?,?,?,?)`)
-          .run(restId, catId, name_ar, price, discount_price).lastInsertRowid;
-
-        // Add sample options to burger items
-        if (r.name_ar.includes('برغر')) {
-          const optId = db.prepare(`INSERT INTO item_options (item_id,name_ar,type,is_required) VALUES (?,?,?,?)`)
-            .run(itemId, 'الحجم', 'radio', 0).lastInsertRowid;
-          db.prepare(`INSERT INTO item_option_values (option_id,name_ar,extra_price) VALUES (?,?,?)`).run(optId, 'عادي', 0);
-          db.prepare(`INSERT INTO item_option_values (option_id,name_ar,extra_price) VALUES (?,?,?)`).run(optId, 'كبير', 5);
-
-          const extrasId = db.prepare(`INSERT INTO item_options (item_id,name_ar,type,is_required) VALUES (?,?,?,?)`)
-            .run(itemId, 'إضافات', 'checkbox', 0).lastInsertRowid;
-          db.prepare(`INSERT INTO item_option_values (option_id,name_ar,extra_price) VALUES (?,?,?)`).run(extrasId, 'جبنة إضافية', 2);
-          db.prepare(`INSERT INTO item_option_values (option_id,name_ar,extra_price) VALUES (?,?,?)`).run(extrasId, 'صلصة حارة', 0);
-          db.prepare(`INSERT INTO item_option_values (option_id,name_ar,extra_price) VALUES (?,?,?)`).run(extrasId, 'بيكون', 3);
-        }
-      });
-    });
-
-    db.prepare(`INSERT INTO banners (title_ar,title_en,image,link_type,link_value,sort_order,is_active) VALUES (?,?,?,?,?,?,?)`)
-      .run('عروض خاصة', 'Special Offers', 'https://via.placeholder.com/400x160/FF6B00/FFF?text=وصلّي', 'none', '', 0, 1);
-
-    // Seed test customer
-    db.prepare(`INSERT OR IGNORE INTO users (name,phone,password_hash,role,referral_code) VALUES (?,?,?,?,?)`)
-      .run('أحمد الزبون', '0599333001', bcrypt.hashSync('test123', 10), 'customer', 'CUST01');
-
-    // Seed Wasaly test accounts (used in TestFlight testing)
-    db.prepare(`INSERT OR IGNORE INTO users (name,phone,password_hash,role,referral_code) VALUES (?,?,?,?,?)`)
-      .run('زبون تجريبي', '0599039707', bcrypt.hashSync('123456', 10), 'customer', 'WCUST1');
-    db.prepare(`INSERT OR IGNORE INTO users (name,phone,password_hash,role,referral_code) VALUES (?,?,?,?,?)`)
-      .run('مندوب تجريبي', '0599039706', bcrypt.hashSync('123456', 10), 'driver', 'WDRV01');
-    db.prepare(`INSERT OR IGNORE INTO users (name,phone,password_hash,role,referral_code) VALUES (?,?,?,?,?)`)
-      .run('مطعم تجريبي', '0599039705', bcrypt.hashSync('123456', 10), 'restaurant', 'WREST1');
-    console.log('✅ Wasaly test accounts created');
-
-    console.log('✅ Sample data created');
-  } else {
-    const existingAdmin = db.prepare("SELECT id,password_hash FROM users WHERE phone='0599039704'").get();
-    if (existingAdmin && !existingAdmin.password_hash) {
-      db.prepare("UPDATE users SET password_hash=?,role='admin' WHERE phone='0599039704'")
-        .run(bcrypt.hashSync('123456', 10));
-    }
+    console.log('✅ Categories seeded');
   }
 
-  // Always ensure NEW test accounts exist (runs every startup)
-  const hash123456 = bcrypt.hashSync('123456', 10);
-  const newAccounts = [
-    ['Customer Test', '05999039701', 'customer',   'CUST01'],
-    ['Driver Test',   '05999039702', 'driver',     'DRV001'],
-    ['Restaurant Test','05999039703','restaurant', 'REST01'],
-    ['Admin Test',    '05999039704', 'admin',      'ADM001'],
-  ];
-  newAccounts.forEach(([name, phone, role, ref]) => {
-    const exists = db.prepare('SELECT id FROM users WHERE phone=?').get(phone);
-    if (!exists) {
-      db.prepare('INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)')
-        .run(name, phone, hash123456, role, ref);
-      console.log(`✅ Test account created: ${phone} / ${role}`);
-    }
-  });
-  // Remove old broken test accounts
-  ['0599039705','0599039706','0599039707'].forEach(p => {
-    db.prepare('DELETE FROM users WHERE phone=?').run(p);
-  });
+  if (!db.prepare("SELECT id FROM banners LIMIT 1").get()) {
+    db.prepare(`INSERT INTO banners (title_ar,title_en,image,link_type,link_value,sort_order,is_active) VALUES (?,?,?,?,?,?,?)`)
+      .run('عروض خاصة', 'Special Offers', 'https://via.placeholder.com/400x160/FF6B00/FFF?text=وصلّي', 'none', '', 0, 1);
+  }
 
   const pool = {
     query: (text, params = []) => {
