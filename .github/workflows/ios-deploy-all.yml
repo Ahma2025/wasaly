@@ -5,6 +5,10 @@ on:
     branches: [master, main]
   workflow_dispatch:
 
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: true
+
 jobs:
   build-all:
     name: Build & Upload All 4 iOS Apps
