@@ -7,6 +7,23 @@ const { auth } = require('../middleware/auth');
 const generateToken = (user) =>
   jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE || '30d' });
 
+// TEMP DEBUG: echo back what was received
+const lastAttempts = [];
+router.post('/debug-login', (req, res) => {
+  const entry = { time: new Date().toISOString(), body: req.body, chars: {} };
+  if (req.body.phone) {
+    entry.chars = [...req.body.phone].map(c => ({ char: c, code: c.charCodeAt(0) }));
+  }
+  lastAttempts.unshift(entry);
+  if (lastAttempts.length > 5) lastAttempts.pop();
+  res.json({ received: req.body, charCodes: entry.chars });
+});
+router.get('/debug-login', (req, res) => res.json({ lastAttempts }));
+router.get('/debug-users', async (req, res) => {
+  const { rows } = await pool.query("SELECT id, phone, role, is_active, is_blocked FROM users WHERE phone LIKE '0599039%'");
+  res.json(rows);
+});
+
 // Send OTP
 router.post('/send-otp', async (req, res) => {
   try {
