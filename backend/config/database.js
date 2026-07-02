@@ -350,6 +350,15 @@ if (!process.env.DATABASE_URL) {
     db.prepare(`INSERT OR IGNORE INTO users (name,phone,password_hash,role,referral_code) VALUES (?,?,?,?,?)`)
       .run('أحمد الزبون', '0599333001', bcrypt.hashSync('test123', 10), 'customer', 'CUST01');
 
+    // Seed Wasaly test accounts (used in TestFlight testing)
+    db.prepare(`INSERT OR IGNORE INTO users (name,phone,password_hash,role,referral_code) VALUES (?,?,?,?,?)`)
+      .run('زبون تجريبي', '0599039707', bcrypt.hashSync('123456', 10), 'customer', 'WCUST1');
+    db.prepare(`INSERT OR IGNORE INTO users (name,phone,password_hash,role,referral_code) VALUES (?,?,?,?,?)`)
+      .run('مندوب تجريبي', '0599039706', bcrypt.hashSync('123456', 10), 'driver', 'WDRV01');
+    db.prepare(`INSERT OR IGNORE INTO users (name,phone,password_hash,role,referral_code) VALUES (?,?,?,?,?)`)
+      .run('مطعم تجريبي', '0599039705', bcrypt.hashSync('123456', 10), 'restaurant', 'WREST1');
+    console.log('✅ Wasaly test accounts created');
+
     console.log('✅ Sample data created');
   } else {
     const existingAdmin = db.prepare("SELECT id,password_hash FROM users WHERE phone='0599039704'").get();
