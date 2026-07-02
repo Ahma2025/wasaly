@@ -16,11 +16,13 @@ export default function LoginScreen() {
   const [city, setCity] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const normalizePhone = (p) => p.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\s|-/g, '');
+
   const handleLogin = async () => {
     if (!phone || !password) return Alert.alert('خطأ', 'أدخل رقم الهاتف وكلمة المرور');
     setLoading(true);
     try {
-      const res = await api.post('/auth/login-password', { phone, password, role: 'customer' });
+      const res = await api.post('/auth/login-password', { phone: normalizePhone(phone), password, role: 'customer' });
       await login(res.token, res.user);
     } catch (e) {
       Alert.alert('خطأ', e.message || 'بيانات غير صحيحة');
@@ -33,7 +35,7 @@ export default function LoginScreen() {
     if (password.length < 6) return Alert.alert('خطأ', 'كلمة المرور 6 أحرف على الأقل');
     setLoading(true);
     try {
-      const res = await api.post('/auth/register', { name, phone, password, city });
+      const res = await api.post('/auth/register', { name, phone: normalizePhone(phone), password, city });
       await login(res.token, res.user);
     } catch (e) {
       Alert.alert('خطأ', e.message || 'حدث خطأ، حاول مجدداً');

@@ -8,11 +8,13 @@ export default function Login() {
   const [form, setForm] = useState({ phone: '', password: '' });
   const [loading, setLoading] = useState(false);
 
+  const normalizePhone = (p) => p.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\s|-/g, '');
+
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const data = await api.post('/auth/login-password', { ...form, role: 'restaurant' });
+      const data = await api.post('/auth/login-password', { ...form, phone: normalizePhone(form.phone), role: 'restaurant' });
       if (!['restaurant', 'admin'].includes(data.user?.role)) {
         toast.error('هذا الحساب ليس حساب مطعم');
         return;

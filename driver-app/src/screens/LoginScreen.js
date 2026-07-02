@@ -11,11 +11,13 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
 
+  const normalizePhone = (p) => p.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\s|-/g, '');
+
   const handleLogin = async () => {
     if (!phone || !password) return Alert.alert('خطأ', 'أدخل رقم الهاتف وكلمة المرور');
     setLoading(true);
     try {
-      const res = await api.post('/auth/login-password', { phone, password, role: 'driver' });
+      const res = await api.post('/auth/login-password', { phone: normalizePhone(phone), password, role: 'driver' });
       if (res.user.role !== 'driver') return Alert.alert('خطأ', 'هذا الحساب ليس حساب مندوب');
       await login(res.token, res.user);
       // Set driver online automatically after login

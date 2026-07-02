@@ -6,11 +6,13 @@ export default function Login({ onLogin }) {
   const [form, setForm] = useState({ phone: '', password: '' });
   const [loading, setLoading] = useState(false);
 
+  const normalizePhone = (p) => p.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\s|-/g, '');
+
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const data = await api.post('/auth/login-password', { ...form, role: 'admin' });
+      const data = await api.post('/auth/login-password', { ...form, phone: normalizePhone(form.phone), role: 'admin' });
       if (data.user?.role !== 'admin') return toast.error('غير مصرح - هذا الحساب ليس حساب مدير');
       localStorage.setItem('admin_token', data.token);
       onLogin(data.user);
@@ -30,7 +32,7 @@ export default function Login({ onLogin }) {
         <form onSubmit={submit} className="space-y-4">
           <div>
             <label className="text-sm text-gray-500 mb-1 block">رقم الهاتف</label>
-            <input type="tel" className="border rounded-xl px-4 py-3 w-full focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="+972..." value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} required />
+            <input type="tel" className="border rounded-xl px-4 py-3 w-full focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="05XXXXXXXX" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} required />
           </div>
           <div>
             <label className="text-sm text-gray-500 mb-1 block">كلمة المرور</label>

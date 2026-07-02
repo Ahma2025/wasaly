@@ -11,7 +11,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-const API_BASE = 'http://localhost:5000';
+const API_BASE = 'https://burger-app-production.up.railway.app';
 
 export default function OrderMap({ order, token }) {
   const mapContainerRef = useRef(null);
