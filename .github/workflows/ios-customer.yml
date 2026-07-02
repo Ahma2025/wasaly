@@ -1,0 +1,216 @@
+name: iOS Customer App → TestFlight
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'customer-app/**'
+      - '.github/workflows/ios-customer.yml'
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    name: Build & Upload Customer App
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          LATEST=$(ls /Applications/ | grep "^Xcode" | sort -V | tail -1)
+          sudo xcode-select -s /Applications/$LATEST/Contents/Developer
+          xcodebuild -version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: customer-app
+        run: npm install --legacy-peer-deps
+
+      - name: Write ASC API Key
+        env:
+          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          mkdir -p ~/.private_keys
+          echo "$ASC_KEY_BASE64" | base64 --decode > ~/.private_keys/AuthKey_${ASC_KEY_ID}.p8
+
+      - name: Setup Ruby & Fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: false
+
+      - name: Install CocoaPods and Fastlane
+        run: gem install i18n -v 1.14.6 --no-document && gem install cocoapods fastlane --no-document
+
+      - name: Generate iOS project (Expo prebuild)
+        working-directory: customer-app
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      - name: Install Pods
+        working-directory: customer-app/ios
+        run: pod install --repo-update
+
+      - name: Setup Signing & Profile via ASC API
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          BUNDLE_ID: com.wasaly.customer
+          APP_NAME: wassely
+          TEAM_ID: RTYG6CS9G2
+        run: |
+          ruby - <<'RUBYEOF'
+          require 'openssl'; require 'base64'; require 'json'
+          require 'net/http'; require 'uri'; require 'time'; require 'fileutils'
+
+          key_id = ENV['ASC_KEY_ID']; issuer_id = ENV['ASC_ISSUER_ID']
+          bundle_id = ENV['BUNDLE_ID']; team_id = ENV['TEAM_ID']
+          key_path = File.expand_path("~/.private_keys/AuthKey_#{key_id}.p8")
+          private_key = OpenSSL::PKey::EC.new(File.read(key_path))
+
+          def base64url(data) = Base64.strict_encode64(data).tr('+/', '-_').gsub('=', '')
+
+          def make_token(key_id, issuer_id, pk)
+            h = base64url({alg:'ES256',kid:key_id,typ:'JWT'}.to_json)
+            now = Time.now.to_i
+            p = base64url({iss:issuer_id,iat:now,exp:now+1200,aud:'appstoreconnect-v1'}.to_json)
+            sig = pk.sign(OpenSSL::Digest::SHA256.new, "#{h}.#{p}")
+            asn1 = OpenSSL::ASN1.decode(sig)
+            r = asn1.value[0].value.to_s(2).rjust(32,"\x00")[-32..]
+            s = asn1.value[1].value.to_s(2).rjust(32,"\x00")[-32..]
+            "#{h}.#{p}.#{base64url(r+s)}"
+          end
+
+          def api(token, method, path, body=nil)
+            uri = URI("https://api.appstoreconnect.apple.com#{path}")
+            http = Net::HTTP.new(uri.host, uri.port); http.use_ssl=true; http.read_timeout=30
+            klass = {'GET'=>Net::HTTP::Get,'POST'=>Net::HTTP::Post,'DELETE'=>Net::HTTP::Delete}[method]
+            req = klass.new(uri); req['Authorization']="Bearer #{token}"; req['Content-Type']='application/json'
+            req.body = body.to_json if body
+            JSON.parse(http.request(req).body) rescue {}
+          end
+
+          token = make_token(key_id, issuer_id, private_key)
+
+          # Find/create bundle ID
+          data = api(token,'GET',"/v1/bundleIds?filter[identifier]=#{bundle_id}")
+          bundle_rid = data.dig('data',0,'id')
+          puts "Bundle ID: #{bundle_rid}"
+
+          # Setup keychain
+          system("security create-keychain -p wasaly123 build.keychain 2>/dev/null || true")
+          system("security default-keychain -s build.keychain")
+          system("security unlock-keychain -p wasaly123 build.keychain")
+          system("security set-keychain-settings -t 3600 build.keychain")
+          system("security list-keychains -d user -s build.keychain login.keychain")
+
+          # Generate cert
+          system("openssl genrsa -out /tmp/ci.key 2048 2>/dev/null")
+          system("openssl req -new -key /tmp/ci.key -out /tmp/ci.csr.der -outform DER -subj '/CN=Wasaly CI/O=Wasaly/C=US' 2>/dev/null")
+          csr_b64 = Base64.strict_encode64(File.binread('/tmp/ci.csr.der'))
+
+          # Delete old IOS_DISTRIBUTION certs
+          certs = api(token,'GET','/v1/certificates?limit=20')
+          (certs['data']||[]).each do |c|
+            api(token,'DELETE',"/v1/certificates/#{c['id']}") if c.dig('attributes','certificateType')=='IOS_DISTRIBUTION'
+          end
+
+          # Create new cert
+          cert_resp = api(token,'POST','/v1/certificates',{data:{type:'certificates',attributes:{certificateType:'IOS_DISTRIBUTION',csrContent:csr_b64}}})
+          abort "Cert failed: #{cert_resp.inspect[0..300]}" unless cert_resp.dig('data','attributes','certificateContent')
+          cert_content = cert_resp.dig('data','attributes','certificateContent')
+          cert_rid = cert_resp['data']['id']
+
+          # Import P12
+          File.binwrite('/tmp/ci.cer', Base64.decode64(cert_content))
+          system("openssl x509 -inform DER -in /tmp/ci.cer -out /tmp/ci_cert.pem 2>/dev/null")
+          system("openssl pkcs12 -export -inkey /tmp/ci.key -in /tmp/ci_cert.pem -out /tmp/ci.p12 -passout pass:wasaly123 2>/dev/null -legacy 2>/dev/null || openssl pkcs12 -export -inkey /tmp/ci.key -in /tmp/ci_cert.pem -out /tmp/ci.p12 -passout pass:wasaly123 2>/dev/null")
+          system("security import /tmp/ci.p12 -k build.keychain -P wasaly123 -T /usr/bin/codesign -A 2>/dev/null")
+          system("security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k wasaly123 build.keychain 2>/dev/null || true")
+
+          # Delete old profiles
+          old = api(token,'GET',"/v1/profiles?filter[bundleId]=#{bundle_rid}&filter[profileType]=IOS_APP_STORE&limit=10")
+          (old['data']||[]).each {|p| api(token,'DELETE',"/v1/profiles/#{p['id']}")}
+
+          # Create profile
+          pr = api(token,'POST','/v1/profiles',{data:{type:'profiles',attributes:{name:"Wasaly Customer #{Time.now.to_i}",profileType:'IOS_APP_STORE'},relationships:{bundleId:{data:{type:'bundleIds',id:bundle_rid}},certificates:{data:[{type:'certificates',id:cert_rid}]},devices:{data:[]}}}})
+          abort "Profile failed: #{pr.inspect[0..300]}" unless pr.dig('data','attributes','profileContent')
+
+          profile_content = pr.dig('data','attributes','profileContent')
+          profile_uuid = pr.dig('data','attributes','uuid')
+          profile_name = pr.dig('data','attributes','name')
+
+          # Install profile
+          profiles_dir = File.expand_path("~/Library/MobileDevice/Provisioning Profiles")
+          FileUtils.mkdir_p(profiles_dir)
+          File.write("#{profiles_dir}/#{profile_uuid}.mobileprovision", Base64.decode64(profile_content))
+          puts "Profile: #{profile_name} (#{profile_uuid})"
+
+          # Update pbxproj
+          pbx = Dir.glob('customer-app/ios/**/*.xcodeproj/project.pbxproj').first
+          if pbx
+            content = File.read(pbx)
+            content.gsub!(/CODE_SIGN_STYLE = Automatic;/, 'CODE_SIGN_STYLE = Manual;')
+            content.gsub!(/PROVISIONING_PROFILE_SPECIFIER = "[^"]*";/, "PROVISIONING_PROFILE_SPECIFIER = \"#{profile_name}\";")
+            content.gsub!(/CODE_SIGN_IDENTITY = "[^"]*";/, 'CODE_SIGN_IDENTITY = "iPhone Distribution";')
+            File.write(pbx, content)
+            puts "Updated: #{pbx}"
+          end
+
+          File.open(ENV['GITHUB_ENV'],'a') {|f| f.puts "PROFILE_UUID=#{profile_uuid}"; f.puts "PROFILE_NAME=#{profile_name}"}
+          RUBYEOF
+
+      - name: Build & Archive
+        working-directory: customer-app/ios
+        run: |
+          security unlock-keychain -p wasaly123 build.keychain || true
+          xcodebuild archive \
+            -workspace *.xcworkspace \
+            -scheme main \
+            -configuration Release \
+            -archivePath /tmp/customer.xcarchive \
+            OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
+            DEVELOPMENT_TEAM=RTYG6CS9G2 \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }}
+
+      - name: Export & Upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          cat > /tmp/ExportOptions.plist << PEOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>RTYG6CS9G2</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict><key>com.wasaly.customer</key><string>${PROFILE_UUID}</string></dict>
+          </dict></plist>
+          PEOF
+          mkdir -p /tmp/build-customer
+          xcodebuild -exportArchive \
+            -archivePath /tmp/customer.xcarchive \
+            -exportOptionsPlist /tmp/ExportOptions.plist \
+            -exportPath /tmp/build-customer \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/.private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "${ASC_KEY_ID}" \
+            -authenticationKeyIssuerID "${ASC_ISSUER_ID}"
+
+      - name: Save IPA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Customer-App-IPA
+          path: /tmp/build-customer/*.ipa
+          retention-days: 30

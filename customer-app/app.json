@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "وصلّي",
+    "slug": "wasaly-customer",
+    "version": "1.0.0",
+    "sdkVersion": "50.0.0",
+    "orientation": "portrait",
+    "platforms": ["ios", "android"],
+    "android": {
+      "package": "com.wasaly.customer",
+      "googleServicesFile": "./android/app/google-services.json",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "VIBRATE",
+        "POST_NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.wasaly.customer"
+    },
+    "plugins": [
+      ["expo-location", {
+        "locationAlwaysAndWhenInUsePermission": "نحتاج موقعك لتوصيل الطلبات"
+      }],
+      ["expo-notifications", {
+        "icon": "./assets/icon.png",
+        "color": "#FF6B35",
+        "androidMode": "default",
+        "androidCollapsedTitle": "وصلّي"
+      }]
+    ]
+  }
+}

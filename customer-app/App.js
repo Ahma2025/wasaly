@@ -1,10 +1,29 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Text, ScrollView } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import * as Notifications from 'expo-notifications';
+import SplashScreen from './src/components/SplashScreen';
+
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <ScrollView style={{ flex:1, backgroundColor:'#fff', padding:20, paddingTop:60 }}>
+          <Text style={{ fontSize:18, fontWeight:'bold', color:'red', marginBottom:10 }}>❌ خطأ في التطبيق</Text>
+          <Text style={{ color:'#333', fontSize:13 }}>{this.state.error?.message || String(this.state.error)}</Text>
+          <Text style={{ color:'#999', fontSize:11, marginTop:10 }}>{this.state.error?.stack}</Text>
+        </ScrollView>
+      );
+    }
+    return this.props.children;
+  }
+}
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { CartProvider } from './src/context/CartContext';
 
@@ -27,7 +46,13 @@ function MainTabs() {
   return (
     <Tab.Navigator screenOptions={({ route }) => ({
       tabBarIcon: ({ focused, color, size }) => {
-        const icons = { الرئيسية: focused ? 'home' : 'home-outline', بحث: focused ? 'search' : 'search-outline', سلتي: focused ? 'cart' : 'cart-outline', حسابي: focused ? 'person' : 'person-outline' };
+        const icons = {
+          'الرئيسية': focused ? 'home' : 'home-outline',
+          'بحث': focused ? 'search' : 'search-outline',
+          'سلتي': focused ? 'cart' : 'cart-outline',
+          'طلباتي': focused ? 'receipt' : 'receipt-outline',
+          'حسابي': focused ? 'person' : 'person-outline',
+        };
         return <Ionicons name={icons[route.name]} size={size} color={color} />;
       },
       tabBarActiveTintColor: '#FF6B00', tabBarInactiveTintColor: '#8E8E93',
@@ -36,6 +61,7 @@ function MainTabs() {
       <Tab.Screen name="الرئيسية" component={HomeScreen} />
       <Tab.Screen name="بحث" component={SearchScreen} />
       <Tab.Screen name="سلتي" component={CartScreen} />
+      <Tab.Screen name="طلباتي" component={OrdersHistoryScreen} />
       <Tab.Screen name="حسابي" component={ProfileScreen} />
     </Tab.Navigator>
   );
@@ -63,16 +89,46 @@ function AppNavigator() {
   );
 }
 
-export default function App() {
+function MainApp() {
+  const navigationRef = useRef(null);
+
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data;
+      if (data?.order_id && navigationRef.current) {
+        navigationRef.current.navigate('OrderTracking', { orderId: data.order_id });
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
         <CartProvider>
-          <NavigationContainer>
+          <NavigationContainer ref={navigationRef}>
             <AppNavigator />
           </NavigationContainer>
         </CartProvider>
       </AuthProvider>
     </GestureHandlerRootView>
+  );
+}
+
+export default function App() {
+  const [splashDone, setSplashDone] = useState(false);
+
+  if (!splashDone) {
+    return (
+      <ErrorBoundary>
+        <SplashScreen onFinish={() => setSplashDone(true)} />
+      </ErrorBoundary>
+    );
+  }
+
+  return (
+    <ErrorBoundary>
+      <MainApp />
+    </ErrorBoundary>
   );
 }

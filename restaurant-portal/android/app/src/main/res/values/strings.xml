@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">وصلّي - مطعم</string>
+    <string name="title_activity_main">وصلّي - مطعم</string>
+    <string name="package_name">com.wasaly.restaurant</string>
+    <string name="custom_url_scheme">com.wasaly.restaurant</string>
+</resources>

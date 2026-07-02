@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { View, ActivityIndicator } from 'react-native';
+import SplashScreen from './src/components/SplashScreen';
 
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
@@ -52,6 +53,12 @@ function AppNavigator() {
 }
 
 export default function App() {
+  const [splashDone, setSplashDone] = useState(false);
+
+  if (!splashDone) {
+    return <SplashScreen onFinish={() => setSplashDone(true)} />;
+  }
+
   return (
     <AuthProvider>
       <NavigationContainer>

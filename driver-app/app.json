@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "وصلّي - مندوب",
+    "slug": "wasaly-driver",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FF6B00"
+    },
+    "android": {
+      "package": "com.wasaly.driver",
+      "googleServicesFile": "./android/app/google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FF6B00"
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "VIBRATE",
+        "POST_NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.wasaly.driver"
+    },
+    "plugins": [
+      ["expo-location", {
+        "locationAlwaysAndWhenInUsePermission": "نحتاج موقعك لمتابعة التوصيلات",
+        "isIosBackgroundLocationEnabled": true
+      }],
+      ["expo-notifications", {
+        "icon": "./assets/icon.png",
+        "color": "#FF6B35",
+        "androidMode": "default",
+        "androidCollapsedTitle": "وصلّي - مندوب"
+      }]
+    ]
+  }
+}
