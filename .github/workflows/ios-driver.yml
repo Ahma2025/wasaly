@@ -134,10 +134,11 @@ jobs:
         working-directory: driver-app/ios
         run: |
           security unlock-keychain -p wasaly123 build.keychain || true
-          SCHEME=$(xcodebuild -list -workspace *.xcworkspace 2>/dev/null | grep -A5 "Schemes:" | grep -v "Schemes:" | head -1 | xargs)
+          WS=$(ls *.xcworkspace | head -1)
+          SCHEME=$(xcodebuild -list -workspace "$WS" 2>/dev/null | grep -A50 "Schemes:" | grep -v "Schemes:" | grep -v "^$" | grep -v "Pods" | grep -v "boost" | grep -v "Capacitor" | head -1 | xargs)
           echo "Using scheme: $SCHEME"
           xcodebuild archive \
-            -workspace *.xcworkspace \
+            -workspace "$WS" \
             -scheme "$SCHEME" \
             -configuration Release \
             -archivePath /tmp/driver.xcarchive \
