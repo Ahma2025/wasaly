@@ -3,11 +3,13 @@ const webpush = require('web-push');
 const pool = require('../config/database');
 const { auth } = require('../middleware/auth');
 
-webpush.setVapidDetails(
-  'mailto:engahmadjamall00@gmail.com',
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails(
+    'mailto:engahmadjamall00@gmail.com',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+}
 
 // Return public VAPID key to frontend
 router.get('/vapid-public-key', (req, res) => {
