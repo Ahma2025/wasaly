@@ -1,5 +1,5 @@
 import * as Notifications from 'expo-notifications';
-import { Platform, Alert } from 'react-native';
+import { Platform } from 'react-native';
 import api from './api';
 
 Notifications.setNotificationHandler({
@@ -12,8 +12,6 @@ Notifications.setNotificationHandler({
 
 export async function registerForPushNotifications() {
   if (Platform.OS !== 'android' && Platform.OS !== 'ios') return null;
-
-  Alert.alert('🔔 PUSH', 'Step 1: بدأ تسجيل الإشعارات...');
 
   try {
     if (Platform.OS === 'android') {
@@ -35,35 +33,22 @@ export async function registerForPushNotifications() {
       finalStatus = status;
     }
 
-    Alert.alert('🔔 PUSH', 'Step 2: Permission = ' + finalStatus);
-
     if (finalStatus !== 'granted') return null;
 
     let fcmToken = null;
     try {
       const result = await Notifications.getDevicePushTokenAsync();
       fcmToken = result?.data;
-      Alert.alert('🔔 PUSH', 'Step 3: FCM Token = ' + (fcmToken ? fcmToken.slice(0, 40) + '...' : 'NULL!'));
-    } catch (e) {
-      Alert.alert('❌ PUSH ERROR', 'getDevicePushTokenAsync فشل:\n' + e.message);
-      return null;
-    }
+    } catch { return null; }
 
-    if (!fcmToken) {
-      Alert.alert('❌ PUSH', 'Token = NULL - فشل الحصول على token');
-      return null;
-    }
+    if (!fcmToken) return null;
 
     try {
       await api.post('/users/fcm-token', { token: fcmToken });
-      Alert.alert('✅ PUSH SUCCESS', 'Token حُفظ في السيرفر بنجاح!');
-    } catch (e) {
-      Alert.alert('❌ PUSH SAVE FAILED', 'فشل الحفظ:\n' + (e.message || JSON.stringify(e)));
-    }
+    } catch {}
 
     return fcmToken;
-  } catch (e) {
-    Alert.alert('❌ PUSH CRASH', 'خطأ عام:\n' + e.message);
+  } catch {
     return null;
   }
 }
