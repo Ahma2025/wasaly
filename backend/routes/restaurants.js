@@ -7,16 +7,25 @@ router.get('/', async (req, res) => {
   try {
     const { lat, lng, category_id, search, sort, limit = 20, offset = 0, city, owner_id } = req.query;
 
+    const userLat = lat ? parseFloat(lat) : null;
+    const userLng = lng ? parseFloat(lng) : null;
+
     let query = `
       SELECT r.*, c.name_ar as category_name, c.icon as category_icon,
-        CASE WHEN $1::float IS NOT NULL AND $2::float IS NOT NULL
-          THEN round((point(r.lng, r.lat) <@> point($2::float, $1::float)) * 1.609344, 2)
+        CASE WHEN $1::float IS NOT NULL AND $2::float IS NOT NULL AND r.lat IS NOT NULL AND r.lng IS NOT NULL
+          THEN round(CAST(
+            6371 * 2 * ASIN(SQRT(
+              POWER(SIN((RADIANS(r.lat) - RADIANS($1::float)) / 2), 2) +
+              COS(RADIANS($1::float)) * COS(RADIANS(r.lat)) *
+              POWER(SIN((RADIANS(r.lng) - RADIANS($2::float)) / 2), 2)
+            ))
+          AS numeric), 2)
           ELSE NULL END as distance_km
       FROM restaurants r
       LEFT JOIN categories c ON r.category_id = c.id
       WHERE r.is_active=true
     `;
-    const params = [lat || null, lng || null];
+    const params = [userLat, userLng];
     let paramIdx = 3;
 
     if (owner_id) { query += ` AND r.owner_id = $${paramIdx++}`; params.push(owner_id); }
