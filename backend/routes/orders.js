@@ -56,7 +56,7 @@ async function assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, ex
     // Also send FCM push so driver gets it even when app is backgrounded
     try {
       const tokens = await getUserTokens(driver.user_id);
-      if (tokens.length) await sendFCM(tokens, '🛵 طلب توصيل جديد!', 'يوجد طلب جديد بانتظارك، اقبل الآن!', { type: 'new_order_request', order_id: String(orderId) });
+      if (tokens.length) await sendFCM(tokens, '🛵 طلب توصيل جديد!', 'يوجد طلب جديد بانتظارك، اقبل الآن!', { type: 'new_order_request', order_id: String(orderId) }, 'com.wasaly.driver');
     } catch (e) { console.error('FCM push to driver failed:', e.message); }
 
     // Auto-reject after 60s if not accepted
@@ -159,7 +159,7 @@ router.post('/', auth, async (req, res) => {
       saveNotification(restaurant.owner_id, `طلب جديد #${orderNumber}`, 'new_order', { order_id: order.id });
       try {
         const tokens = await getUserTokens(restaurant.owner_id);
-        if (tokens.length) await sendFCM(tokens, '🛎️ طلب جديد!', `طلب #${orderNumber} ينتظر موافقتك`, { type: 'new_order', order_id: String(order.id) });
+        if (tokens.length) await sendFCM(tokens, '🛎️ طلب جديد!', `طلب #${orderNumber} ينتظر موافقتك`, { type: 'new_order', order_id: String(order.id) }, 'com.wasaly.restaurant');
       } catch (e) { console.error('FCM push to restaurant failed:', e.message); }
       // Web Push for restaurant portal (browser)
       sendWebPush(restaurant.id, '🛎️ طلب جديد!', `طلب #${orderNumber} ينتظر موافقتك`, { order_id: order.id }).catch(() => {});

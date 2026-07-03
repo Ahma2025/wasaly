@@ -127,8 +127,9 @@ async function setupWebPush() {
 // ─── Main entry ────────────────────────────────────────────────────────────
 export async function setupBrowserNotifications() {
   if (Capacitor.isNativePlatform()) {
-    // In Capacitor: try Firebase Web SDK first (more reliable on MIUI/Xiaomi)
-    await setupFirebaseWebPush();
+    // On iOS/Android Capacitor: use native APNs/FCM directly
+    // This gives raw APNs token on iOS which our backend handles directly
+    await setupNativePush();
   } else {
     await setupWebPush();
   }
