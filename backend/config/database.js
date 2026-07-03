@@ -260,10 +260,14 @@ if (!process.env.DATABASE_URL) {
     console.log('✅ Delivery zones created');
   }
 
-  // Clean slate: delete ALL old accounts and recreate only 4 clean ones
+  // Clean slate: delete everything and start fresh
   const hash123456_seed = bcrypt.hashSync('123456', 10);
   db.prepare('DELETE FROM users').run();
-  console.log('🗑️ All users cleared');
+  db.prepare('DELETE FROM restaurants').run();
+  db.prepare('DELETE FROM menu_items').run();
+  db.prepare('DELETE FROM menu_categories').run();
+  db.prepare('DELETE FROM orders').run();
+  console.log('🗑️ Full clean slate done');
   db.prepare(`INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)`)
     .run('Admin', '05999039704', hash123456_seed, 'admin', 'ADM001');
   db.prepare(`INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)`)
