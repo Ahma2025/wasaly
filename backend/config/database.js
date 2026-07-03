@@ -372,23 +372,229 @@ if (!process.env.DATABASE_URL) {
   pool.on('connect', () => console.log('✅ Connected to PostgreSQL'));
   pool.on('error', (err) => console.error('❌ PostgreSQL error:', err));
 
-  // Ensure admin account always exists in PostgreSQL (safe — never deletes data)
+  // Create all tables and seed initial data
   (async () => {
     try {
-      await new Promise(r => setTimeout(r, 2000)); // wait for connection
-      const { rows } = await pool.query("SELECT id FROM users WHERE phone='05999039704' AND role='admin'");
+      await new Promise(r => setTimeout(r, 2000));
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id SERIAL PRIMARY KEY,
+          name TEXT, email TEXT UNIQUE, phone TEXT UNIQUE,
+          password_hash TEXT, role TEXT DEFAULT 'customer',
+          avatar TEXT, city TEXT, is_verified BOOLEAN DEFAULT true,
+          is_active BOOLEAN DEFAULT true, is_blocked BOOLEAN DEFAULT false,
+          wallet_balance REAL DEFAULT 0, loyalty_points INTEGER DEFAULT 0,
+          loyalty_tier TEXT DEFAULT 'bronze', referral_code TEXT,
+          fcm_token TEXT, vehicle_type TEXT, vehicle_number TEXT,
+          rating REAL DEFAULT 0, created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS otp_codes (
+          id SERIAL PRIMARY KEY,
+          phone TEXT, code TEXT, used BOOLEAN DEFAULT false,
+          expires_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS categories (
+          id SERIAL PRIMARY KEY,
+          name_ar TEXT, name_en TEXT, icon TEXT, image TEXT,
+          sort_order INTEGER DEFAULT 0, is_active BOOLEAN DEFAULT true
+        );
+        CREATE TABLE IF NOT EXISTS restaurants (
+          id SERIAL PRIMARY KEY,
+          name_ar TEXT, name_en TEXT, description_ar TEXT, description_en TEXT,
+          logo TEXT, cover_image TEXT, phone TEXT, email TEXT,
+          category_id INTEGER, rating REAL DEFAULT 0, total_reviews INTEGER DEFAULT 0,
+          is_open BOOLEAN DEFAULT true, is_active BOOLEAN DEFAULT true,
+          is_featured BOOLEAN DEFAULT false, is_verified BOOLEAN DEFAULT true,
+          address TEXT, city TEXT, lat REAL, lng REAL,
+          delivery_time_min INTEGER DEFAULT 25, delivery_time_max INTEGER DEFAULT 45,
+          preparation_time_min INTEGER DEFAULT 20, preparation_time_max INTEGER DEFAULT 35,
+          delivery_fee REAL DEFAULT 2, min_order REAL DEFAULT 10,
+          commission_rate REAL DEFAULT 15,
+          opens_at TEXT, closes_at TEXT, tags TEXT,
+          owner_id INTEGER, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS menu_categories (
+          id SERIAL PRIMARY KEY,
+          restaurant_id INTEGER, name_ar TEXT, name_en TEXT,
+          sort_order INTEGER DEFAULT 0, is_active BOOLEAN DEFAULT true
+        );
+        CREATE TABLE IF NOT EXISTS menu_items (
+          id SERIAL PRIMARY KEY,
+          restaurant_id INTEGER, category_id INTEGER,
+          name_ar TEXT, name_en TEXT, description_ar TEXT, description_en TEXT,
+          price REAL, discount_price REAL,
+          image TEXT, is_available BOOLEAN DEFAULT true, sort_order INTEGER DEFAULT 0,
+          calories INTEGER, is_featured BOOLEAN DEFAULT false,
+          is_new BOOLEAN DEFAULT false, is_spicy BOOLEAN DEFAULT false,
+          is_vegetarian BOOLEAN DEFAULT false, is_vegan BOOLEAN DEFAULT false,
+          preparation_time INTEGER DEFAULT 15, created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS item_options (
+          id SERIAL PRIMARY KEY,
+          item_id INTEGER, name_ar TEXT, name_en TEXT,
+          type TEXT DEFAULT 'radio', is_required BOOLEAN DEFAULT false,
+          max_selections INTEGER DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS item_option_values (
+          id SERIAL PRIMARY KEY,
+          option_id INTEGER, name_ar TEXT, name_en TEXT,
+          extra_price REAL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS drivers (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER UNIQUE,
+          is_online BOOLEAN DEFAULT false, is_busy BOOLEAN DEFAULT false,
+          lat REAL, lng REAL, current_lat REAL, current_lng REAL,
+          vehicle_type TEXT, vehicle_number TEXT, vehicle_plate TEXT,
+          national_id TEXT, license_number TEXT,
+          rating REAL DEFAULT 0, total_deliveries INTEGER DEFAULT 0,
+          wallet_balance REAL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS addresses (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER, label TEXT, title TEXT, address TEXT,
+          floor TEXT, notes TEXT,
+          lat REAL, lng REAL, is_default BOOLEAN DEFAULT false
+        );
+        CREATE TABLE IF NOT EXISTS orders (
+          id SERIAL PRIMARY KEY,
+          order_number TEXT,
+          customer_id INTEGER, restaurant_id INTEGER, driver_id INTEGER,
+          status TEXT DEFAULT 'pending',
+          subtotal REAL DEFAULT 0, total REAL, delivery_fee REAL DEFAULT 0,
+          discount REAL DEFAULT 0, loyalty_discount REAL DEFAULT 0,
+          tax REAL DEFAULT 0, discount_amount REAL DEFAULT 0,
+          commission_rate REAL DEFAULT 15,
+          address_id INTEGER, delivery_address TEXT,
+          delivery_lat REAL, delivery_lng REAL,
+          notes TEXT, payment_method TEXT DEFAULT 'cash',
+          payment_status TEXT DEFAULT 'pending',
+          coupon_code TEXT, cancel_reason TEXT,
+          order_type TEXT DEFAULT 'delivery',
+          loyalty_points_earned INTEGER DEFAULT 0,
+          loyalty_points_used INTEGER DEFAULT 0,
+          estimated_delivery_time TEXT,
+          restaurant_accepted_at TIMESTAMP,
+          driver_assigned_at TIMESTAMP,
+          picked_up_at TIMESTAMP,
+          delivered_at TIMESTAMP,
+          cancelled_at TIMESTAMP,
+          actual_delivery_time TEXT,
+          rating_restaurant INTEGER, rating_driver INTEGER, review_text TEXT,
+          created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS order_items (
+          id SERIAL PRIMARY KEY,
+          order_id INTEGER, item_id INTEGER, menu_item_id INTEGER,
+          name_ar TEXT, name_en TEXT, quantity INTEGER, price REAL,
+          subtotal REAL DEFAULT 0, options TEXT, notes TEXT
+        );
+        CREATE TABLE IF NOT EXISTS notifications (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER, title TEXT, title_ar TEXT, title_en TEXT,
+          body TEXT, body_ar TEXT, body_en TEXT,
+          type TEXT, data TEXT, is_read BOOLEAN DEFAULT false,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS coupons (
+          id SERIAL PRIMARY KEY,
+          code TEXT UNIQUE, type TEXT DEFAULT 'fixed', value REAL,
+          min_order REAL DEFAULT 0, max_discount REAL,
+          max_uses INTEGER DEFAULT 100, uses_count INTEGER DEFAULT 0,
+          usage_limit INTEGER DEFAULT 100, usage_count INTEGER DEFAULT 0,
+          is_active BOOLEAN DEFAULT true, expires_at TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS coupon_usage (
+          id SERIAL PRIMARY KEY,
+          coupon_id INTEGER, user_id INTEGER, order_id INTEGER,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS reviews (
+          id SERIAL PRIMARY KEY,
+          order_id INTEGER UNIQUE, customer_id INTEGER, restaurant_id INTEGER,
+          driver_id INTEGER, restaurant_rating INTEGER, driver_rating INTEGER,
+          comment TEXT, images TEXT, created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS banners (
+          id SERIAL PRIMARY KEY,
+          title TEXT, title_ar TEXT, title_en TEXT,
+          image TEXT, link_type TEXT, link_value TEXT,
+          sort_order INTEGER DEFAULT 0, is_active BOOLEAN DEFAULT true,
+          starts_at TIMESTAMP, ends_at TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS delivery_zones (
+          id SERIAL PRIMARY KEY,
+          name TEXT, min_km REAL DEFAULT 0, max_km REAL DEFAULT 3,
+          price REAL DEFAULT 5, is_active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS wallet_transactions (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER, type TEXT, amount REAL,
+          description TEXT, created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS support_tickets (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER, subject TEXT, message TEXT,
+          status TEXT DEFAULT 'open', created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS web_push_subscriptions (
+          id SERIAL PRIMARY KEY,
+          restaurant_id INTEGER, subscription TEXT,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS cart (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER, menu_item_id INTEGER, quantity INTEGER DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS restaurant_hours (
+          id SERIAL PRIMARY KEY,
+          restaurant_id INTEGER, day_of_week INTEGER,
+          open_time TEXT, close_time TEXT, is_closed BOOLEAN DEFAULT false
+        );
+      `);
+      console.log('✅ All tables created/verified');
+
+      // Seed delivery zones
+      const { rows: zones } = await pool.query("SELECT COUNT(*) FROM delivery_zones");
+      if (parseInt(zones[0].count) === 0) {
+        await pool.query(`INSERT INTO delivery_zones (name,min_km,max_km,price) VALUES
+          ('قريب (0-3 كم)',0,3,5),('متوسط (3-6 كم)',3,6,8),('بعيد (6+ كم)',6,999,12)`);
+        console.log('✅ Delivery zones seeded');
+      }
+
+      // Seed categories
+      const { rows: cats } = await pool.query("SELECT COUNT(*) FROM categories");
+      if (parseInt(cats[0].count) === 0) {
+        await pool.query(`INSERT INTO categories (name_ar,name_en,icon,sort_order) VALUES
+          ('برغر','Burger','🍔',0),('بيتزا','Pizza','🍕',1),('شاورما','Shawarma','🌯',2),
+          ('دجاج','Chicken','🍗',3),('مشاوي','Grills','🥩',4),('حلويات','Sweets','🍰',5),
+          ('مشروبات','Drinks','🥤',6),('سلطات','Salads','🥗',7),('ماركت','Market','🛒',8),('صيدلية','Pharmacy','💊',9)`);
+        console.log('✅ Categories seeded');
+      }
+
+      // Seed banner
+      const { rows: bannerRows } = await pool.query("SELECT COUNT(*) FROM banners");
+      if (parseInt(bannerRows[0].count) === 0) {
+        await pool.query(`INSERT INTO banners (title_ar,title_en,image,link_type,link_value,sort_order,is_active)
+          VALUES ('عروض خاصة','Special Offers','https://via.placeholder.com/400x160/FF6B00/FFF?text=وصلّي','none','',0,true)`);
+      }
+
+      // Ensure admin exists
+      const { rows } = await pool.query("SELECT id FROM users WHERE phone='05999039704'");
       if (rows.length === 0) {
         const hash = await bcrypt.hash('123456', 10);
         await pool.query(
           `INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES ($1,$2,$3,$4,$5,true,true)`,
           ['Admin', '05999039704', hash, 'admin', 'ADM001']
         );
-        console.log('✅ Admin account created: 05999039704 / 123456');
+        console.log('✅ Admin created: 05999039704 / 123456');
       } else {
-        console.log('✅ Admin account exists');
+        console.log('✅ Admin exists');
       }
     } catch (e) {
-      console.error('⚠️ Admin seed error:', e.message);
+      console.error('⚠️ DB setup error:', e.message);
     }
   })();
 
