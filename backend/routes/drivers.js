@@ -60,7 +60,7 @@ router.get('/me', auth, driverOnly, async (req, res) => {
               r.phone as restaurant_phone, u.name as customer_name, u.phone as customer_phone
        FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
        LEFT JOIN users u ON o.customer_id=u.id
-       WHERE o.driver_id=$1 AND o.status NOT IN ('delivered','cancelled','confirmed')
+       WHERE o.driver_id=$1 AND o.status NOT IN ('delivered','cancelled')
        ORDER BY o.created_at DESC LIMIT 1`,
       [req.user.id]
     );

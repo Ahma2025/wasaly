@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import DismissKeyboard from '../components/DismissKeyboard';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -28,6 +29,7 @@ export default function LoginScreen() {
   };
 
   return (
+    <DismissKeyboard>
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.inner}>
         <Text style={styles.emoji}>🏍️</Text>
@@ -49,6 +51,7 @@ export default function LoginScreen() {
         <Text style={styles.note}>يتم إنشاء حسابات المناديب عبر لوحة الإدارة</Text>
       </View>
     </KeyboardAvoidingView>
+    </DismissKeyboard>
   );
 }
 

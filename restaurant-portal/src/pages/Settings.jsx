@@ -1,6 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
+
+// Fix default marker icon for webpack/vite
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
+
+function MapPicker({ position, onPick }) {
+  useMapEvents({
+    click(e) { onPick(e.latlng.lat, e.latlng.lng); }
+  });
+  return position ? <Marker position={position} /> : null;
+}
+
+function LocationMap({ lat, lng, onPick }) {
+  const center = lat && lng ? [parseFloat(lat), parseFloat(lng)] : [31.9, 35.2];
+  return (
+    <MapContainer center={center} zoom={14} style={{ height: '260px', borderRadius: '12px', zIndex: 0 }}>
+      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      <MapPicker position={lat && lng ? [parseFloat(lat), parseFloat(lng)] : null} onPick={onPick} />
+    </MapContainer>
+  );
+}
 
 export default function Settings() {
   const [restaurant, setRestaurant] = useState(JSON.parse(localStorage.getItem('restaurant') || '{}'));
@@ -179,7 +207,7 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Location */}
+      {/* Location - Interactive Map */}
       <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-bold text-gray-900">📍 موقع المطعم</h2>
@@ -187,37 +215,22 @@ export default function Settings() {
             onClick={detectLocation}
             className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded-xl font-bold"
           >
-            تحديد موقعي الآن
+            📡 موقعي الآن
           </button>
         </div>
-        <p className="text-xs text-gray-400">يُستخدم الموقع لحساب رسوم التوصيل وإيجاد أقرب سائق</p>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs font-bold text-gray-600">خط العرض (Latitude)</label>
-            <input
-              className="w-full border border-gray-200 rounded-xl p-3 text-sm mt-1"
-              type="number" step="0.000001" placeholder="31.9000"
-              value={form.lat} onChange={e => setForm(f => ({ ...f, lat: e.target.value }))}
-            />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-gray-600">خط الطول (Longitude)</label>
-            <input
-              className="w-full border border-gray-200 rounded-xl p-3 text-sm mt-1"
-              type="number" step="0.000001" placeholder="35.2000"
-              value={form.lng} onChange={e => setForm(f => ({ ...f, lng: e.target.value }))}
-            />
-          </div>
-        </div>
+        <p className="text-xs text-gray-400">اضغط على الخريطة لتحديد موقع مطعمك بدقة</p>
+        <LocationMap
+          lat={form.lat}
+          lng={form.lng}
+          onPick={(lat, lng) => {
+            setForm(f => ({ ...f, lat: lat.toFixed(6), lng: lng.toFixed(6) }));
+            toast.success('تم تحديد الموقع على الخريطة ✅');
+          }}
+        />
         {form.lat && form.lng && (
-          <a
-            href={`https://maps.google.com/?q=${form.lat},${form.lng}`}
-            target="_blank"
-            rel="noreferrer"
-            className="block text-center text-xs text-blue-600 font-semibold py-2 bg-blue-50 rounded-xl"
-          >
-            🗺️ عرض الموقع على خريطة Google
-          </a>
+          <p className="text-xs text-gray-500 text-center">
+            📌 {parseFloat(form.lat).toFixed(5)}, {parseFloat(form.lng).toFixed(5)}
+          </p>
         )}
       </div>
 

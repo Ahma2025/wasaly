@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, Keyboard } from 'react-native';
+import DismissKeyboard from '../components/DismissKeyboard';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
@@ -134,6 +135,7 @@ export default function CartScreen() {
   }
 
   return (
+    <DismissKeyboard>
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={24} color={COLORS.text} /></TouchableOpacity>
@@ -289,6 +291,7 @@ export default function CartScreen() {
         }
       </TouchableOpacity>
     </View>
+    </DismissKeyboard>
   );
 }
 

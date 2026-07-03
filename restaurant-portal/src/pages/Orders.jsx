@@ -153,11 +153,18 @@ function OrderCard({ order, token, isExpanded, onToggle, onAccept, onUpdateStatu
       color: 'bg-orange-500 text-white',
       onClick: () => onAccept(order.id)
     }];
-    if (order.status === 'confirmed') return [{
-      label: '🍳 بدء التحضير',
-      color: 'bg-blue-500 text-white',
-      onClick: () => onUpdateStatus(order.id, 'preparing')
-    }];
+    if (order.status === 'confirmed') {
+      if (isDelivery) return [{
+        label: '⏳ بانتظار قبول السائق...',
+        color: 'bg-gray-200 text-gray-500 cursor-not-allowed',
+        onClick: () => {}
+      }];
+      return [{
+        label: '🍳 بدء التحضير',
+        color: 'bg-blue-500 text-white',
+        onClick: () => onUpdateStatus(order.id, 'preparing')
+      }];
+    }
     if (order.status === 'preparing') {
       if (isDelivery) return [{
         label: '🛵 السائق أخذ الطلب - في الطريق',

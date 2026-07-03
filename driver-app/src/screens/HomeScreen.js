@@ -121,7 +121,14 @@ export default function DriverHome() {
   const fetchActiveOrder = async () => {
     try {
       const r = await api.get('/drivers/me');
-      setActiveOrder(r.data?.active_order || null);
+      const active = r.data?.active_order || null;
+      // If there's a 'confirmed' order assigned to this driver but not yet accepted, show it as pending
+      if (active && active.status === 'confirmed' && !pendingOrder) {
+        setPendingOrder(active);
+        startOrderTimer();
+      } else {
+        setActiveOrder(active);
+      }
     } catch {}
   };
 
