@@ -260,13 +260,13 @@ if (!process.env.DATABASE_URL) {
     console.log('✅ Delivery zones created');
   }
 
-  // Wipe everything clean — no seed accounts
-  db.prepare('DELETE FROM users').run();
-  db.prepare('DELETE FROM restaurants').run();
-  db.prepare('DELETE FROM menu_items').run();
-  db.prepare('DELETE FROM menu_categories').run();
-  db.prepare('DELETE FROM orders').run();
-  console.log('🗑️ Database wiped clean');
+  // Always ensure admin exists (runs every startup)
+  const _adminExists = db.prepare("SELECT id FROM users WHERE phone='05999039704'").get();
+  if (!_adminExists) {
+    db.prepare(`INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)`)
+      .run('Admin', '05999039704', bcrypt.hashSync('123456', 10), 'admin', 'ADM001');
+    console.log('✅ Admin created: 05999039704 / 123456');
+  }
 
   // Seed categories if not exist
   if (!db.prepare("SELECT id FROM categories LIMIT 1").get()) {
