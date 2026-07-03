@@ -364,11 +364,33 @@ if (!process.env.DATABASE_URL) {
   module.exports = pool;
 } else {
   const { Pool } = require('pg');
+  const bcrypt = require('bcryptjs');
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
   });
   pool.on('connect', () => console.log('✅ Connected to PostgreSQL'));
   pool.on('error', (err) => console.error('❌ PostgreSQL error:', err));
+
+  // Ensure admin account always exists in PostgreSQL (safe — never deletes data)
+  (async () => {
+    try {
+      await new Promise(r => setTimeout(r, 2000)); // wait for connection
+      const { rows } = await pool.query("SELECT id FROM users WHERE phone='05999039704' AND role='admin'");
+      if (rows.length === 0) {
+        const hash = await bcrypt.hash('123456', 10);
+        await pool.query(
+          `INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES ($1,$2,$3,$4,$5,true,true)`,
+          ['Admin', '05999039704', hash, 'admin', 'ADM001']
+        );
+        console.log('✅ Admin account created: 05999039704 / 123456');
+      } else {
+        console.log('✅ Admin account exists');
+      }
+    } catch (e) {
+      console.error('⚠️ Admin seed error:', e.message);
+    }
+  })();
+
   module.exports = pool;
 }

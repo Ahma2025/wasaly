@@ -4,18 +4,6 @@ const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
 const { auth } = require('../middleware/auth');
 
-// TEMP: create admin directly — remove after use
-router.get('/setup-admin', async (req, res) => {
-  try {
-    const hash = await bcrypt.hash('123456', 10);
-    await pool.query('DELETE FROM users WHERE phone=$1', ['05999039704']);
-    await pool.query(
-      `INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES ($1,$2,$3,$4,$5,true,true)`,
-      ['Admin', '05999039704', hash, 'admin', 'ADM001']
-    );
-    res.json({ success: true, message: 'Admin created: 05999039704 / 123456' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
 
 const generateToken = (user) =>
   jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE || '30d' });
