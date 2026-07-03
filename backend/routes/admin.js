@@ -214,7 +214,7 @@ router.patch('/restaurants/:id/toggle', auth, adminOnly, async (req, res) => {
     const allowed = ['is_active', 'is_featured', 'is_verified', 'is_open'];
     if (!allowed.includes(field)) return res.status(400).json({ success: false });
     const { rows } = await pool.query(`SELECT ${field} FROM restaurants WHERE id=$1`, [req.params.id]);
-    const newVal = rows[0]?.[field] ? 0 : 1;
+    const newVal = !rows[0]?.[field];
     await pool.query(`UPDATE restaurants SET ${field}=$1 WHERE id=$2`, [newVal, req.params.id]);
     res.json({ success: true, value: newVal });
   } catch (e) {
