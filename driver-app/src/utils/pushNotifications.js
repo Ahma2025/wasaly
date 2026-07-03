@@ -16,7 +16,7 @@ export async function registerForPushNotifications() {
   try {
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('wasaly_default', {
-        name: 'وصالي - إشعارات السائق',
+        name: 'وصلّي - إشعارات السائق',
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#FF6B35',
@@ -34,29 +34,22 @@ export async function registerForPushNotifications() {
     }
     if (finalStatus !== 'granted') return null;
 
-    // Try up to 3 times to get FCM token (MIUI can fail on first attempt)
-    let fcmToken = null;
+    let token = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const result = await Notifications.getDevicePushTokenAsync();
-        fcmToken = result?.data;
-        if (fcmToken) break;
+        token = result?.data;
+        if (token) break;
       } catch (e) {
-        console.log(`[PUSH DRIVER] attempt ${attempt} failed:`, e.message);
         if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
       }
     }
 
-    if (!fcmToken) {
-      console.log('[PUSH DRIVER] Could not get FCM token after 3 attempts');
-      return null;
-    }
+    if (!token) return null;
 
-    await api.post('/users/fcm-token', { token: fcmToken });
-    console.log('[PUSH DRIVER] Token saved OK');
-    return fcmToken;
+    await api.post('/users/fcm-token', { token });
+    return token;
   } catch (e) {
-    console.log('[PUSH DRIVER] Error:', e.message);
     return null;
   }
 }
@@ -66,4 +59,15 @@ export async function showLocalNotification(title, body, data = {}) {
     content: { title, body, data, sound: 'default' },
     trigger: null,
   });
+}
+
+// Setup notification tap handler — call once in App root
+export function setupNotificationListeners(navigationRef) {
+  const responseSub = Notifications.addNotificationResponseReceivedListener(response => {
+    const data = response.notification.request.content.data;
+    if (data?.order_id && navigationRef?.current) {
+      navigationRef.current.navigate('ActiveOrder');
+    }
+  });
+  return () => responseSub.remove();
 }

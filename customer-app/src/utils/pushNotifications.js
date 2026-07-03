@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import api from './api';
 
+// Handle notifications when app is FOREGROUND
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -16,7 +17,7 @@ export async function registerForPushNotifications() {
   try {
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('wasaly_default', {
-        name: 'وصالي - إشعارات الطلبات',
+        name: 'وصلّي - إشعارات الطلبات',
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#FF6B35',
@@ -32,22 +33,29 @@ export async function registerForPushNotifications() {
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }
-
     if (finalStatus !== 'granted') return null;
 
-    let fcmToken = null;
-    try {
-      const result = await Notifications.getDevicePushTokenAsync();
-      fcmToken = result?.data;
-    } catch { return null; }
+    // iOS  → getDevicePushTokenAsync returns raw APNs token (64-char hex)
+    //         backend detects this and sends via APNs directly
+    // Android → returns FCM token, backend sends via FCM v1
+    let token = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const result = await Notifications.getDevicePushTokenAsync();
+        token = result?.data;
+        if (token) break;
+      } catch (e) {
+        if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
+      }
+    }
 
-    if (!fcmToken) return null;
+    if (!token) return null;
 
     try {
-      await api.post('/users/fcm-token', { token: fcmToken });
+      await api.post('/users/fcm-token', { token });
     } catch {}
 
-    return fcmToken;
+    return token;
   } catch {
     return null;
   }
@@ -58,4 +66,15 @@ export async function showLocalNotification(title, body, data = {}) {
     content: { title, body, data, sound: 'default' },
     trigger: null,
   });
+}
+
+// Setup notification tap handler — call once in App root
+export function setupNotificationListeners(navigationRef) {
+  const responseSub = Notifications.addNotificationResponseReceivedListener(response => {
+    const data = response.notification.request.content.data;
+    if (data?.order_id && navigationRef?.current) {
+      navigationRef.current.navigate('Orders');
+    }
+  });
+  return () => responseSub.remove();
 }

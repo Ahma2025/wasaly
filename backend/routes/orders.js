@@ -387,8 +387,8 @@ router.post('/:id/rate', auth, async (req, res) => {
     const order = orders[0];
 
     await pool.query(
-      `INSERT OR IGNORE INTO reviews (order_id, customer_id, restaurant_id, driver_id, restaurant_rating, driver_rating, comment)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      `INSERT INTO reviews (order_id, customer_id, restaurant_id, driver_id, restaurant_rating, driver_rating, comment)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (order_id) DO NOTHING`,
       [order.id, req.user.id, order.restaurant_id, order.driver_id, restaurant_rating, driver_rating, comment]
     );
     await pool.query(
