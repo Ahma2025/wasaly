@@ -1,34 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
-
-// Fix default marker icon for webpack/vite
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
-
-function MapPicker({ position, onPick }) {
-  useMapEvents({
-    click(e) { onPick(e.latlng.lat, e.latlng.lng); }
-  });
-  return position ? <Marker position={position} /> : null;
-}
-
-function LocationMap({ lat, lng, onPick }) {
-  const center = lat && lng ? [parseFloat(lat), parseFloat(lng)] : [31.9, 35.2];
-  return (
-    <MapContainer center={center} zoom={14} style={{ height: '260px', borderRadius: '12px', zIndex: 0 }}>
-      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-      <MapPicker position={lat && lng ? [parseFloat(lat), parseFloat(lng)] : null} onPick={onPick} />
-    </MapContainer>
-  );
-}
 
 export default function Settings() {
   const [restaurant, setRestaurant] = useState(JSON.parse(localStorage.getItem('restaurant') || '{}'));
@@ -207,7 +179,7 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Location - Interactive Map */}
+      {/* Location */}
       <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-bold text-gray-900">📍 موقع المطعم</h2>
@@ -218,15 +190,20 @@ export default function Settings() {
             📡 موقعي الآن
           </button>
         </div>
-        <p className="text-xs text-gray-400">اضغط على الخريطة لتحديد موقع مطعمك بدقة</p>
-        <LocationMap
-          lat={form.lat}
-          lng={form.lng}
-          onPick={(lat, lng) => {
-            setForm(f => ({ ...f, lat: lat.toFixed(6), lng: lng.toFixed(6) }));
-            toast.success('تم تحديد الموقع على الخريطة ✅');
-          }}
-        />
+        <p className="text-xs text-gray-400">اضغط "موقعي الآن" لتحديد موقع مطعمك تلقائياً عبر GPS</p>
+        {form.lat && form.lng && (
+          <iframe
+            title="map"
+            src={`https://www.openstreetmap.org/export/embed.html?bbox=${parseFloat(form.lng)-0.01},${parseFloat(form.lat)-0.01},${parseFloat(form.lng)+0.01},${parseFloat(form.lat)+0.01}&layer=mapnik&marker=${form.lat},${form.lng}`}
+            style={{ width: '100%', height: '220px', border: 'none', borderRadius: '12px' }}
+          />
+        )}
+        {!form.lat && !form.lng && (
+          <div className="flex flex-col items-center justify-center h-28 bg-gray-50 rounded-xl text-gray-400 gap-2">
+            <span className="text-3xl">🗺️</span>
+            <p className="text-xs">اضغط "موقعي الآن" لتحديد الموقع</p>
+          </div>
+        )}
         {form.lat && form.lng && (
           <p className="text-xs text-gray-500 text-center">
             📌 {parseFloat(form.lat).toFixed(5)}, {parseFloat(form.lng).toFixed(5)}
