@@ -1,4 +1,4 @@
-const router = require('express').Router();
+﻿const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, restaurantOnly } = require('../middleware/auth');
 
@@ -48,7 +48,7 @@ router.post('/items', auth, restaurantOnly, async (req, res) => {
         image || null, parseFloat(price) || 0,
         discount_price ? parseFloat(discount_price) : null,
         calories ? parseInt(calories) : null,
-        is_spicy ? 1 : 0, is_vegetarian ? 1 : 0, is_vegan ? 1 : 0,
+        is_spicy ? true : false, is_vegetarian ? true : false, is_vegan ? true : false,
         parseInt(preparation_time) || 15
       ]
     );
@@ -88,7 +88,7 @@ router.post('/items/:id/options', auth, restaurantOnly, async (req, res) => {
     const { name_ar, name_en, type, is_required, max_selections, values } = req.body;
     const { rows: option } = await pool.query(
       'INSERT INTO item_options (item_id, name_ar, name_en, type, is_required, max_selections) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [req.params.id, name_ar || '', name_en || null, type || 'single', is_required ? 1 : 0, max_selections || 1]
+      [req.params.id, name_ar || '', name_en || null, type || 'single', is_required ? true : false, max_selections || 1]
     );
     for (const v of (values || [])) {
       await pool.query(

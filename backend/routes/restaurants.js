@@ -1,4 +1,4 @@
-const router = require('express').Router();
+﻿const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, adminOnly, restaurantOnly } = require('../middleware/auth');
 
@@ -14,7 +14,7 @@ router.get('/', async (req, res) => {
           ELSE NULL END as distance_km
       FROM restaurants r
       LEFT JOIN categories c ON r.category_id = c.id
-      WHERE r.is_active = true
+      WHERE r.is_active=true
     `;
     const params = [lat || null, lng || null];
     let paramIdx = 3;
@@ -126,7 +126,7 @@ router.put('/:id', auth, restaurantOnly, async (req, res) => {
         values.push(req.body[key]);
       }
     }
-    updates.push(`updated_at=datetime('now')`);
+    updates.push(`updated_at=NOW()`);
     values.push(req.params.id);
 
     const { rows } = await pool.query(

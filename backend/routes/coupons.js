@@ -1,4 +1,4 @@
-const router = require('express').Router();
+﻿const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, adminOnly } = require('../middleware/auth');
 
@@ -7,8 +7,8 @@ router.post('/validate', auth, async (req, res) => {
   try {
     const { code, subtotal } = req.body;
     const { rows } = await pool.query(
-      `SELECT * FROM coupons WHERE code=$1 AND is_active=1
-       AND (expires_at IS NULL OR expires_at > datetime('now'))
+      `SELECT * FROM coupons WHERE code=$1 AND is_active=true
+       AND (expires_at IS NULL OR expires_at > NOW())
        AND (max_uses IS NULL OR uses_count < max_uses)
        AND min_order <= $2`,
       [code, subtotal || 0]

@@ -1,4 +1,4 @@
-const router = require('express').Router();
+﻿const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, adminOnly } = require('../middleware/auth');
 
@@ -6,22 +6,22 @@ const { auth, adminOnly } = require('../middleware/auth');
 router.get('/dashboard', auth, adminOnly, async (req, res) => {
   try {
     const [users, restaurants, activeDrivers, ordersToday, revenueToday, pendingOrders] = await Promise.all([
-      pool.query("SELECT COUNT(*) as count FROM users WHERE role='customer' AND is_active=1"),
-      pool.query("SELECT COUNT(*) as count FROM restaurants WHERE is_active=1"),
-      pool.query("SELECT COUNT(*) as count FROM drivers WHERE is_online=1"),
-      pool.query("SELECT COUNT(*) as count FROM orders WHERE strftime('%Y-%m-%d',created_at)=strftime('%Y-%m-%d','now')"),
-      pool.query("SELECT COALESCE(SUM(total),0) as total FROM orders WHERE status='delivered' AND strftime('%Y-%m-%d',created_at)=strftime('%Y-%m-%d','now')"),
+      pool.query("SELECT COUNT(*) as count FROM users WHERE role='customer' AND is_active=true"),
+      pool.query("SELECT COUNT(*) as count FROM restaurants WHERE is_active=true"),
+      pool.query("SELECT COUNT(*) as count FROM drivers WHERE is_online=true"),
+      pool.query("SELECT COUNT(*) as count FROM orders WHERE TO_CHAR(created_at, 'YYYY-MM-DD')=TO_CHAR(NOW(), 'YYYY-MM-DD')"),
+      pool.query("SELECT COALESCE(SUM(total),0) as total FROM orders WHERE status='delivered' AND TO_CHAR(created_at, 'YYYY-MM-DD')=TO_CHAR(NOW(), 'YYYY-MM-DD')"),
       pool.query("SELECT COUNT(*) as count FROM orders WHERE status='pending'"),
     ]);
 
     const { rows: weeklyRevenue } = await pool.query(
-      `SELECT strftime('%Y-%m-%d', created_at) as date, COALESCE(SUM(total),0) as revenue, COUNT(*) as orders
-       FROM orders WHERE status='delivered' AND created_at > datetime('now', '-7 days')
-       GROUP BY strftime('%Y-%m-%d', created_at) ORDER BY date`
+      `SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COALESCE(SUM(total),0) as revenue, COUNT(*) as orders
+       FROM orders WHERE status='delivered' AND created_at > NOW() - INTERVAL '7 days'
+       GROUP BY TO_CHAR(created_at, 'YYYY-MM-DD') ORDER BY date`
     );
 
     const { rows: ordersByStatus } = await pool.query(
-      `SELECT status, COUNT(*) as count FROM orders WHERE created_at > datetime('now', '-30 days') GROUP BY status`
+      `SELECT status, COUNT(*) as count FROM orders WHERE created_at > NOW() - INTERVAL '30 days' GROUP BY status`
     );
 
     res.json({
@@ -83,7 +83,7 @@ router.patch('/users/:id/block', auth, adminOnly, async (req, res) => {
       'SELECT is_blocked FROM users WHERE id=$1', [req.params.id]
     );
     if (!rows[0]) return res.status(404).json({ success: false, message: 'User not found' });
-    const newVal = rows[0].is_blocked ? 0 : 1;
+    const newVal = !rows[0].is_blocked;
     await pool.query('UPDATE users SET is_blocked=$1 WHERE id=$2', [newVal, req.params.id]);
     res.json({ success: true, is_blocked: newVal });
   } catch (e) {
@@ -94,7 +94,7 @@ router.patch('/users/:id/block', auth, adminOnly, async (req, res) => {
 // Delete user
 router.delete('/users/:id', auth, adminOnly, async (req, res) => {
   try {
-    await pool.query("UPDATE users SET is_active=0 WHERE id=$1", [req.params.id]);
+    await pool.query("UPDATE users SET is_active=false WHERE id=$1", [req.params.id]);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -169,8 +169,7 @@ router.post('/restaurants', auth, adminOnly, async (req, res) => {
 
     const { rows } = await pool.query(
       `INSERT INTO restaurants (name_ar, description_ar, category_id, city, address, lat, lng,
-        phone, email, min_order, delivery_fee, delivery_time_min, delivery_time_max, owner_id, is_active, is_verified)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,1,1) RETURNING *`,
+        phone, email, min_order, delivery_fee, delivery_time_min, delivery_time_max, owner_id, is_active, is_verified) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,true,true) RETURNING *`,
       [name_ar, description_ar, category_id, city, address, lat || 31.9, lng || 35.2,
        phone, email, min_order || 10, delivery_fee || 5, delivery_time_min || 20, delivery_time_max || 40, owner_id]
     );
@@ -201,7 +200,7 @@ router.put('/restaurants/:id', auth, adminOnly, async (req, res) => {
 // Delete restaurant (admin)
 router.delete('/restaurants/:id', auth, adminOnly, async (req, res) => {
   try {
-    await pool.query("UPDATE restaurants SET is_active=0 WHERE id=$1", [req.params.id]);
+    await pool.query("UPDATE restaurants SET is_active=false WHERE id=$1", [req.params.id]);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -233,9 +232,9 @@ router.get('/driver-stats/:id', auth, adminOnly, async (req, res) => {
       [req.params.id]
     );
     const { rows: weekly } = await pool.query(
-      `SELECT strftime('%Y-%m-%d', delivered_at) as date, COUNT(*) as orders, COALESCE(SUM(delivery_fee),0) as earnings
-       FROM orders WHERE driver_id=$1 AND status='delivered' AND delivered_at > datetime('now', '-7 days')
-       GROUP BY strftime('%Y-%m-%d', delivered_at) ORDER BY date DESC`,
+      `SELECT TO_CHAR(delivered_at, 'YYYY-MM-DD') as date, COUNT(*) as orders, COALESCE(SUM(delivery_fee),0) as earnings
+       FROM orders WHERE driver_id=$1 AND status='delivered' AND delivered_at > NOW() - INTERVAL '7 days'
+       GROUP BY TO_CHAR(delivered_at, 'YYYY-MM-DD') ORDER BY date DESC`,
       [req.params.id]
     );
     res.json({ success: true, data: { ...stats[0], weekly } });
@@ -254,9 +253,9 @@ router.get('/analytics', auth, adminOnly, async (req, res) => {
       pool.query(`SELECT u.name, u.phone, COUNT(o.id) as orders, COALESCE(SUM(o.delivery_fee),0) as earnings
                   FROM users u LEFT JOIN orders o ON u.id=o.driver_id AND o.status='delivered'
                   WHERE u.role='driver' GROUP BY u.id, u.name, u.phone ORDER BY orders DESC LIMIT 10`),
-      pool.query(`SELECT strftime('%Y-%m', created_at) as month, COALESCE(SUM(total),0) as revenue, COUNT(*) as orders
-                  FROM orders WHERE status='delivered' AND created_at > datetime('now', '-6 months')
-                  GROUP BY strftime('%Y-%m', created_at) ORDER BY month`),
+      pool.query(`SELECT TO_CHAR(created_at, 'YYYY-MM') as month, COALESCE(SUM(total),0) as revenue, COUNT(*) as orders
+                  FROM orders WHERE status='delivered' AND created_at > NOW() - INTERVAL '6 months'
+                  GROUP BY TO_CHAR(created_at, 'YYYY-MM') ORDER BY month`),
       pool.query(`SELECT status, COUNT(*) as count FROM orders GROUP BY status`)
     ]);
 
@@ -309,7 +308,7 @@ router.post('/notifications/broadcast', auth, adminOnly, async (req, res) => {
     const { title, body, target, role } = req.body;
     if (!title || !body) return res.status(400).json({ success: false, message: 'العنوان والمحتوى مطلوبان' });
 
-    let query = 'SELECT id, fcm_token FROM users WHERE fcm_token IS NOT NULL AND is_active=1';
+    let query = 'SELECT id, fcm_token FROM users WHERE fcm_token IS NOT NULL AND is_active=true';
     const params = [];
     if (target === 'role' && role) {
       query += ' AND role=$1';

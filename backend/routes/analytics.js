@@ -1,4 +1,4 @@
-const router = require('express').Router();
+﻿const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, adminOnly } = require('../middleware/auth');
 
@@ -16,7 +16,7 @@ router.get('/overview', auth, adminOnly, async (req, res) => {
     ]);
 
     const hourly = await pool.query(
-      `SELECT CAST(strftime('%H', created_at) AS INTEGER) as hour, COUNT(*) as orders FROM orders WHERE created_at BETWEEN $1 AND $2 GROUP BY hour ORDER BY hour`,
+      `SELECT EXTRACT(HOUR FROM created_at)::INTEGER as hour, COUNT(*) as orders FROM orders WHERE created_at BETWEEN $1 AND $2 GROUP BY hour ORDER BY hour`,
       [start, end]
     );
 

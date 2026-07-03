@@ -1,4 +1,4 @@
-const router = require('express').Router();
+﻿const router = require('express').Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
@@ -110,7 +110,7 @@ router.post('/login-password', async (req, res) => {
     if (phone) phone = phone.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
     console.log('[LOGIN] normalized phone:', phone);
     // Match by phone only — role check removed so any account can login to any app
-    const { rows } = await pool.query('SELECT * FROM users WHERE phone=$1 AND is_active=1', [phone]);
+    const { rows } = await pool.query('SELECT * FROM users WHERE phone=$1 AND is_active=true', [phone]);
     const user = rows[0];
     if (!user || !user.password_hash) return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' });
     const valid = await bcrypt.compare(password, user.password_hash);
@@ -174,7 +174,7 @@ router.post('/admin/create-user', auth, async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
     const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     const { rows } = await pool.query(
-      `INSERT INTO users (name, phone, password_hash, role, city, referral_code, is_verified) VALUES ($1,$2,$3,$4,$5,$6,1) RETURNING *`,
+      `INSERT INTO users (name, phone, password_hash, role, city, referral_code, is_verified) VALUES ($1,$2,$3,$4,$5,$6, true) RETURNING *`,
       [name, phone, hash, role, city || null, referralCode]
     );
     res.status(201).json({ success: true, user: sanitizeUser(rows[0]) });

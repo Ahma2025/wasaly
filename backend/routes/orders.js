@@ -1,4 +1,4 @@
-const router = require('express').Router();
+﻿const router = require('express').Router();
 const pool = require('../config/database');
 const { auth } = require('../middleware/auth');
 const { saveNotification, notifyUser, Notify, sendFCM, getUserTokens } = require('../utils/notifications');
@@ -19,7 +19,7 @@ async function getDeliveryFee(restaurantLat, restaurantLng, deliveryLat, deliver
     const distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 
     const { rows: zones } = await pool.query(
-      'SELECT * FROM delivery_zones WHERE is_active=1 AND min_km <= $1 AND max_km > $1 ORDER BY min_km LIMIT 1',
+      'SELECT * FROM delivery_zones WHERE is_active=true AND min_km <= $1 AND max_km > $1 ORDER BY min_km LIMIT 1',
       [distKm]
     );
     return zones[0]?.price || 5;
@@ -31,7 +31,7 @@ async function assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, ex
   try {
     let q = `SELECT d.*, u.name, u.phone, u.fcm_token FROM drivers d
              JOIN users u ON d.user_id=u.id
-             WHERE d.is_online=1 AND d.is_busy=0`;
+             WHERE d.is_online=true AND d.is_busy=false`;
     if (excludeDriverIds.length > 0) {
       q += ` AND d.user_id NOT IN (${excludeDriverIds.join(',')})`;
     }
@@ -84,7 +84,7 @@ router.post('/', auth, async (req, res) => {
     } = req.body;
 
     const { rows: restaurants } = await pool.query(
-      'SELECT * FROM restaurants WHERE id=$1 AND is_active=1', [restaurant_id]
+      'SELECT * FROM restaurants WHERE id=$1 AND is_active=true', [restaurant_id]
     );
     if (!restaurants[0]) return res.status(400).json({ success: false, message: 'المطعم غير متاح' });
     const restaurant = restaurants[0];
@@ -93,7 +93,7 @@ router.post('/', auth, async (req, res) => {
     const orderItems = [];
     for (const item of items) {
       const { rows: menuItems } = await pool.query(
-        'SELECT * FROM menu_items WHERE id=$1 AND is_available=1', [item.id]
+        'SELECT * FROM menu_items WHERE id=$1 AND is_available=true', [item.id]
       );
       if (!menuItems[0]) return res.status(400).json({ success: false, message: `الصنف ${item.id} غير متاح` });
       const mi = menuItems[0];
@@ -110,8 +110,8 @@ router.post('/', auth, async (req, res) => {
     let discount = 0;
     if (coupon_code) {
       const { rows: coupons } = await pool.query(
-        `SELECT * FROM coupons WHERE code=$1 AND is_active=1 AND min_order <= $2
-         AND (expires_at IS NULL OR expires_at > datetime('now'))
+        `SELECT * FROM coupons WHERE code=$1 AND is_active=true AND min_order <= $2
+         AND (expires_at IS NULL OR expires_at > NOW())
          AND (usage_limit IS NULL OR usage_count < usage_limit)`,
         [coupon_code, subtotal]
       );
@@ -225,7 +225,7 @@ router.patch('/:id/confirm', auth, async (req, res) => {
     if (!order) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
 
     await pool.query(
-      `UPDATE orders SET status='confirmed', restaurant_accepted_at=datetime('now'), updated_at=datetime('now') WHERE id=$1`,
+      `UPDATE orders SET status='confirmed', restaurant_accepted_at=NOW(), updated_at=NOW() WHERE id=$1`,
       [order.id]
     );
 
@@ -261,15 +261,15 @@ router.patch('/:id/status', auth, async (req, res) => {
       cancelled: 'cancelled_at'
     };
 
-    let setClause = `status=$1, updated_at=datetime('now')`;
+    let setClause = `status=$1, updated_at=NOW()`;
     const params = [status, order.id];
     if (timeFields[status]) {
-      setClause += `, ${timeFields[status]}=datetime('now')`;
+      setClause += `, ${timeFields[status]}=NOW()`;
     }
     if (status === 'delivered') {
-      setClause += `, actual_delivery_time=datetime('now'), payment_status='paid'`;
+      setClause += `, actual_delivery_time=NOW(), payment_status='paid'`;
       // Free up driver
-      await pool.query('UPDATE drivers SET is_busy=0 WHERE user_id=$1', [order.driver_id]);
+      await pool.query('UPDATE drivers SET is_busy=false WHERE user_id=$1', [order.driver_id]);
       // Add earnings to driver
       await pool.query('UPDATE drivers SET wallet_balance=wallet_balance+$1 WHERE user_id=$2', [order.delivery_fee, order.driver_id]);
     }
@@ -308,10 +308,10 @@ router.post('/:id/accept', auth, async (req, res) => {
     // Only update if still 'confirmed' (avoid double-update)
     if (order.status === 'confirmed') {
       await pool.query(
-        `UPDATE orders SET status='preparing', driver_assigned_at=datetime('now'), updated_at=datetime('now') WHERE id=$1`,
+        `UPDATE orders SET status='preparing', driver_assigned_at=NOW(), updated_at=NOW() WHERE id=$1`,
         [req.params.id]
       );
-      await pool.query('UPDATE drivers SET is_busy=1 WHERE user_id=$1', [req.user.id]);
+      await pool.query('UPDATE drivers SET is_busy=true WHERE user_id=$1', [req.user.id]);
 
       // Notifications — don't let these fail the whole request
       try {
@@ -363,11 +363,11 @@ router.patch('/:id/cancel', auth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'لا يمكن إلغاء الطلب في هذه المرحلة' });
     }
     await pool.query(
-      `UPDATE orders SET status='cancelled', cancel_reason=$1, cancelled_at=datetime('now') WHERE id=$2`,
+      `UPDATE orders SET status='cancelled', cancel_reason=$1, cancelled_at=NOW() WHERE id=$2`,
       [reason || '', order.id]
     );
     if (order.driver_id) {
-      await pool.query('UPDATE drivers SET is_busy=0 WHERE user_id=$1', [order.driver_id]);
+      await pool.query('UPDATE drivers SET is_busy=false WHERE user_id=$1', [order.driver_id]);
     }
     res.json({ success: true });
   } catch (e) {

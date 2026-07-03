@@ -1,4 +1,4 @@
-const router = require('express').Router();
+﻿const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, driverOnly, adminOnly } = require('../middleware/auth');
 const { notifyUser, saveNotification } = require('../utils/notifications');
@@ -9,7 +9,7 @@ router.patch('/status', auth, driverOnly, async (req, res) => {
     const { is_online, lat, lng } = req.body;
     await pool.query(
       'UPDATE drivers SET is_online=$1, current_lat=$2, current_lng=$3, lat=$2, lng=$3 WHERE user_id=$4',
-      [is_online ? 1 : 0, lat || null, lng || null, req.user.id]
+      [is_online ? true : false, lat || null, lng || null, req.user.id]
     );
     res.json({ success: true });
   } catch (e) {
@@ -81,14 +81,14 @@ router.get('/earnings', auth, driverOnly, async (req, res) => {
     const { rows: stats } = await pool.query(
       `SELECT COUNT(*) as deliveries, COALESCE(SUM(delivery_fee),0) as earnings
        FROM orders WHERE driver_id=$1 AND status='delivered'
-       AND delivered_at > datetime('now', '${interval}')`,
+       AND delivered_at > NOW() - INTERVAL '1 day'`,
       [req.user.id]
     );
     const { rows: daily } = await pool.query(
-      `SELECT strftime('%Y-%m-%d', delivered_at) as date, COUNT(*) as count, COALESCE(SUM(delivery_fee),0) as earnings
+      `SELECT TO_CHAR(delivered_at, 'YYYY-MM-DD') as date, COUNT(*) as count, COALESCE(SUM(delivery_fee),0) as earnings
        FROM orders WHERE driver_id=$1 AND status='delivered'
-       AND delivered_at > datetime('now', '-30 days')
-       GROUP BY strftime('%Y-%m-%d', delivered_at) ORDER BY date DESC`,
+       AND delivered_at > NOW() - INTERVAL '30 days'
+       GROUP BY TO_CHAR(delivered_at, 'YYYY-MM-DD') ORDER BY date DESC`,
       [req.user.id]
     );
     const { rows: driver } = await pool.query(
@@ -168,7 +168,7 @@ router.post('/', auth, adminOnly, async (req, res) => {
 router.delete('/:id', auth, adminOnly, async (req, res) => {
   try {
     await pool.query('DELETE FROM drivers WHERE user_id=$1', [req.params.id]);
-    await pool.query("UPDATE users SET is_active=0, role='customer' WHERE id=$1", [req.params.id]);
+    await pool.query("UPDATE users SET is_active=false, role='customer' WHERE id=$1", [req.params.id]);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });

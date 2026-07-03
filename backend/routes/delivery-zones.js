@@ -1,11 +1,11 @@
-const router = require('express').Router();
+﻿const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, adminOnly } = require('../middleware/auth');
 
 // Get all zones
 router.get('/', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM delivery_zones WHERE is_active=1 ORDER BY min_km');
+    const { rows } = await pool.query('SELECT * FROM delivery_zones WHERE is_active=true ORDER BY min_km');
     res.json({ success: true, data: rows });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -27,7 +27,7 @@ router.get('/calculate', async (req, res) => {
     const distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 
     const { rows } = await pool.query(
-      'SELECT * FROM delivery_zones WHERE is_active=1 AND min_km <= $1 AND max_km > $1 ORDER BY min_km LIMIT 1',
+      'SELECT * FROM delivery_zones WHERE is_active=true AND min_km <= $1 AND max_km > $1 ORDER BY min_km LIMIT 1',
       [distKm]
     );
     res.json({ success: true, data: { fee: rows[0]?.price || 5, distance_km: distKm.toFixed(2), zone: rows[0] } });

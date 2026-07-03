@@ -1,4 +1,4 @@
-const router = require('express').Router();
+﻿const router = require('express').Router();
 const pool = require('../config/database');
 const { auth } = require('../middleware/auth');
 
@@ -42,12 +42,12 @@ router.post('/addresses', auth, async (req, res) => {
   try {
     const { label, title, address, lat, lng, floor, notes } = req.body;
     if (req.body.is_default) {
-      await pool.query('UPDATE addresses SET is_default=0 WHERE user_id=$1', [req.user.id]);
+      await pool.query('UPDATE addresses SET is_default=false WHERE user_id=$1', [req.user.id]);
     }
     const { rows } = await pool.query(
       `INSERT INTO addresses (user_id, label, title, address, lat, lng, floor, notes, is_default)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [req.user.id, label || 'منزل', title || address, address, lat || null, lng || null, floor || null, notes || null, req.body.is_default ? 1 : 0]
+      [req.user.id, label || 'منزل', title || address, address, lat || null, lng || null, floor || null, notes || null, req.body.is_default ? true : false]
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (e) {
@@ -59,11 +59,11 @@ router.post('/addresses', auth, async (req, res) => {
 router.put('/addresses/:id', auth, async (req, res) => {
   try {
     const { label, title, address, lat, lng, floor, notes, is_default } = req.body;
-    if (is_default) await pool.query('UPDATE addresses SET is_default=0 WHERE user_id=$1', [req.user.id]);
+    if (is_default) await pool.query('UPDATE addresses SET is_default=false WHERE user_id=$1', [req.user.id]);
     const { rows } = await pool.query(
       `UPDATE addresses SET label=$1, title=$2, address=$3, lat=$4, lng=$5, floor=$6, notes=$7, is_default=$8
        WHERE id=$9 AND user_id=$10 RETURNING *`,
-      [label, title, address, lat, lng, floor, notes, is_default ? 1 : 0, req.params.id, req.user.id]
+      [label, title, address, lat, lng, floor, notes, is_default ? true : false, req.params.id, req.user.id]
     );
     res.json({ success: true, data: rows[0] });
   } catch (e) {
