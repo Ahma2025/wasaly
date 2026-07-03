@@ -260,23 +260,13 @@ if (!process.env.DATABASE_URL) {
     console.log('✅ Delivery zones created');
   }
 
-  // Clean slate: delete everything and start fresh
-  const hash123456_seed = bcrypt.hashSync('123456', 10);
+  // Wipe everything clean — no seed accounts
   db.prepare('DELETE FROM users').run();
   db.prepare('DELETE FROM restaurants').run();
   db.prepare('DELETE FROM menu_items').run();
   db.prepare('DELETE FROM menu_categories').run();
   db.prepare('DELETE FROM orders').run();
-  console.log('🗑️ Full clean slate done');
-  db.prepare(`INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)`)
-    .run('Admin', '05999039704', hash123456_seed, 'admin', 'ADM001');
-  db.prepare(`INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)`)
-    .run('Customer', '05999039701', hash123456_seed, 'customer', 'CUST01');
-  db.prepare(`INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)`)
-    .run('Driver', '05999039702', hash123456_seed, 'driver', 'DRV001');
-  db.prepare(`INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)`)
-    .run('Restaurant', '05999039703', hash123456_seed, 'restaurant', 'REST001');
-  console.log('✅ 4 clean accounts created: 05999039701-704 / 123456');
+  console.log('🗑️ Database wiped clean');
 
   // Seed categories if not exist
   if (!db.prepare("SELECT id FROM categories LIMIT 1").get()) {
