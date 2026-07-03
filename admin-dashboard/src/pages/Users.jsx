@@ -2,10 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
 
-const roleLabel = { customer: 'زبون', restaurant_owner: 'مطعم', driver: 'مندوب', admin: 'مدير' };
+const roleLabel = { customer: 'زبون', restaurant: 'مطعم', driver: 'مندوب', admin: 'مدير' };
 const roleColor = {
   customer: 'bg-blue-100 text-blue-700',
-  restaurant_owner: 'bg-green-100 text-green-700',
+  restaurant: 'bg-green-100 text-green-700',
   driver: 'bg-orange-100 text-orange-700',
   admin: 'bg-purple-100 text-purple-700'
 };
@@ -73,7 +73,7 @@ export default function Users() {
           <h2 className="font-bold text-base text-gray-800">إنشاء حساب جديد</h2>
           <select className="w-full border rounded-xl px-3 py-2.5 text-sm bg-white" value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}>
             <option value="driver">مندوب توصيل</option>
-            <option value="restaurant_owner">صاحب مطعم</option>
+            <option value="restaurant">صاحب مطعم</option>
           </select>
           <input className="w-full border rounded-xl px-3 py-2.5 text-sm" placeholder="الاسم الكامل *" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required />
           <input className="w-full border rounded-xl px-3 py-2.5 text-sm" placeholder="رقم الهاتف *" value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} required />
@@ -96,7 +96,7 @@ export default function Users() {
         <select className="border rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400" value={role} onChange={e => setRole(e.target.value)}>
           <option value="">الكل</option>
           <option value="customer">زبائن</option>
-          <option value="restaurant_owner">مطاعم</option>
+          <option value="restaurant">مطاعم</option>
           <option value="driver">مناديب</option>
           <option value="admin">مدراء</option>
         </select>

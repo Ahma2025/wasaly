@@ -15,13 +15,13 @@ export default function Login() {
     setLoading(true);
     try {
       const data = await api.post('/auth/login-password', { ...form, phone: normalizePhone(form.phone) });
-      if (!['restaurant', 'admin'].includes(data.user?.role)) {
+      if (!['restaurant', 'restaurant_owner', 'admin'].includes(data.user?.role)) {
         toast.error('هذا الحساب ليس حساب مطعم');
         return;
       }
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
-      if (data.user.role === 'restaurant') {
+      if (['restaurant', 'restaurant_owner'].includes(data.user.role)) {
         try {
           const rData = await api.get(`/restaurants?owner_id=${data.user.id}`);
           if (rData.data?.[0]) localStorage.setItem('restaurant', JSON.stringify(rData.data[0]));
