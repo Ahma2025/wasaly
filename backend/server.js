@@ -84,10 +84,16 @@ app.use('/api/webpush', require('./routes/webpush').router);
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
 
 // Debug push notifications from restaurant portal
-app.post('/debug-push', (req, res) => {
-  console.log('[DEBUG-PUSH]', req.body?.msg);
-  res.json({ ok: true });
-});
+const debugLogs = [];
+function addDebugLog(msg) {
+  debugLogs.push({ time: new Date().toISOString(), msg });
+  if (debugLogs.length > 50) debugLogs.shift();
+  console.log('[DEBUG-PUSH]', msg);
+}
+app.post('/debug-push', (req, res) => { addDebugLog(req.body?.msg); res.json({ ok: true }); });
+app.post('/api/debug-push', (req, res) => { addDebugLog(req.body?.msg); res.json({ ok: true }); });
+app.get('/debug-logs', (req, res) => res.json({ logs: debugLogs.slice(-20).reverse() }));
+app.get('/api/debug-logs', (req, res) => res.json({ logs: debugLogs.slice(-20).reverse() }));
 
 // Debug: test push notification to a user
 app.get('/test-push/:userId', async (req, res) => {
