@@ -69,26 +69,46 @@ async function setupFirebaseWebPush() {
   }
 }
 
-// ─── Native Capacitor push (fallback) ─────────────────────────────────────
+// ─── Native Capacitor push ────────────────────────────────────────────────
 async function setupNativePush() {
-  const { PushNotifications } = await import('@capacitor/push-notifications');
-  const perm = await PushNotifications.requestPermissions();
-  if (perm.receive !== 'granted') return;
+  try {
+    const { PushNotifications } = await import('@capacitor/push-notifications');
 
-  PushNotifications.addListener('registration', async (token) => {
-    try {
-      await api.post('/users/fcm-token', { token: token.value });
-      console.log('[PUSH] Native token saved');
-    } catch (e) {
-      console.error('[PUSH] Native save failed:', e.message);
+    // Send debug status to backend so we can see it in logs
+    const dbg = async (msg) => {
+      try { await api.post('/debug-push', { msg }); } catch {}
+    };
+
+    await dbg('setupNativePush started');
+
+    const perm = await PushNotifications.requestPermissions();
+    await dbg(`permission: ${JSON.stringify(perm)}`);
+
+    if (perm.receive !== 'granted') {
+      await dbg('permission not granted, exit');
+      return;
     }
-  });
 
-  PushNotifications.addListener('registrationError', (err) => {
-    console.error('[PUSH] Native error:', JSON.stringify(err));
-  });
+    PushNotifications.addListener('registration', async (token) => {
+      await dbg(`token received: ${token.value?.slice(0,20)}... len=${token.value?.length}`);
+      try {
+        await api.post('/users/fcm-token', { token: token.value });
+        await dbg('token saved OK');
+      } catch (e) {
+        await dbg(`token save failed: ${e.message}`);
+      }
+    });
 
-  await PushNotifications.register();
+    PushNotifications.addListener('registrationError', async (err) => {
+      await dbg(`registrationError: ${JSON.stringify(err)}`);
+    });
+
+    await PushNotifications.register();
+    await dbg('register() called');
+
+  } catch (e) {
+    try { await api.post('/debug-push', { msg: `setupNativePush error: ${e.message}` }); } catch {}
+  }
 }
 
 // ─── Browser Web Push (desktop) ───────────────────────────────────────────

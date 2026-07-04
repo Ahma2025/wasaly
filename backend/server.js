@@ -83,6 +83,12 @@ app.use('/api/webpush', require('./routes/webpush').router);
 
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
 
+// Debug push notifications from restaurant portal
+app.post('/debug-push', (req, res) => {
+  console.log('[DEBUG-PUSH]', req.body?.msg);
+  res.json({ ok: true });
+});
+
 // Debug: test push notification to a user
 app.get('/test-push/:userId', async (req, res) => {
   try {
