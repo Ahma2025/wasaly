@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { View, ActivityIndicator, Text, ScrollView } from 'react-native';
+import { View, ActivityIndicator, Text, ScrollView, Keyboard, Platform, TouchableOpacity, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Notifications from 'expo-notifications';
 import SplashScreen from './src/components/SplashScreen';
@@ -89,6 +89,42 @@ function AppNavigator() {
   );
 }
 
+function KeyboardToolbar() {
+  const [kbHeight, setKbHeight] = useState(0);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const showEv = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEv = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEv, e => { setKbHeight(e.endCoordinates.height); setVisible(true); });
+    const hide = Keyboard.addListener(hideEv, () => setVisible(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+
+  if (!visible || Platform.OS !== 'ios') return null;
+
+  return (
+    <View style={[styles.kbToolbar, { bottom: kbHeight }]}>
+      <View style={{ flex: 1 }} />
+      <TouchableOpacity onPress={() => Keyboard.dismiss()} style={styles.doneBtn} hitSlop={{ top: 10, bottom: 10, left: 20, right: 20 }}>
+        <Text style={styles.doneBtnText}>تم</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  kbToolbar: {
+    position: 'absolute', left: 0, right: 0, height: 44,
+    backgroundColor: '#D1D5DB',
+    borderTopWidth: 0.5, borderTopColor: '#A0A0A8',
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8,
+    zIndex: 9999,
+  },
+  doneBtn: { paddingHorizontal: 8, paddingVertical: 6 },
+  doneBtnText: { color: '#007AFF', fontSize: 17, fontWeight: '600' },
+});
+
 function MainApp() {
   const navigationRef = useRef(null);
 
@@ -109,6 +145,7 @@ function MainApp() {
           <NavigationContainer ref={navigationRef}>
             <AppNavigator />
           </NavigationContainer>
+          <KeyboardToolbar />
         </CartProvider>
       </AuthProvider>
     </GestureHandlerRootView>

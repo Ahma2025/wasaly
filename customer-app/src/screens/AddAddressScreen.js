@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, StyleSheet, TouchableOpacity,
-  Alert, ScrollView, Keyboard, Platform, Animated
+  Alert, ScrollView, Keyboard, Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -18,20 +18,6 @@ export default function AddAddressScreen({ navigation }) {
   const [saving, setSaving] = useState(false);
   const [coords, setCoords] = useState(null);
   const [locating, setLocating] = useState(false);
-  const [kbHeight, setKbHeight] = useState(0);
-  const [kbVisible, setKbVisible] = useState(false);
-
-  useEffect(() => {
-    const showEv = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEv = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const show = Keyboard.addListener(showEv, e => {
-      setKbHeight(e.endCoordinates.height);
-      setKbVisible(true);
-    });
-    const hide = Keyboard.addListener(hideEv, () => setKbVisible(false));
-    return () => { show.remove(); hide.remove(); };
-  }, []);
-
   const useMyLocation = async () => {
     setLocating(true);
     try {
@@ -119,15 +105,6 @@ export default function AddAddressScreen({ navigation }) {
         <View style={{ height: 30 }} />
       </ScrollView>
 
-      {/* iOS-style keyboard toolbar */}
-      {kbVisible && (
-        <View style={[styles.kbToolbar, { bottom: kbHeight }]}>
-          <View style={{ flex: 1 }} />
-          <TouchableOpacity onPress={() => Keyboard.dismiss()} style={styles.doneBtn}>
-            <Text style={styles.doneBtnText}>تم</Text>
-          </TouchableOpacity>
-        </View>
-      )}
     </View>
   );
 }
@@ -149,12 +126,4 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 12, padding: 12, fontSize: 14, backgroundColor: '#FFF', color: COLORS.text },
   saveBtn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, alignItems: 'center', marginTop: 8 },
   saveBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
-  kbToolbar: {
-    position: 'absolute', left: 0, right: 0, height: 44,
-    backgroundColor: '#D1D5DB',
-    borderTopWidth: 0.5, borderTopColor: '#A0A0A8',
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8,
-  },
-  doneBtn: { paddingHorizontal: 8, paddingVertical: 6 },
-  doneBtnText: { color: '#007AFF', fontSize: 17, fontWeight: '600' },
 });
