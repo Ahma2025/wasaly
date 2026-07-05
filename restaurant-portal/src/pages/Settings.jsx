@@ -158,19 +158,30 @@ export default function Settings() {
   return (
     <div className="p-4 space-y-4" dir="rtl">
 
-      {/* Keyboard dismiss button — fixed above keyboard */}
+      {/* iOS-style keyboard toolbar — fixed above keyboard */}
       {kbVisible && (
         <div
-          className="fixed left-0 right-0 z-[9999] flex justify-center"
-          style={{ bottom: kbHeight > 0 ? kbHeight : 260 }}
+          className="fixed left-0 right-0 z-[9999] flex items-center justify-end px-3"
+          style={{
+            bottom: kbHeight > 0 ? kbHeight : 260,
+            height: 44,
+            background: '#d1d5db',
+            borderTop: '0.5px solid #a0a0a8',
+          }}
         >
           <button
             onTouchStart={dismissKeyboard}
             onMouseDown={dismissKeyboard}
-            className="bg-orange-500 text-white px-10 py-3 rounded-full font-black text-base shadow-2xl shadow-orange-400"
-            style={{ WebkitTapHighlightColor: 'transparent', touchAction: 'none' }}
+            style={{
+              color: '#007AFF',
+              fontWeight: '600',
+              fontSize: 17,
+              WebkitTapHighlightColor: 'transparent',
+              touchAction: 'none',
+              padding: '0 8px',
+            }}
           >
-            ✓ تم
+            تم
           </button>
         </div>
       )}

@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ScrollView } from 'react-native';
+import {
+  View, Text, TextInput, StyleSheet, TouchableOpacity,
+  Alert, ScrollView, InputAccessoryView, Keyboard, Platform
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import api from '../utils/api';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
 const LABELS = ['المنزل', 'العمل', 'أخرى'];
+const KB_ACCESSORY_ID = 'add-address-kb';
 
 export default function AddAddressScreen({ navigation }) {
   const [label, setLabel] = useState('المنزل');
@@ -41,8 +45,24 @@ export default function AddAddressScreen({ navigation }) {
     finally { setSaving(false); }
   };
 
+  const inputProps = Platform.OS === 'ios'
+    ? { inputAccessoryViewID: KB_ACCESSORY_ID }
+    : {};
+
   return (
     <View style={styles.container}>
+      {/* Native iOS keyboard toolbar */}
+      {Platform.OS === 'ios' && (
+        <InputAccessoryView nativeID={KB_ACCESSORY_ID}>
+          <View style={styles.kbToolbar}>
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity onPress={() => Keyboard.dismiss()} style={styles.doneBtn}>
+              <Text style={styles.doneBtnText}>تم</Text>
+            </TouchableOpacity>
+          </View>
+        </InputAccessoryView>
+      )}
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -84,19 +104,33 @@ export default function AddAddressScreen({ navigation }) {
             value={details} onChangeText={setDetails}
             multiline numberOfLines={3}
             textAlign="right"
+            {...inputProps}
           />
         </View>
 
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Text style={styles.fieldLabel}>الطابق</Text>
-            <TextInput style={styles.input} placeholder="مثال: 3" value={floor} onChangeText={setFloor} keyboardType="number-pad" textAlign="right" />
+            <TextInput
+              style={styles.input}
+              placeholder="مثال: 3"
+              value={floor} onChangeText={setFloor}
+              keyboardType="number-pad"
+              textAlign="right"
+              {...inputProps}
+            />
           </View>
         </View>
 
         <View>
           <Text style={styles.fieldLabel}>ملاحظات للسائق</Text>
-          <TextInput style={styles.input} placeholder="مثال: اتصل عند الوصول..." value={notes} onChangeText={setNotes} multiline textAlign="right" />
+          <TextInput
+            style={styles.input}
+            placeholder="مثال: اتصل عند الوصول..."
+            value={notes} onChangeText={setNotes}
+            multiline textAlign="right"
+            {...inputProps}
+          />
         </View>
 
         <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.7 }]} onPress={save} disabled={saving}>
@@ -126,4 +160,16 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 12, padding: 12, fontSize: 14, backgroundColor: '#FFF', color: COLORS.text },
   saveBtn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, alignItems: 'center', marginTop: 8 },
   saveBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
+  // iOS keyboard toolbar — same as native
+  kbToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D1D5DB',
+    borderTopWidth: 0.5,
+    borderTopColor: '#A0A0A8',
+    height: 44,
+    paddingHorizontal: 8,
+  },
+  doneBtn: { paddingHorizontal: 8, paddingVertical: 6 },
+  doneBtnText: { color: '#007AFF', fontSize: 17, fontWeight: '600' },
 });
