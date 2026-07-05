@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, StyleSheet, TouchableOpacity,
-  Alert, ScrollView, InputAccessoryView, Keyboard, Platform
+  Alert, ScrollView, Keyboard, Platform, Animated
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -9,7 +9,6 @@ import api from '../utils/api';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
 const LABELS = ['المنزل', 'العمل', 'أخرى'];
-const KB_ACCESSORY_ID = 'add-address-kb';
 
 export default function AddAddressScreen({ navigation }) {
   const [label, setLabel] = useState('المنزل');
@@ -19,6 +18,19 @@ export default function AddAddressScreen({ navigation }) {
   const [saving, setSaving] = useState(false);
   const [coords, setCoords] = useState(null);
   const [locating, setLocating] = useState(false);
+  const [kbHeight, setKbHeight] = useState(0);
+  const [kbVisible, setKbVisible] = useState(false);
+
+  useEffect(() => {
+    const showEv = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEv = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEv, e => {
+      setKbHeight(e.endCoordinates.height);
+      setKbVisible(true);
+    });
+    const hide = Keyboard.addListener(hideEv, () => setKbVisible(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
 
   const useMyLocation = async () => {
     setLocating(true);
@@ -45,24 +57,8 @@ export default function AddAddressScreen({ navigation }) {
     finally { setSaving(false); }
   };
 
-  const inputProps = Platform.OS === 'ios'
-    ? { inputAccessoryViewID: KB_ACCESSORY_ID }
-    : {};
-
   return (
     <View style={styles.container}>
-      {/* Native iOS keyboard toolbar */}
-      {Platform.OS === 'ios' && (
-        <InputAccessoryView nativeID={KB_ACCESSORY_ID}>
-          <View style={styles.kbToolbar}>
-            <View style={{ flex: 1 }} />
-            <TouchableOpacity onPress={() => Keyboard.dismiss()} style={styles.doneBtn}>
-              <Text style={styles.doneBtnText}>تم</Text>
-            </TouchableOpacity>
-          </View>
-        </InputAccessoryView>
-      )}
-
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -73,7 +69,6 @@ export default function AddAddressScreen({ navigation }) {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
-        {/* Location Button */}
         <TouchableOpacity style={styles.locBtn} onPress={useMyLocation} disabled={locating}>
           <Ionicons name="locate-outline" size={22} color={COLORS.primary} />
           <View style={{ flex: 1 }}>
@@ -83,7 +78,6 @@ export default function AddAddressScreen({ navigation }) {
           {coords && <Ionicons name="checkmark-circle" size={22} color={COLORS.primary} />}
         </TouchableOpacity>
 
-        {/* Label Selector */}
         <View>
           <Text style={styles.sectionTitle}>نوع العنوان</Text>
           <View style={styles.labelRow}>
@@ -95,50 +89,45 @@ export default function AddAddressScreen({ navigation }) {
           </View>
         </View>
 
-        {/* Details */}
         <View>
           <Text style={styles.fieldLabel}>تفاصيل العنوان *</Text>
           <TextInput
             style={[styles.input, { minHeight: 70, textAlignVertical: 'top' }]}
             placeholder="الشارع، المبنى، المنطقة..."
             value={details} onChangeText={setDetails}
-            multiline numberOfLines={3}
-            textAlign="right"
-            {...inputProps}
+            multiline numberOfLines={3} textAlign="right"
           />
         </View>
 
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Text style={styles.fieldLabel}>الطابق</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="مثال: 3"
-              value={floor} onChangeText={setFloor}
-              keyboardType="number-pad"
-              textAlign="right"
-              {...inputProps}
-            />
+            <TextInput style={styles.input} placeholder="مثال: 3"
+              value={floor} onChangeText={setFloor} keyboardType="number-pad" textAlign="right" />
           </View>
         </View>
 
         <View>
           <Text style={styles.fieldLabel}>ملاحظات للسائق</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="مثال: اتصل عند الوصول..."
-            value={notes} onChangeText={setNotes}
-            multiline textAlign="right"
-            {...inputProps}
-          />
+          <TextInput style={styles.input} placeholder="مثال: اتصل عند الوصول..."
+            value={notes} onChangeText={setNotes} multiline textAlign="right" />
         </View>
 
         <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.7 }]} onPress={save} disabled={saving}>
           <Text style={styles.saveBtnText}>{saving ? 'جاري الحفظ...' : 'حفظ العنوان'}</Text>
         </TouchableOpacity>
-
         <View style={{ height: 30 }} />
       </ScrollView>
+
+      {/* iOS-style keyboard toolbar */}
+      {kbVisible && (
+        <View style={[styles.kbToolbar, { bottom: kbHeight }]}>
+          <View style={{ flex: 1 }} />
+          <TouchableOpacity onPress={() => Keyboard.dismiss()} style={styles.doneBtn}>
+            <Text style={styles.doneBtnText}>تم</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
@@ -160,15 +149,11 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 12, padding: 12, fontSize: 14, backgroundColor: '#FFF', color: COLORS.text },
   saveBtn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, alignItems: 'center', marginTop: 8 },
   saveBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
-  // iOS keyboard toolbar — same as native
   kbToolbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    position: 'absolute', left: 0, right: 0, height: 44,
     backgroundColor: '#D1D5DB',
-    borderTopWidth: 0.5,
-    borderTopColor: '#A0A0A8',
-    height: 44,
-    paddingHorizontal: 8,
+    borderTopWidth: 0.5, borderTopColor: '#A0A0A8',
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8,
   },
   doneBtn: { paddingHorizontal: 8, paddingVertical: 6 },
   doneBtnText: { color: '#007AFF', fontSize: 17, fontWeight: '600' },
