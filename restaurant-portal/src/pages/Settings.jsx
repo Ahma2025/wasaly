@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
 
@@ -30,48 +30,7 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
-  const [kbVisible, setKbVisible] = useState(false);
-  const [kbHeight, setKbHeight] = useState(0);
   const logoInputRef = useRef(null);
-  const blurTimer = useRef(null);
-
-  // Detect keyboard via visualViewport (most reliable on iOS)
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const onVVChange = () => {
-      const diff = window.innerHeight - vv.height;
-      if (diff > 80) {
-        setKbVisible(true);
-        setKbHeight(diff);
-      } else {
-        setKbVisible(false);
-        setKbHeight(0);
-      }
-    };
-    vv.addEventListener('resize', onVVChange);
-    vv.addEventListener('scroll', onVVChange);
-    return () => {
-      vv.removeEventListener('resize', onVVChange);
-      vv.removeEventListener('scroll', onVVChange);
-    };
-  }, []);
-
-  const onInputFocus = useCallback(() => {
-    clearTimeout(blurTimer.current);
-    setKbVisible(true);
-  }, []);
-
-  const onInputBlur = useCallback(() => {
-    blurTimer.current = setTimeout(() => setKbVisible(false), 200);
-  }, []);
-
-  const dismissKeyboard = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    document.activeElement?.blur();
-    setKbVisible(false);
-  }, []);
 
   useEffect(() => {
     if (restaurant.id) {
@@ -153,38 +112,8 @@ export default function Settings() {
     );
   };
 
-  const inputProps = { onFocus: onInputFocus, onBlur: onInputBlur };
-
   return (
     <div className="p-4 space-y-4" dir="rtl">
-
-      {/* iOS-style keyboard toolbar — fixed above keyboard */}
-      {kbVisible && (
-        <div
-          className="fixed left-0 right-0 z-[9999] flex items-center justify-end px-3"
-          style={{
-            bottom: kbHeight > 0 ? kbHeight : 260,
-            height: 44,
-            background: '#d1d5db',
-            borderTop: '0.5px solid #a0a0a8',
-          }}
-        >
-          <button
-            onTouchStart={dismissKeyboard}
-            onMouseDown={dismissKeyboard}
-            style={{
-              color: '#007AFF',
-              fontWeight: '600',
-              fontSize: 17,
-              WebkitTapHighlightColor: 'transparent',
-              touchAction: 'none',
-              padding: '0 8px',
-            }}
-          >
-            تم
-          </button>
-        </div>
-      )}
 
       <h1 className="text-lg font-black text-gray-900">الإعدادات</h1>
 
@@ -244,27 +173,27 @@ export default function Settings() {
             <label className="text-xs font-bold text-gray-600">اسم المطعم</label>
             <input className="w-full border border-gray-200 rounded-xl p-3 text-sm mt-1"
               value={form.name_ar} onChange={e => setForm(f => ({ ...f, name_ar: e.target.value }))}
-              {...inputProps} />
+              />
           </div>
           <div>
             <label className="text-xs font-bold text-gray-600">وصف المطعم</label>
             <textarea className="w-full border border-gray-200 rounded-xl p-3 text-sm mt-1" rows={3}
               placeholder="وصف مختصر للمطعم ومميزاته..."
               value={form.description_ar} onChange={e => setForm(f => ({ ...f, description_ar: e.target.value }))}
-              {...inputProps} />
+              />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-bold text-gray-600">رقم الهاتف</label>
               <input className="w-full border border-gray-200 rounded-xl p-3 text-sm mt-1"
                 value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                {...inputProps} />
+                />
             </div>
             <div>
               <label className="text-xs font-bold text-gray-600">العنوان</label>
               <input className="w-full border border-gray-200 rounded-xl p-3 text-sm mt-1"
                 value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
-                {...inputProps} />
+                />
             </div>
           </div>
         </div>
@@ -305,31 +234,31 @@ export default function Settings() {
             <label className="text-xs font-bold text-gray-600">الحد الأدنى للطلب (₪)</label>
             <input className="w-full border border-gray-200 rounded-xl p-3 text-sm mt-1" type="number"
               value={form.min_order} onChange={e => setForm(f => ({ ...f, min_order: e.target.value }))}
-              {...inputProps} />
+              />
           </div>
           <div>
             <label className="text-xs font-bold text-gray-600">وقت التحضير من (دق)</label>
             <input className="w-full border border-gray-200 rounded-xl p-3 text-sm mt-1" type="number"
               value={form.delivery_time_min} onChange={e => setForm(f => ({ ...f, delivery_time_min: e.target.value }))}
-              {...inputProps} />
+              />
           </div>
           <div>
             <label className="text-xs font-bold text-gray-600">وقت التحضير حتى (دق)</label>
             <input className="w-full border border-gray-200 rounded-xl p-3 text-sm mt-1" type="number"
               value={form.delivery_time_max} onChange={e => setForm(f => ({ ...f, delivery_time_max: e.target.value }))}
-              {...inputProps} />
+              />
           </div>
           <div>
             <label className="text-xs font-bold text-gray-600">ساعة الافتتاح</label>
             <input className="w-full border border-gray-200 rounded-xl p-3 text-sm mt-1" type="time"
               value={form.opens_at} onChange={e => setForm(f => ({ ...f, opens_at: e.target.value }))}
-              {...inputProps} />
+              />
           </div>
           <div className="col-span-2">
             <label className="text-xs font-bold text-gray-600">ساعة الإغلاق</label>
             <input className="w-full border border-gray-200 rounded-xl p-3 text-sm mt-1" type="time"
               value={form.closes_at} onChange={e => setForm(f => ({ ...f, closes_at: e.target.value }))}
-              {...inputProps} />
+              />
           </div>
         </div>
       </div>
