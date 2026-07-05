@@ -324,7 +324,15 @@ router.post('/notifications/broadcast', auth, adminOnly, async (req, res) => {
       );
     }
 
-    // FCM would be called here in production
+    const { sendFCM } = require('../utils/notifications');
+    const bundleMap = { customer: 'com.wasaly.customer', driver: 'com.wasaly.driver', restaurant: 'com.wasaly.restaurant' };
+    const bundleId = (target === 'role' && role) ? (bundleMap[role] || 'com.wasaly.customer') : 'com.wasaly.customer';
+    const tokens = users.map(u => u.fcm_token).filter(Boolean);
+    if (tokens.length > 0) {
+      const chunks = [];
+      for (let i = 0; i < tokens.length; i += 100) chunks.push(tokens.slice(i, i + 100));
+      for (const chunk of chunks) await sendFCM(chunk, title, body, { type: 'broadcast' }, bundleId);
+    }
     res.json({ success: true, recipients: users.length });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });

@@ -203,9 +203,11 @@ router.get('/:id', auth, async (req, res) => {
     const { rows: orders } = await pool.query(
       `SELECT o.*, r.name_ar as restaurant_name, r.logo, r.lat as restaurant_lat, r.lng as restaurant_lng,
               r.phone as restaurant_phone, u.name as driver_name, u.phone as driver_phone,
-              d.current_lat as driver_lat, d.current_lng as driver_lng, d.vehicle_type, d.vehicle_plate
+              d.current_lat as driver_lat, d.current_lng as driver_lng, d.vehicle_type, d.vehicle_plate,
+              cu.phone as customer_phone, cu.name as customer_name
        FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
        LEFT JOIN users u ON o.driver_id=u.id LEFT JOIN drivers d ON d.user_id=o.driver_id
+       LEFT JOIN users cu ON o.customer_id=cu.id
        WHERE o.id=$1`,
       [req.params.id]
     );
