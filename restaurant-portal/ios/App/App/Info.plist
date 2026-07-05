@@ -49,5 +49,9 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>نحتاج موقعك لتحديد موقع مطعمك على الخريطة</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>نحتاج موقعك لتحديد موقع مطعمك على الخريطة</string>
 </dict>
 </plist>

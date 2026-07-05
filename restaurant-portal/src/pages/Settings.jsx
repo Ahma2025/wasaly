@@ -2,6 +2,47 @@ import React, { useState, useEffect, useRef } from 'react';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
 
+// Compress image and return base64 — avoids Railway ephemeral filesystem issue
+function compressToBase64(file, maxPx = 600, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const ratio = Math.min(maxPx / img.width, maxPx / img.height, 1);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * ratio);
+      canvas.height = Math.round(img.height * ratio);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+// Hook: show floating "تم" button when keyboard is open on iOS
+function useKeyboardDone() {
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    const onFocus = e => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
+        setFocused(true);
+        setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 350);
+      }
+    };
+    const onBlur = () => setFocused(false);
+    document.addEventListener('focusin', onFocus);
+    document.addEventListener('focusout', onBlur);
+    return () => {
+      document.removeEventListener('focusin', onFocus);
+      document.removeEventListener('focusout', onBlur);
+    };
+  }, []);
+  const dismiss = () => { document.activeElement?.blur(); setFocused(false); };
+  return { focused, dismiss };
+}
+
 export default function Settings() {
   const [restaurant, setRestaurant] = useState(JSON.parse(localStorage.getItem('restaurant') || '{}'));
   const [form, setForm] = useState({
@@ -13,6 +54,7 @@ export default function Settings() {
   const [toggling, setToggling] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoInputRef = useRef(null);
+  const { focused, dismiss } = useKeyboardDone();
 
   useEffect(() => {
     if (restaurant.id) {
@@ -37,15 +79,14 @@ export default function Settings() {
     if (!file) return;
     setUploadingLogo(true);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const r = await api.post('/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      setForm(f => ({ ...f, logo: r.url }));
+      const base64 = await compressToBase64(file);
+      setForm(f => ({ ...f, logo: base64 }));
       toast.success('تم رفع الشعار ✅');
-    } catch (e) { toast.error('فشل رفع الصورة'); }
-    finally { setUploadingLogo(false); }
+    } catch (e) {
+      toast.error('فشل رفع الصورة');
+    } finally {
+      setUploadingLogo(false);
+    }
   };
 
   const save = async () => {
@@ -81,17 +122,34 @@ export default function Settings() {
 
   const detectLocation = () => {
     if (!navigator.geolocation) return toast.error('المتصفح لا يدعم الموقع');
+    toast('جاري تحديد موقعك...', { icon: '📡' });
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setForm(f => ({ ...f, lat: pos.coords.latitude.toFixed(6), lng: pos.coords.longitude.toFixed(6) }));
         toast.success('تم تحديد موقعك ✅');
       },
-      () => toast.error('فشل تحديد الموقع - تأكد من منح الإذن')
+      (err) => {
+        if (err.code === 1) toast.error('يرجى السماح للتطبيق بالوصول لموقعك من الإعدادات');
+        else toast.error('فشل تحديد الموقع، حاول مرة أخرى');
+      },
+      { timeout: 10000, enableHighAccuracy: true }
     );
   };
 
   return (
     <div className="p-4 space-y-4" dir="rtl">
+      {/* Floating keyboard dismiss button */}
+      {focused && (
+        <button
+          onMouseDown={e => { e.preventDefault(); dismiss(); }}
+          onTouchStart={e => { e.preventDefault(); dismiss(); }}
+          className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-orange-500 text-white px-8 py-3 rounded-full font-black text-base shadow-xl shadow-orange-300 flex items-center gap-2"
+          style={{ WebkitTapHighlightColor: 'transparent' }}
+        >
+          ✓ تم
+        </button>
+      )}
+
       <h1 className="text-lg font-black text-gray-900">الإعدادات</h1>
 
       {/* Open/Close Toggle */}
@@ -137,7 +195,7 @@ export default function Settings() {
               onClick={() => logoInputRef.current?.click()}
               className="w-full border-2 border-dashed border-orange-200 rounded-xl p-2.5 text-sm text-orange-500 font-semibold hover:bg-orange-50 transition-colors"
             >
-              {uploadingLogo ? 'جاري الرفع...' : '📷 رفع صورة الشعار'}
+              {uploadingLogo ? 'جاري المعالجة...' : '📷 رفع صورة الشعار'}
             </button>
             <input
               ref={logoInputRef}
@@ -146,8 +204,8 @@ export default function Settings() {
               className="hidden"
               onChange={e => uploadLogo(e.target.files?.[0])}
             />
-            {form.logo && (
-              <p className="text-xs text-green-600 mt-1 truncate">✓ تم رفع الشعار</p>
+            {form.logo && !uploadingLogo && (
+              <p className="text-xs text-green-600 mt-1">✓ تم رفع الشعار</p>
             )}
           </div>
         </div>
@@ -185,7 +243,7 @@ export default function Settings() {
           <h2 className="font-bold text-gray-900">📍 موقع المطعم</h2>
           <button
             onClick={detectLocation}
-            className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded-xl font-bold"
+            className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded-xl font-bold active:opacity-70"
           >
             📡 موقعي الآن
           </button>
