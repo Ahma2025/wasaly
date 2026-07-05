@@ -76,7 +76,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
 
         {/* Banners */}
-        {banners.length > 0 && <BannerSlider banners={banners} />}
+        <BannerSlider banners={banners} />
 
         {/* Categories */}
         <View style={styles.section}>

@@ -30,8 +30,25 @@ export default function RestaurantScreen() {
   const fetchRestaurant = async () => {
     try {
       const data = await api.get(`/restaurants/${id}`);
-      setRestaurant(data.data);
-      setMenu(data.data.menu || []);
+      const r = data.data;
+      // Transform item_options → addon_groups format
+      const menu = (r.menu || []).map(cat => ({
+        ...cat,
+        items: (cat.items || []).map(item => ({
+          ...item,
+          addon_groups: (item.options || []).filter(o => o && o.id).map(o => ({
+            name: o.name_ar || o.name_en || '',
+            required: o.is_required,
+            multi_select: (o.max_selections || 1) > 1,
+            options: (o.values || []).filter(v => v && v.id).map(v => ({
+              name: v.name_ar || v.name_en || '',
+              price: parseFloat(v.extra_price || v.price || 0)
+            }))
+          }))
+        }))
+      }));
+      setRestaurant(r);
+      setMenu(menu);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -87,12 +104,16 @@ export default function RestaurantScreen() {
     <View style={styles.container}>
       <Animated.View style={[styles.cover, { height: headerHeight }]}>
         {restaurant.cover_image ? (
-          <Image source={{ uri: restaurant.cover_image }} style={styles.coverImg} />
-        ) : (
+          <Image source={{ uri: restaurant.cover_image }} style={styles.coverImg} resizeMode="cover" />
+        ) : restaurant.logo ? (
           <View style={styles.logoBg}>
-            {restaurant.logo
-              ? <Image source={{ uri: restaurant.logo }} style={styles.logoHero} resizeMode="contain" />
-              : <Text style={{ fontSize: 48 }}>🏪</Text>}
+            <Image source={{ uri: restaurant.logo }} style={styles.coverImg} resizeMode="cover" />
+            <View style={styles.logoBgOverlay} />
+            <Image source={{ uri: restaurant.logo }} style={styles.logoHero} resizeMode="contain" />
+          </View>
+        ) : (
+          <View style={[styles.logoBg, { justifyContent: 'center', alignItems: 'center' }]}>
+            <Text style={{ fontSize: 64 }}>🏪</Text>
           </View>
         )}
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
@@ -201,8 +222,9 @@ const styles = StyleSheet.create({
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   cover: { overflow: 'hidden' },
   coverImg: { width: '100%', height: '100%', resizeMode: 'cover' },
-  logoBg: { width: '100%', height: '100%', backgroundColor: '#FFF5EE', alignItems: 'center', justifyContent: 'center' },
-  logoHero: { width: 140, height: 140, borderRadius: 20 },
+  logoBg: { width: '100%', height: '100%', backgroundColor: '#1a1a1a', alignItems: 'center', justifyContent: 'center' },
+  logoBgOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+  logoHero: { width: 120, height: 120, borderRadius: 16, position: 'absolute', borderWidth: 3, borderColor: 'rgba(255,255,255,0.3)' },
   backBtn: { position: 'absolute', top: 50, left: 16, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 20, padding: 8 },
   favBtn: { position: 'absolute', top: 50, right: 16, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 20, padding: 8 },
   infoCard: { backgroundColor: '#FFF', margin: 16, borderRadius: 16, padding: 16, flexDirection: 'row', elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8 },
