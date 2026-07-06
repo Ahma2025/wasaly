@@ -20,15 +20,18 @@ const FALLBACK = [
 export default function BannerSlider({ banners }) {
   const ref = useRef(null);
   const [idx, setIdx] = useState(0);
-  // إذا في إعلانات حقيقية من الإدمن (فيها صورة) = اعرضها فقط، وإلا الـ fallback
-  const apiBanners = (banners || []).filter(b => b && b.image);
-  const items = apiBanners.length > 0 ? apiBanners : FALLBACK;
 
+  const apiBanners = (banners || []).filter(b => b && b.image);
+  const hasApi = apiBanners.length > 0;
+  const items = hasApi ? apiBanners : FALLBACK;
+
+  // يعمل reset فقط لما تتغير المصدر (من fallback لـ API) — مش كل render
   useEffect(() => {
     setIdx(0);
     ref.current?.scrollTo({ x: 0, animated: false });
-  }, [items]);
+  }, [hasApi]);
 
+  // interval منفصل — بيشتغل بناءً على عدد العناصر فقط
   useEffect(() => {
     const t = setInterval(() => {
       setIdx(prev => {
@@ -52,16 +55,16 @@ export default function BannerSlider({ banners }) {
       >
         {items.map((item, i) => (
           item.image ? (
-            /* إعلان برصورة من الإدمن */
             <View key={item.id || i} style={s.slide}>
               <Image source={{ uri: item.image }} style={StyleSheet.absoluteFill} resizeMode="cover" />
               <View style={s.imgOverlay} />
               <View style={s.textBlock}>
-                <Text style={s.title}>{item.title_ar || item.title || ''}</Text>
+                <View style={s.titleWrap}>
+                  <Text style={s.title}>{item.title_ar || item.title || ''}</Text>
+                </View>
               </View>
             </View>
           ) : (
-            /* إعلان Fallback ملوّن */
             <View key={item.id || i} style={[s.slide, { backgroundColor: item.bg || '#FF6B00' }]}>
               <View style={[s.circle1, { backgroundColor: item.circle || 'rgba(255,255,255,0.12)' }]} />
               <View style={[s.circle2, { backgroundColor: item.circle || 'rgba(255,255,255,0.08)' }]} />
@@ -70,7 +73,9 @@ export default function BannerSlider({ banners }) {
                 <Ionicons name={item.icon || 'restaurant'} size={70} color="rgba(255,255,255,0.18)" />
               </View>
               <View style={s.textBlock}>
-                <Text style={s.title}>{item.title || item.title_ar || ''}</Text>
+                <View style={s.titleWrap}>
+                  <Text style={s.title}>{item.title || item.title_ar || ''}</Text>
+                </View>
                 <Text style={s.sub} numberOfLines={2}>{item.sub || ''}</Text>
               </View>
               <View style={s.orderBtn}>
@@ -81,7 +86,6 @@ export default function BannerSlider({ banners }) {
         ))}
       </ScrollView>
 
-      {/* نقاط */}
       <View style={s.dots}>
         {items.map((_, i) => (
           <TouchableOpacity key={i} onPress={() => { ref.current?.scrollTo({ x: i * W, animated: true }); setIdx(i); }}>
@@ -107,10 +111,27 @@ const s = StyleSheet.create({
   circle1: { position: 'absolute', width: 220, height: 220, borderRadius: 110, top: -70, left: -60 },
   circle2: { position: 'absolute', width: 150, height: 150, borderRadius: 75, bottom: -40, right: -10 },
   circle3: { position: 'absolute', width: 90, height: 90, borderRadius: 45, top: 10, right: 80 },
-  imgOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.32)' },
+  imgOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.38)' },
   iconWrap: { position: 'absolute', bottom: 8, left: 16 },
   textBlock: { zIndex: 1, marginTop: 'auto' },
-  title: { color: '#FFF', fontSize: 23, fontWeight: '800', textAlign: 'right', marginBottom: 6, letterSpacing: 0.4, textShadowColor: 'rgba(0,0,0,0.55)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 8 },
+  titleWrap: {
+    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginBottom: 6,
+  },
+  title: {
+    color: '#FFF',
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'right',
+    letterSpacing: 0.6,
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
   sub: { color: 'rgba(255,255,255,0.88)', fontSize: 13.5, textAlign: 'right', fontWeight: '500', lineHeight: 20 },
   orderBtn: { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
   orderBtnTxt: { color: '#FFF', fontSize: 13, fontWeight: '800' },

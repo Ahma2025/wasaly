@@ -142,6 +142,7 @@ export default function HomeScreen() {
   const [restaurants, setRestaurants] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const suggestedRef = useRef(null);
 
   useEffect(() => { load(); }, []);
 
@@ -169,6 +170,13 @@ export default function HomeScreen() {
   const byCat = (id) => restaurants.filter(r => r.category_id === id);
   const topRated = [...restaurants].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 10);
   const suggested = restaurants.slice(0, 8);
+
+  useEffect(() => {
+    if (suggested.length > 0) {
+      const t = setTimeout(() => suggestedRef.current?.scrollToEnd({ animated: false }), 100);
+      return () => clearTimeout(t);
+    }
+  }, [suggested.length]);
 
   if (loading) return (
     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.bg }}>
@@ -221,10 +229,11 @@ export default function HomeScreen() {
         {/* مطاعم مقترحة */}
         {suggested.length > 0 && (
           <CollapsibleSection title="مطاعم مقترحة" icon="sparkles" bg={C.sec}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 4 }}
-              onContentSizeChange={(w) => { /* scroll to right end so first item (rightmost) shows first */ }}
-              ref={r => { if (r && suggested.length > 0) r.scrollToEnd({ animated: false }); }}>
+            <ScrollView
+              ref={suggestedRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 4 }}>
               {suggested.map(r => <HCard key={r.id} r={r} onPress={() => go(r.id)} />)}
             </ScrollView>
           </CollapsibleSection>
