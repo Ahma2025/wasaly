@@ -51,10 +51,15 @@ export default function NotificationsScreen() {
 
       <FlatList
         data={notifications}
-        keyExtractor={i => i.id}
+        keyExtractor={i => String(i.id)}
         renderItem={renderItem}
         contentContainerStyle={{ padding: 16, gap: 10 }}
-        onRefresh={() => api.get('/notifications').then(d => setNotifications(d.data))}
+        onRefresh={() => {
+          api.get('/notifications')
+            .then(d => setNotifications(d.data))
+            .catch(() => {})
+            .finally(() => setLoading(false));
+        }}
         refreshing={loading}
         ListEmptyComponent={!loading && (
           <View style={styles.empty}>

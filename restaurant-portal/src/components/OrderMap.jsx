@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import api from '../utils/api';
 
 // Fix leaflet default marker icons
 delete L.Icon.Default.prototype._getIconUrl;
@@ -11,7 +12,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-const API_BASE = 'https://burger-app-production.up.railway.app';
+const API_BASE = api.defaults.baseURL?.replace('/api', '') || 'https://burger-app-production.up.railway.app';
 
 export default function OrderMap({ order, token }) {
   const mapContainerRef = useRef(null);

@@ -31,6 +31,15 @@ router.post('/send-otp', async (req, res) => {
     const { phone } = req.body;
     if (!phone) return res.status(400).json({ success: false, message: 'Phone required' });
 
+    // Rate limiting: منع إرسال OTP أكثر من مرة في 60 ثانية
+    const { rows: recent } = await pool.query(
+      "SELECT id FROM otp_codes WHERE phone=$1 AND created_at > NOW() - INTERVAL '60 seconds'",
+      [phone]
+    );
+    if (recent.length > 0) {
+      return res.status(429).json({ success: false, message: 'انتظر دقيقة قبل طلب رمز جديد' });
+    }
+
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
@@ -42,7 +51,8 @@ router.post('/send-otp', async (req, res) => {
 
     res.json({ success: true, message: 'OTP sent', ...(process.env.NODE_ENV !== 'production' && { code }) });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -76,7 +86,8 @@ router.post('/verify-otp', async (req, res) => {
 
     res.json({ success: true, token: generateToken(user), user: sanitizeUser(user), isNew: !users[0] });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -97,7 +108,8 @@ router.post('/register', async (req, res) => {
     const user = rows[0];
     res.status(201).json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -118,7 +130,8 @@ router.post('/login-password', async (req, res) => {
     if (user.is_blocked) return res.status(403).json({ success: false, message: 'الحساب محظور' });
     res.json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -137,7 +150,8 @@ router.post('/login', async (req, res) => {
 
     res.json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -159,7 +173,8 @@ router.post('/social', async (req, res) => {
 
     res.json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -179,7 +194,8 @@ router.post('/admin/create-user', auth, async (req, res) => {
     );
     res.status(201).json({ success: true, user: sanitizeUser(rows[0]) });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 

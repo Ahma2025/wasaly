@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, Keyboard } from 'react-native';
 import DismissKeyboard from '../components/DismissKeyboard';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +21,7 @@ export default function CartScreen() {
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
+  const submittingRef = useRef(false);
   const [deliveryFee, setDeliveryFee] = useState(0);
   const [calculatingFee, setCalculatingFee] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
@@ -79,10 +80,13 @@ export default function CartScreen() {
   };
 
   const placeOrder = async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     if (deliveryType === 'delivery' && !selectedAddress) {
+      submittingRef.current = false;
       return Alert.alert('خطأ', 'الرجاء تحديد عنوان التوصيل');
     }
-    if (items.length === 0) return;
+    if (items.length === 0) { submittingRef.current = false; return; }
 
     setLoading(true);
     try {
@@ -117,6 +121,7 @@ export default function CartScreen() {
       Alert.alert('خطأ', e.message || 'فشل في إتمام الطلب');
     } finally {
       setLoading(false);
+      submittingRef.current = false;
     }
   };
 

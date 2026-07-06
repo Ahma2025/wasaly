@@ -33,6 +33,9 @@ export default function Orders() {
 
   useEffect(() => {
     fetchOrders();
+  }, [filter]);
+
+  useEffect(() => {
     const socket = io('https://burger-app-production.up.railway.app', {
       auth: { token: localStorage.getItem('token') }
     });
@@ -46,7 +49,7 @@ export default function Orders() {
     });
     socket.on('order_updated', () => fetchOrders());
     return () => socket.disconnect();
-  }, [filter]);
+  }, []);
 
   const fetchOrders = async () => {
     if (!restaurant.id) return setLoading(false);

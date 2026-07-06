@@ -24,6 +24,8 @@ export default function SearchScreen() {
     } catch {} finally { setLoading(false); }
   };
 
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
   const onChangeText = (text) => {
     setQuery(text);
     clearTimeout(timerRef.current);
@@ -38,7 +40,7 @@ export default function SearchScreen() {
         <Text style={styles.cardSub}>{item.delivery_time_min}-{item.delivery_time_max} دقيقة</Text>
         <View style={styles.cardMeta}>
           <Text style={styles.rating}>⭐ {parseFloat(item.rating || 0).toFixed(1)}</Text>
-          <Text style={styles.fee}>🛵 {item.delivery_fee}₪</Text>
+          <Text style={styles.fee}>🛵 {item.delivery_fee ?? 0}₪</Text>
         </View>
       </View>
     </TouchableOpacity>

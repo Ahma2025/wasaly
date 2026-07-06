@@ -67,6 +67,10 @@ export default function Settings() {
 
   const save = async () => {
     if (!restaurant.id) return toast.error('لم يتم تحديد المطعم');
+    const lat = parseFloat(form.lat);
+    const lng = parseFloat(form.lng);
+    if (form.lat && (isNaN(lat) || lat < -90 || lat > 90)) return toast.error('خط العرض غير صحيح (بين -90 و90)');
+    if (form.lng && (isNaN(lng) || lng < -180 || lng > 180)) return toast.error('خط الطول غير صحيح (بين -180 و180)');
     setSaving(true);
     try {
       const payload = {

@@ -216,7 +216,7 @@ export default function DriverHome() {
         deliveries: data.data?.stats?.deliveries || 0,
         earnings: parseFloat(data.data?.stats?.earnings || 0)
       });
-    } catch {}
+    } catch (e) { console.error('fetchStats error:', e); }
   };
 
   const distToRestaurant = pendingOrder && location

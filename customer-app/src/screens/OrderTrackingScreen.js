@@ -19,8 +19,14 @@ const STATUS_STEPS = [
 ];
 
 function buildMapHTML({ restLat, restLng, custLat, custLng, driverLat, driverLng }) {
-  const cLat = driverLat || restLat || custLat || 31.9;
-  const cLng = driverLng || restLng || custLng || 35.2;
+  const safeRestLat = parseFloat(restLat) || null;
+  const safeRestLng = parseFloat(restLng) || null;
+  const safeCustLat = parseFloat(custLat) || null;
+  const safeCustLng = parseFloat(custLng) || null;
+  const safeDriverLat = parseFloat(driverLat) || null;
+  const safeDriverLng = parseFloat(driverLng) || null;
+  const cLat = safeDriverLat || safeRestLat || safeCustLat || 31.9;
+  const cLng = safeDriverLng || safeRestLng || safeCustLng || 35.2;
 
   return `<!DOCTYPE html>
 <html>
@@ -69,26 +75,26 @@ function mkIcon(emoji,size,bg){
 var pts=[];
 var driverMarker=null;
 
-${restLat && restLng ? `
-L.marker([${restLat},${restLng}],{icon:mkIcon('🏪',40,'#FF6B00')}).addTo(map)
+${safeRestLat && safeRestLng ? `
+L.marker([${safeRestLat},${safeRestLng}],{icon:mkIcon('🏪',40,'#FF6B00')}).addTo(map)
   .bindPopup('<div style="direction:rtl;font-weight:700">🏪 المطعم</div>',{className:'custom-popup'});
-pts.push([${restLat},${restLng}]);
+pts.push([${safeRestLat},${safeRestLng}]);
 ` : ''}
 
-${custLat && custLng ? `
-L.marker([${custLat},${custLng}],{icon:mkIcon('📍',40,'#FF3B30')}).addTo(map)
+${safeCustLat && safeCustLng ? `
+L.marker([${safeCustLat},${safeCustLng}],{icon:mkIcon('📍',40,'#FF3B30')}).addTo(map)
   .bindPopup('<div style="direction:rtl;font-weight:700">📍 موقع التوصيل</div>',{className:'custom-popup'});
-pts.push([${custLat},${custLng}]);
+pts.push([${safeCustLat},${safeCustLng}]);
 ` : ''}
 
-${driverLat && driverLng ? `
-driverMarker=L.marker([${driverLat},${driverLng}],{icon:mkIcon('🛵',44,'#FF6B00')}).addTo(map)
+${safeDriverLat && safeDriverLng ? `
+driverMarker=L.marker([${safeDriverLat},${safeDriverLng}],{icon:mkIcon('🛵',44,'#FF6B00')}).addTo(map)
   .bindPopup('<div style="direction:rtl;font-weight:700;color:#FF6B00">🛵 السائق</div>',{className:'custom-popup'});
-pts.push([${driverLat},${driverLng}]);
+pts.push([${safeDriverLat},${safeDriverLng}]);
 ` : ''}
 
-${restLat && custLat ? `
-L.polyline([[${restLat},${restLng}],[${custLat},${custLng}]],{
+${safeRestLat && safeCustLat ? `
+L.polyline([[${safeRestLat},${safeRestLng}],[${safeCustLat},${safeCustLng}]],{
   color:'#FF6B00',weight:4,dashArray:'10 6',opacity:0.7
 }).addTo(map);
 ` : ''}
@@ -181,7 +187,7 @@ export default function OrderTrackingScreen() {
       if (o.driver_lat && o.driver_lng) {
         setDriverLoc({ lat: parseFloat(o.driver_lat), lng: parseFloat(o.driver_lng) });
       }
-    } catch {}
+    } catch (e) { console.error('fetchOrder error:', e); }
     finally { setLoading(false); }
   };
 

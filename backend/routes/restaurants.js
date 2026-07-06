@@ -5,7 +5,9 @@ const { auth, adminOnly, restaurantOnly } = require('../middleware/auth');
 // Get all restaurants (with filters)
 router.get('/', async (req, res) => {
   try {
-    const { lat, lng, category_id, search, sort, limit = 20, offset = 0, city, owner_id } = req.query;
+    const { lat, lng, category_id, search, sort, city, owner_id } = req.query;
+    const safeLimit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const safeOffset = Math.max(parseInt(req.query.offset) || 0, 0);
 
     const userLat = lat ? parseFloat(lat) : null;
     const userLng = lng ? parseFloat(lng) : null;
@@ -45,12 +47,13 @@ router.get('/', async (req, res) => {
     };
     query += ` ORDER BY r.is_featured DESC, ${orderMap[sort] || 'r.rating DESC'}`;
     query += ` LIMIT $${paramIdx++} OFFSET $${paramIdx++}`;
-    params.push(limit, offset);
+    params.push(safeLimit, safeOffset);
 
     const { rows } = await pool.query(query, params);
     res.json({ success: true, data: rows });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -86,7 +89,8 @@ router.get('/:id', async (req, res) => {
 
     res.json({ success: true, data: { ...rows[0], hours, menu: menuCategories } });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -96,7 +100,8 @@ router.get('/featured/list', async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM restaurants WHERE is_featured=true AND is_active=true LIMIT 10');
     res.json({ success: true, data: rows });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -106,7 +111,8 @@ router.get('/top/rated', async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM restaurants WHERE is_active=true ORDER BY rating DESC LIMIT 20');
     res.json({ success: true, data: rows });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -121,7 +127,8 @@ router.post('/', auth, adminOnly, async (req, res) => {
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -152,7 +159,8 @@ router.put('/:id', auth, restaurantOnly, async (req, res) => {
     );
     res.json({ success: true, data: rows[0] });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -168,7 +176,8 @@ router.patch('/:id/toggle', auth, restaurantOnly, async (req, res) => {
     );
     res.json({ success: true, is_open: rows[0].is_open });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -179,7 +188,9 @@ router.get('/:id/orders', auth, restaurantOnly, async (req, res) => {
       const { rows: own } = await pool.query('SELECT id FROM restaurants WHERE id=$1 AND owner_id=$2', [req.params.id, req.user.id]);
       if (!own[0]) return res.status(403).json({ success: false, message: 'غير مصرح' });
     }
-    const { status, limit = 20, offset = 0 } = req.query;
+    const { status } = req.query;
+    const safeLimit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const safeOffset = Math.max(parseInt(req.query.offset) || 0, 0);
     let q = `SELECT o.*, u.name as customer_name, u.phone as customer_phone FROM orders o
              LEFT JOIN users u ON o.customer_id = u.id WHERE o.restaurant_id=$1`;
     const params = [req.params.id];
@@ -193,12 +204,13 @@ router.get('/:id/orders', auth, restaurantOnly, async (req, res) => {
       }
     }
     q += ` ORDER BY o.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`;
-    params.push(limit, offset);
+    params.push(safeLimit, safeOffset);
 
     const { rows } = await pool.query(q, params);
     res.json({ success: true, data: rows });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -217,7 +229,8 @@ router.get('/:id/stats', auth, restaurantOnly, async (req, res) => {
     ]);
     res.json({ success: true, data: { sales: sales.rows, topItems: topItems.rows, ordersByStatus: orders.rows } });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 

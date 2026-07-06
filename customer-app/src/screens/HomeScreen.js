@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Image, RefreshControl, Dimensions, StatusBar, Animated, Pressable, LayoutAnimation, Platform, UIManager
+  Image, RefreshControl, Dimensions, StatusBar, Animated, Pressable, LayoutAnimation, Platform, UIManager, ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -141,10 +141,12 @@ export default function HomeScreen() {
   const [categories, setCategories] = useState([]);
   const [restaurants, setRestaurants] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
 
   const load = async () => {
+    setLoading(true);
     try {
       const [r, c, b] = await Promise.allSettled([
         api.get('/restaurants?limit=60'),
@@ -155,6 +157,7 @@ export default function HomeScreen() {
       if (c.status === 'fulfilled') setCategories(c.value?.data || []);
       if (b.status === 'fulfilled') setBanners(b.value?.data || []);
     } catch (e) { console.error(e); }
+    finally { setLoading(false); }
   };
 
   const onRefresh = useCallback(() => {
@@ -164,8 +167,14 @@ export default function HomeScreen() {
 
   const go = (id) => navigation.navigate('Restaurant', { restaurantId: id });
   const byCat = (id) => restaurants.filter(r => r.category_id === id);
-  const topRated = [...restaurants].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+  const topRated = [...restaurants].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 10);
   const suggested = restaurants.slice(0, 8);
+
+  if (loading) return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.bg }}>
+      <ActivityIndicator size="large" color={C.primary} />
+    </View>
+  );
 
   return (
     <View style={s.container}>

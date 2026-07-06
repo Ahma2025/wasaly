@@ -25,14 +25,24 @@ function getBaseUrl(req) {
   return process.env.API_URL || `${proto}://${host}`;
 }
 
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
 router.post('/', auth, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: 'No file' });
+  if (!ALLOWED_TYPES.includes(req.file.mimetype)) {
+    return res.status(400).json({ success: false, message: 'نوع الملف غير مسموح' });
+  }
   const url = `${getBaseUrl(req)}/uploads/${req.file.filename}`;
   res.json({ success: true, url });
 });
 
 router.post('/multiple', auth, upload.array('files', 5), (req, res) => {
   if (!req.files?.length) return res.status(400).json({ success: false, message: 'No files' });
+  for (const file of req.files) {
+    if (!ALLOWED_TYPES.includes(file.mimetype)) {
+      return res.status(400).json({ success: false, message: 'نوع الملف غير مسموح' });
+    }
+  }
   const base = getBaseUrl(req);
   const urls = req.files.map(f => `${base}/uploads/${f.filename}`);
   res.json({ success: true, urls });

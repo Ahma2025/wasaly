@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import api from '../utils/api';
+import toast from 'react-hot-toast';
 
 const StatCard = ({ icon, label, value, sub, color }) => (
   <div className={`rounded-2xl p-4 text-white ${color}`}>
@@ -18,7 +19,7 @@ export default function Dashboard() {
   useEffect(() => {
     api.get('/admin/dashboard')
       .then(r => setData(r.data))
-      .catch(console.error)
+      .catch(e => { console.error(e); toast.error('فشل تحميل البيانات'); })
       .finally(() => setLoading(false));
   }, []);
 

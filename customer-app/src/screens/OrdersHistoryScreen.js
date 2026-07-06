@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import api from '../utils/api';
@@ -49,40 +49,34 @@ export default function OrdersHistoryScreen() {
         <Text style={styles.headerTitle}>طلباتي 📦</Text>
       </View>
 
-      <FlatList
-        data={[]}
-        keyExtractor={() => 'x'}
-        renderItem={null}
+      <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchOrders(); }} tintColor={COLORS.primary} />}
-        ListHeaderComponent={
-          <View>
-            {/* Active */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>الطلبات الحالية</Text>
-              {active.length === 0 ? (
-                <View style={styles.emptyBox}>
-                  <Text style={styles.emptyEmoji}>🍽️</Text>
-                  <Text style={styles.emptyText}>لا توجد طلبات حالية</Text>
-                  <TouchableOpacity style={styles.orderNowBtn} onPress={() => navigation.navigate('Main', { screen: 'الرئيسية' })}>
-                    <Text style={styles.orderNowText}>اطلب الآن</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                active.map(o => <OrderCard key={o.id} order={o} navigation={navigation} isActive />)
-              )}
+      >
+        {/* Active */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>الطلبات الحالية</Text>
+          {active.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyEmoji}>🍽️</Text>
+              <Text style={styles.emptyText}>لا توجد طلبات حالية</Text>
+              <TouchableOpacity style={styles.orderNowBtn} onPress={() => navigation.navigate('Main', { screen: 'الرئيسية' })}>
+                <Text style={styles.orderNowText}>اطلب الآن</Text>
+              </TouchableOpacity>
             </View>
+          ) : (
+            active.map(o => <OrderCard key={o.id} order={o} navigation={navigation} isActive />)
+          )}
+        </View>
 
-            {/* History */}
-            {history.length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>الطلبات السابقة</Text>
-                {history.map(o => <OrderCard key={o.id} order={o} navigation={navigation} />)}
-              </View>
-            )}
-            <View style={{ height: 20 }} />
+        {/* History */}
+        {history.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>الطلبات السابقة</Text>
+            {history.map(o => <OrderCard key={o.id} order={o} navigation={navigation} />)}
           </View>
-        }
-      />
+        )}
+        <View style={{ height: 20 }} />
+      </ScrollView>
     </View>
   );
 }

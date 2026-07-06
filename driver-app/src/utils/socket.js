@@ -21,3 +21,10 @@ export function useSocket() {
   return socketRef.current;
 }
 
+export function disconnectSocket() {
+  if (socketInstance) {
+    socketInstance.disconnect();
+    socketInstance = null;
+  }
+}
+

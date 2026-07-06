@@ -174,14 +174,16 @@ router.post('/', auth, async (req, res) => {
     res.status(201).json({ success: true, data: order });
   } catch (e) {
     console.error('POST /orders error:', e.message);
-    res.status(500).json({ success: false, message: e.message });
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
 // Get user orders
 router.get('/my', auth, async (req, res) => {
   try {
-    const { status, limit = 20, offset = 0 } = req.query;
+    const { status, limit, offset } = req.query;
+    const safeLimit = Math.min(parseInt(limit) || 20, 100);
+    const safeOffset = Math.max(parseInt(offset) || 0, 0);
     let q = `SELECT o.*, r.name_ar as restaurant_name, r.logo as restaurant_logo,
              (SELECT COUNT(*) FROM order_items WHERE order_id=o.id) as items_count
              FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
@@ -195,11 +197,12 @@ router.get('/my', auth, async (req, res) => {
       q += ` AND o.status=$2`; params.push(status);
     }
     q += ` ORDER BY o.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`;
-    params.push(limit, offset);
+    params.push(safeLimit, safeOffset);
     const { rows } = await pool.query(q, params);
     res.json({ success: true, data: rows });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -221,7 +224,8 @@ router.get('/:id', auth, async (req, res) => {
     const { rows: items } = await pool.query('SELECT * FROM order_items WHERE order_id=$1', [req.params.id]);
     res.json({ success: true, data: { ...orders[0], items } });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -248,7 +252,8 @@ router.patch('/:id/confirm', auth, async (req, res) => {
 
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -260,6 +265,20 @@ router.patch('/:id/status', auth, async (req, res) => {
     const { rows: orders } = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
     const order = orders[0];
     if (!order) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
+
+    // Role-based status permission check
+    const role = req.user.role;
+    const driverStatuses = ['on_the_way', 'delivered'];
+    const restaurantStatuses = ['confirmed', 'preparing', 'ready', 'cancelled'];
+    if (role === 'driver' && !driverStatuses.includes(status)) {
+      return res.status(403).json({ success: false, message: 'غير مصرح لك بتغيير الحالة إلى هذه القيمة' });
+    }
+    if (role === 'restaurant' && !restaurantStatuses.includes(status)) {
+      return res.status(403).json({ success: false, message: 'غير مصرح لك بتغيير الحالة إلى هذه القيمة' });
+    }
+    if (role !== 'admin' && role !== 'driver' && role !== 'restaurant') {
+      return res.status(403).json({ success: false, message: 'غير مصرح' });
+    }
 
     const timeFields = {
       confirmed: 'restaurant_accepted_at',
@@ -297,7 +316,8 @@ router.patch('/:id/status', auth, async (req, res) => {
 
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -336,7 +356,8 @@ router.post('/:id/accept', auth, async (req, res) => {
 
     res.json({ success: true, order_id: order.id });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -356,7 +377,8 @@ router.post('/:id/reject', auth, async (req, res) => {
 
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -379,7 +401,8 @@ router.patch('/:id/cancel', auth, async (req, res) => {
     }
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 
@@ -411,7 +434,8 @@ router.post('/:id/rate', auth, async (req, res) => {
     );
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error(e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
 });
 

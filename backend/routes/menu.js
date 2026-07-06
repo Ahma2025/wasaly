@@ -11,7 +11,7 @@ router.post('/categories', auth, restaurantOnly, async (req, res) => {
       [restaurant_id, name_ar, name_en, sort_order]
     );
     res.status(201).json({ success: true, data: rows[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { console.error(e.message); res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' }); }
 });
 
 // Update menu category
@@ -23,7 +23,7 @@ router.put('/categories/:id', auth, restaurantOnly, async (req, res) => {
       [name_ar, name_en, sort_order, is_active, req.params.id]
     );
     res.json({ success: true, data: rows[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { console.error(e.message); res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' }); }
 });
 
 // Delete category
@@ -32,7 +32,7 @@ router.delete('/categories/:id', auth, restaurantOnly, async (req, res) => {
     await pool.query('DELETE FROM menu_items WHERE category_id=$1', [req.params.id]);
     await pool.query('DELETE FROM menu_categories WHERE id=$1', [req.params.id]);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { console.error(e.message); res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' }); }
 });
 
 // Add menu item
@@ -53,7 +53,7 @@ router.post('/items', auth, restaurantOnly, async (req, res) => {
       ]
     );
     res.status(201).json({ success: true, data: rows[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { console.error(e.message); res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' }); }
 });
 
 // Update menu item
@@ -67,7 +67,7 @@ router.put('/items/:id', auth, restaurantOnly, async (req, res) => {
     values.push(req.params.id);
     const { rows } = await pool.query(`UPDATE menu_items SET ${updates.join(',')} WHERE id=$${idx} RETURNING *`, values);
     res.json({ success: true, data: rows[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { console.error(e.message); res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' }); }
 });
 
 // Toggle item availability
@@ -97,7 +97,7 @@ router.post('/items/:id/options', auth, restaurantOnly, async (req, res) => {
       );
     }
     res.status(201).json({ success: true, data: option[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { console.error(e.message); res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' }); }
 });
 
 // Get item options
@@ -109,7 +109,7 @@ router.get('/items/:id/options', auth, async (req, res) => {
       opt.values = vals;
     }
     res.json({ success: true, data: options });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { console.error(e.message); res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' }); }
 });
 
 // Delete item option
@@ -118,7 +118,7 @@ router.delete('/options/:id', auth, restaurantOnly, async (req, res) => {
     await pool.query('DELETE FROM item_option_values WHERE option_id=$1', [req.params.id]);
     await pool.query('DELETE FROM item_options WHERE id=$1', [req.params.id]);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { console.error(e.message); res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' }); }
 });
 
 module.exports = router;

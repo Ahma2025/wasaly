@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../utils/api';
 
@@ -9,15 +9,19 @@ export default function EarningsScreen() {
   const [period, setPeriod] = useState('today');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => { fetchEarnings(); }, [period]);
 
   const fetchEarnings = async () => {
+    setHasError(false);
     try {
       const res = await api.get(`/drivers/earnings?period=${period}`);
       setData(res.data);
-    } catch {}
-    finally { setLoading(false); }
+    } catch (e) {
+      console.error('fetchEarnings error:', e);
+      setHasError(true);
+    } finally { setLoading(false); }
   };
 
   const periods = [{ id: 'today', label: 'اليوم' }, { id: 'week', label: 'الأسبوع' }, { id: 'month', label: 'الشهر' }];
@@ -29,6 +33,16 @@ export default function EarningsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16 }}>
+        {/* Error Banner */}
+        {hasError && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>فشل تحميل البيانات</Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={fetchEarnings}>
+              <Text style={styles.retryBtnText}>إعادة المحاولة</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Period Selector */}
         <View style={styles.periodRow}>
           {periods.map(p => (
@@ -54,7 +68,7 @@ export default function EarningsScreen() {
               <Text style={styles.walletAmount}>{parseFloat(data?.wallet_balance || 0).toFixed(2)}₪</Text>
             </View>
           </View>
-          <TouchableOpacity style={styles.withdrawBtn}>
+          <TouchableOpacity style={styles.withdrawBtn} onPress={() => Alert.alert('قريباً', 'ميزة السحب قيد التطوير')}>
             <Text style={styles.withdrawBtnText}>سحب</Text>
           </TouchableOpacity>
         </View>
@@ -94,5 +108,9 @@ const styles = StyleSheet.create({
   dayRow: { backgroundColor: '#FFF', borderRadius: 12, padding: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   dayDate: { fontSize: 13, color: COLORS.gray, flex: 1 },
   dayCount: { fontSize: 13, color: COLORS.text, flex: 1, textAlign: 'center' },
-  dayEarnings: { fontSize: 14, fontWeight: '800', color: COLORS.primary, flex: 1, textAlign: 'left' }
+  dayEarnings: { fontSize: 14, fontWeight: '800', color: COLORS.primary, flex: 1, textAlign: 'left' },
+  errorBox: { backgroundColor: '#FFF0F0', borderRadius: 12, padding: 16, marginBottom: 16, alignItems: 'center', borderWidth: 1, borderColor: '#FFD0D0' },
+  errorText: { color: '#D00', fontWeight: '700', marginBottom: 10 },
+  retryBtn: { backgroundColor: COLORS.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 8 },
+  retryBtnText: { color: '#FFF', fontWeight: '700' },
 });

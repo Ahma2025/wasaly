@@ -25,6 +25,11 @@ export default function BannerSlider({ banners }) {
   const items = apiBanners.length > 0 ? apiBanners : FALLBACK;
 
   useEffect(() => {
+    setIdx(0);
+    ref.current?.scrollTo({ x: 0, animated: false });
+  }, [items]);
+
+  useEffect(() => {
     const t = setInterval(() => {
       setIdx(prev => {
         const next = (prev + 1) % items.length;

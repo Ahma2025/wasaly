@@ -32,11 +32,12 @@ export default function AddAddressScreen({ navigation }) {
 
   const save = async () => {
     if (!details.trim()) return Alert.alert('خطأ', 'أدخل تفاصيل العنوان');
+    if (!coords) return Alert.alert('تنبيه', 'الرجاء تحديد موقعك على الخريطة أولاً');
     setSaving(true);
     try {
       await api.post('/users/addresses', {
         label, address: details, floor, notes,
-        lat: coords?.lat || 31.9, lng: coords?.lng || 35.2
+        lat: coords.lat, lng: coords.lng
       });
       Alert.alert('✅', 'تم حفظ العنوان', [{ text: 'حسناً', onPress: () => navigation.goBack() }]);
     } catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }

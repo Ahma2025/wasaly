@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../utils/api';
+import toast from 'react-hot-toast';
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
@@ -12,7 +13,7 @@ export default function Dashboard() {
     if (!restaurant.id) return setLoading(false);
     api.get(`/restaurants/${restaurant.id}/stats`)
       .then(r => setStats(r.data))
-      .catch(console.error)
+      .catch(e => { console.error(e); toast.error('فشل تحميل البيانات'); })
       .finally(() => setLoading(false));
   }, []);
 

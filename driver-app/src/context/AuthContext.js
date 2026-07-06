@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { registerForPushNotifications } from '../utils/pushNotifications';
+import { disconnectSocket } from '../utils/socket';
 
 const AuthContext = createContext();
 
@@ -69,6 +70,7 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
+    disconnectSocket();
     await AsyncStorage.multiRemove(['driver_token', 'driver_user']);
     setToken(null);
     setUser(null);
