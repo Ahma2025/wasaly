@@ -1,18 +1,23 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Image, RefreshControl, Dimensions, StatusBar, Animated, Pressable
+  Image, RefreshControl, Dimensions, StatusBar, Animated, Pressable, LayoutAnimation, Platform, UIManager
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
 import BannerSlider from '../components/BannerSlider';
 
+// تفعيل LayoutAnimation على Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 const { width } = Dimensions.get('window');
 const CARD_W = (width - 48) / 2;
-const C = { primary: '#FF6B00', bg: '#F2F2F7', white: '#FFF', text: '#1A1A2E', gray: '#6B6B6B', light: '#F8F8F8', sec: '#FFF8F4' };
+const C = { primary: '#FF6B00', bg: '#F2F2F7', white: '#FFF', text: '#1A1A2E', gray: '#6B6B6B', sec: '#FFF8F4' };
 
-/* ── كرت مع موشن ── */
+/* ── كرت مع موشن ضغط ── */
 function AnimCard({ children, style, onPress }) {
   const scale = useRef(new Animated.Value(1)).current;
   const press = () => Animated.spring(scale, { toValue: 0.95, useNativeDriver: true, speed: 50 }).start();
@@ -24,7 +29,48 @@ function AnimCard({ children, style, onPress }) {
   );
 }
 
-/* ── كرت الشبكة (grid) ── */
+/* ── قسم قابل للطي مع موشن ── */
+function CollapsibleSection({ title, icon, bg, children, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const rotation = useRef(new Animated.Value(defaultOpen ? 1 : 0)).current;
+
+  const toggle = () => {
+    LayoutAnimation.configureNext({
+      duration: 280,
+      create: { type: 'easeInEaseOut', property: 'opacity' },
+      update: { type: 'spring', springDamping: 0.7 },
+      delete: { type: 'easeInEaseOut', property: 'opacity' },
+    });
+    Animated.spring(rotation, {
+      toValue: open ? 0 : 1,
+      useNativeDriver: true,
+      speed: 14,
+      bounciness: 6,
+    }).start();
+    setOpen(o => !o);
+  };
+
+  const arrowRotate = rotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
+
+  return (
+    <View style={[cs.wrap, { backgroundColor: bg }]}>
+      <TouchableOpacity style={cs.head} onPress={toggle} activeOpacity={0.75}>
+        {/* يسار: سهم */}
+        <Animated.View style={{ transform: [{ rotate: arrowRotate }] }}>
+          <Ionicons name="chevron-down" size={20} color={C.primary} />
+        </Animated.View>
+        {/* يمين: عنوان + أيقونة */}
+        <View style={cs.titleRow}>
+          <Text style={cs.title}>{title}</Text>
+          {icon ? <Ionicons name={icon} size={20} color={C.primary} style={{ marginLeft: 6 }} /> : null}
+        </View>
+      </TouchableOpacity>
+      {open && <View style={cs.body}>{children}</View>}
+    </View>
+  );
+}
+
+/* ── كرت الشبكة ── */
 function RCard({ r, onPress }) {
   return (
     <AnimCard style={rc.wrap} onPress={onPress}>
@@ -33,9 +79,7 @@ function RCard({ r, onPress }) {
         {(r.discount_percent > 0 || r.discount > 0) && (
           <View style={rc.badge}><Text style={rc.badgeTxt}>خصم {r.discount_percent || r.discount}%</Text></View>
         )}
-        {!r.is_open && (
-          <View style={rc.overlay}><Text style={rc.overlayTxt}>مغلق</Text></View>
-        )}
+        {!r.is_open && <View style={rc.overlay}><Text style={rc.overlayTxt}>مغلق</Text></View>}
         <View style={rc.logoCircle}>
           <Image source={{ uri: r.logo }} style={rc.logoImg} resizeMode="cover" />
         </View>
@@ -55,7 +99,7 @@ function RCard({ r, onPress }) {
   );
 }
 
-/* ── كرت أفقي (مقترحة) ── */
+/* ── كرت أفقي ── */
 function HCard({ r, onPress }) {
   return (
     <AnimCard style={hc.wrap} onPress={onPress}>
@@ -70,31 +114,33 @@ function HCard({ r, onPress }) {
   );
 }
 
-/* ── رأس القسم: النص يمين، الأيقونة يسار ── */
-function SectionHead({ title, icon, onSeeAll }) {
+/* ── grid داخل قسم ── */
+function SectionGrid({ list, onPress, limit = 4 }) {
+  const [expanded, setExpanded] = useState(false);
+  const shown = list.slice(0, expanded ? list.length : limit);
   return (
-    <View style={s.secHead}>
-      {onSeeAll ? (
-        <TouchableOpacity onPress={onSeeAll} style={s.seeAllRow}>
-          <Text style={s.seeAll}>عرض الكل</Text>
-          <Ionicons name="chevron-back" size={14} color={C.primary} />
-        </TouchableOpacity>
-      ) : <View />}
-      <View style={s.secTitleRow}>
-        <Text style={s.secTitle}>{title}</Text>
-        {icon ? <Ionicons name={icon} size={20} color={C.primary} style={{ marginLeft: 6 }} /> : null}
+    <>
+      <View style={s.grid}>
+        {shown.map(r => <RCard key={r.id} r={r} onPress={() => onPress(r.id)} />)}
       </View>
-    </View>
+      {list.length > limit && (
+        <TouchableOpacity style={s.moreBtn} onPress={() => {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+          setExpanded(e => !e);
+        }}>
+          <Text style={s.moreTxt}>{expanded ? 'عرض أقل ▲' : 'اعرض المزيد ▼'}</Text>
+        </TouchableOpacity>
+      )}
+    </>
   );
 }
 
 export default function HomeScreen() {
   const navigation = useNavigation();
-  const [banners, setBanners] = useState([]);
+  const [banners, setBanners]       = useState([]);
   const [categories, setCategories] = useState([]);
   const [restaurants, setRestaurants] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [expanded, setExpanded] = useState({});
 
   useEffect(() => { load(); }, []);
 
@@ -111,11 +157,13 @@ export default function HomeScreen() {
     } catch (e) { console.error(e); }
   };
 
-  const onRefresh = useCallback(() => { setRefreshing(true); load().finally(() => setRefreshing(false)); }, []);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    load().finally(() => setRefreshing(false));
+  }, []);
+
   const go = (id) => navigation.navigate('Restaurant', { restaurantId: id });
   const byCat = (id) => restaurants.filter(r => r.category_id === id);
-  const toggle = (k) => setExpanded(p => ({ ...p, [k]: !p[k] }));
-
   const topRated = [...restaurants].sort((a, b) => (b.rating || 0) - (a.rating || 0));
   const suggested = restaurants.slice(0, 8);
 
@@ -144,8 +192,8 @@ export default function HomeScreen() {
         {/* Banner */}
         <BannerSlider banners={banners} />
 
-        {/* ── تصنيفات سريعة ── */}
-        <View style={[s.section, { backgroundColor: C.white, paddingVertical: 16 }]}>
+        {/* تصنيفات */}
+        <View style={{ backgroundColor: C.white, paddingVertical: 16 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 12 }}>
             {categories.map(cat => (
@@ -161,58 +209,35 @@ export default function HomeScreen() {
 
         <View style={s.divider} />
 
-        {/* ── مطاعم مقترحة ── */}
+        {/* مطاعم مقترحة */}
         {suggested.length > 0 && (
-          <View style={[s.section, { backgroundColor: C.sec, paddingTop: 4, paddingBottom: 16 }]}>
-            <SectionHead title="مطاعم مقترحة" icon="sparkles" />
+          <CollapsibleSection title="مطاعم مقترحة" icon="sparkles" bg={C.sec}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingVertical: 4 }}>
+              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 4 }}>
               {suggested.map(r => <HCard key={r.id} r={r} onPress={() => go(r.id)} />)}
             </ScrollView>
-          </View>
+          </CollapsibleSection>
         )}
 
         <View style={s.divider} />
 
-        {/* ── الأعلى تقييماً ── */}
+        {/* الأعلى تقييماً */}
         {topRated.length > 0 && (
-          <View style={[s.section, { backgroundColor: C.white, paddingTop: 4, paddingBottom: 16 }]}>
-            <SectionHead title="الأعلى تقييماً" icon="star" onSeeAll={() => {}} />
-            <View style={s.grid}>
-              {topRated.slice(0, expanded['top'] ? topRated.length : 4).map(r => (
-                <RCard key={r.id} r={r} onPress={() => go(r.id)} />
-              ))}
-            </View>
-            {topRated.length > 4 && (
-              <TouchableOpacity style={s.moreBtn} onPress={() => toggle('top')}>
-                <Text style={s.moreTxt}>{expanded['top'] ? 'عرض أقل ▲' : 'اعرض المزيد ▼'}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+          <CollapsibleSection title="الأعلى تقييماً" icon="star" bg={C.white}>
+            <SectionGrid list={topRated} onPress={go} />
+          </CollapsibleSection>
         )}
 
-        {/* ── أقسام التصنيفات ── */}
+        {/* أقسام التصنيفات */}
         {categories.map((cat, ci) => {
           const list = byCat(cat.id);
           if (list.length === 0) return null;
-          const isExp = expanded[cat.id];
-          const bg = ci % 2 === 0 ? C.sec : C.white;
           return (
             <React.Fragment key={cat.id}>
               <View style={s.divider} />
-              <View style={[s.section, { backgroundColor: bg, paddingTop: 4, paddingBottom: 16 }]}>
-                <SectionHead title={cat.name_ar} icon={null} onSeeAll={() => {}} />
-                <View style={s.grid}>
-                  {list.slice(0, isExp ? list.length : 4).map(r => (
-                    <RCard key={r.id} r={r} onPress={() => go(r.id)} />
-                  ))}
-                </View>
-                {list.length > 4 && (
-                  <TouchableOpacity style={s.moreBtn} onPress={() => toggle(cat.id)}>
-                    <Text style={s.moreTxt}>{isExp ? 'عرض أقل ▲' : 'اعرض المزيد ▼'}</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+              <CollapsibleSection title={cat.name_ar} icon={null} bg={ci % 2 === 0 ? C.sec : C.white}>
+                <SectionGrid list={list} onPress={go} />
+              </CollapsibleSection>
             </React.Fragment>
           );
         })}
@@ -228,6 +253,15 @@ export default function HomeScreen() {
     </View>
   );
 }
+
+/* ── Styles ── */
+const cs = StyleSheet.create({
+  wrap: { width: '100%' },
+  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 16 },
+  titleRow: { flexDirection: 'row', alignItems: 'center' },
+  title: { fontSize: 18, fontWeight: '900', color: C.text },
+  body: { paddingBottom: 16 },
+});
 
 const rc = StyleSheet.create({
   wrap: { width: CARD_W, backgroundColor: C.white, borderRadius: 18, overflow: 'hidden', elevation: 4, shadowColor: '#000', shadowOpacity: 0.10, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },
@@ -263,13 +297,7 @@ const s = StyleSheet.create({
   iconBtn: { padding: 4 },
   locBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
   locTxt: { fontSize: 15, fontWeight: '800', color: C.text },
-  section: { width: '100%' },
   divider: { height: 8, backgroundColor: '#EBEBF0' },
-  secHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, marginBottom: 14 },
-  secTitleRow: { flexDirection: 'row', alignItems: 'center' },
-  secTitle: { fontSize: 18, fontWeight: '900', color: C.text },
-  seeAllRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  seeAll: { fontSize: 14, color: C.primary, fontWeight: '700' },
   quickCat: { alignItems: 'center', gap: 7 },
   quickCircle: { width: 68, height: 68, borderRadius: 34, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', elevation: 2, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4 },
   quickLbl: { fontSize: 13, fontWeight: '700', color: C.text },
