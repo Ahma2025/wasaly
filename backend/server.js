@@ -1,6 +1,19 @@
 require('dotenv').config();
 process.on('unhandledRejection', (err) => { console.error('UnhandledRejection:', err?.message || err); });
 process.on('uncaughtException', (err) => { console.error('UncaughtException:', err?.message || err); });
+
+// Auto migrations — تضاف عند كل إقلاع بأمان
+async function runMigrations() {
+  const pool = require('./config/database');
+  const migrations = [
+    `ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS store_type VARCHAR(20) DEFAULT 'restaurant'`,
+    `ALTER TABLE banners ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
+  ];
+  for (const sql of migrations) {
+    try { await pool.query(sql); } catch (e) { /* column already exists */ }
+  }
+}
+runMigrations().catch(console.error);
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');

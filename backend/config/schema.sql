@@ -98,6 +98,7 @@ CREATE TABLE restaurants (
   tags TEXT[],
   opens_at TIME DEFAULT '08:00',
   closes_at TIME DEFAULT '23:00',
+  store_type VARCHAR(20) DEFAULT 'restaurant',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
