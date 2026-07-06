@@ -12,7 +12,8 @@ export default function Restaurants() {
   const [form, setForm] = useState({
     name_ar: '', description_ar: '', city: '', address: '', phone: '',
     min_order: '10', delivery_fee: '5', delivery_time_min: '20', delivery_time_max: '40',
-    owner_phone: '', owner_password: 'rest123', category_id: '1', lat: '31.9', lng: '35.2'
+    owner_phone: '', owner_password: 'rest123', category_id: '1', lat: '31.9', lng: '35.2',
+    store_type: 'restaurant'
   });
 
   useEffect(() => {
@@ -36,7 +37,7 @@ export default function Restaurants() {
       await api.post('/admin/restaurants', form);
       toast.success('تم إضافة المطعم ✅');
       setShowForm(false);
-      setForm({ name_ar: '', description_ar: '', city: '', address: '', phone: '', min_order: '10', delivery_fee: '5', delivery_time_min: '20', delivery_time_max: '40', owner_phone: '', owner_password: 'rest123', category_id: '1', lat: '31.9', lng: '35.2' });
+      setForm({ name_ar: '', description_ar: '', city: '', address: '', phone: '', min_order: '10', delivery_fee: '5', delivery_time_min: '20', delivery_time_max: '40', owner_phone: '', owner_password: 'rest123', category_id: '1', lat: '31.9', lng: '35.2', store_type: 'restaurant' });
       fetchRestaurants();
     } catch (e) { toast.error(e.message || 'فشل الإضافة'); }
     finally { setSaving(false); }
@@ -77,7 +78,27 @@ export default function Restaurants() {
 
       {showForm && (
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3">
-          <h2 className="font-bold text-gray-900">مطعم جديد</h2>
+          <h2 className="font-bold text-gray-900">مطعم / متجر جديد</h2>
+
+          {/* نوع المنشأة */}
+          <div>
+            <label className="text-xs font-bold text-gray-600 mb-2 block">نوع المنشأة *</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { val: 'restaurant', icon: '🍽️', label: 'مطعم', desc: 'يظهر بالصفحة الرئيسية' },
+                { val: 'market',     icon: '🛒', label: 'ماركت', desc: 'يظهر بقسم الماركت' },
+              ].map(t => (
+                <button key={t.val} type="button"
+                  onClick={() => setForm(f => ({ ...f, store_type: t.val }))}
+                  className={`p-3 rounded-xl border-2 text-right transition-all ${form.store_type === t.val ? 'border-orange-500 bg-orange-50' : 'border-gray-200 bg-white'}`}>
+                  <div className="text-2xl mb-1">{t.icon}</div>
+                  <div className={`text-sm font-bold ${form.store_type === t.val ? 'text-orange-600' : 'text-gray-700'}`}>{t.label}</div>
+                  <div className="text-[10px] text-gray-400 mt-0.5">{t.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <input className="w-full border border-gray-200 rounded-xl p-3 text-sm" placeholder="اسم المطعم *"
             value={form.name_ar} onChange={e => setForm(f => ({...f, name_ar: e.target.value}))} />
           <textarea className="w-full border border-gray-200 rounded-xl p-3 text-sm" placeholder="وصف المطعم" rows={2}
@@ -156,7 +177,7 @@ export default function Restaurants() {
                       {r.is_featured ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-semibold">⭐</span> : null}
                     </div>
                   </div>
-                  <p className="text-xs text-gray-400">{r.city} • {r.phone || 'بدون هاتف'}</p>
+                  <p className="text-xs text-gray-400">{r.city} • {r.phone || 'بدون هاتف'} {r.store_type === 'market' ? '🛒' : '🍽️'}</p>
                   <p className="text-xs text-gray-400">المالك: {r.owner_name || r.owner_phone || 'غير محدد'}</p>
                 </div>
               </div>

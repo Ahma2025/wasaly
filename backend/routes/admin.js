@@ -149,7 +149,7 @@ router.post('/restaurants', auth, adminOnly, async (req, res) => {
   try {
     const { name_ar, description_ar, category_id, city, address, lat, lng,
             phone, email, min_order, delivery_fee, delivery_time_min, delivery_time_max,
-            owner_phone, owner_password } = req.body;
+            owner_phone, owner_password, store_type } = req.body;
 
     let owner_id = null;
     if (owner_phone) {
@@ -169,9 +169,11 @@ router.post('/restaurants', auth, adminOnly, async (req, res) => {
 
     const { rows } = await pool.query(
       `INSERT INTO restaurants (name_ar, description_ar, category_id, city, address, lat, lng,
-        phone, email, min_order, delivery_fee, delivery_time_min, delivery_time_max, owner_id, is_active, is_verified) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,true,true) RETURNING *`,
+        phone, email, min_order, delivery_fee, delivery_time_min, delivery_time_max, owner_id, is_active, is_verified, store_type)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,true,true,$15) RETURNING *`,
       [name_ar, description_ar, category_id, city, address, lat || 31.9, lng || 35.2,
-       phone, email, min_order || 10, delivery_fee || 5, delivery_time_min || 20, delivery_time_max || 40, owner_id]
+       phone, email, min_order || 10, delivery_fee || 5, delivery_time_min || 20, delivery_time_max || 40, owner_id,
+       store_type || 'restaurant']
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (e) {

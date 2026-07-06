@@ -50,16 +50,20 @@ export default function MarketScreen() {
 
   const load = async () => {
     try {
-      const r = await api.get('/restaurants?limit=60');
+      const r = await api.get('/restaurants?limit=60&store_type=market');
       setStores(r.data || []);
     } catch (e) { console.error(e); }
   };
 
-  const filtered = stores.filter(r =>
-    r.type === selected || r.store_type === selected || (selected === 'supermarket' && r.name_ar?.includes('ماركت'))
-      || (selected === 'pharmacy' && (r.name_ar?.includes('صيدل') || r.name_ar?.includes('دواء')))
-  );
-  const displayList = filtered.length > 0 ? filtered : stores.slice(0, 6);
+  // فلتر محلي حسب القسم المختار
+  const filtered = stores.filter(r => {
+    if (selected === 'supermarket') return !r.market_type || r.market_type === 'supermarket' || r.name_ar?.includes('ماركت') || r.name_ar?.includes('سوبر');
+    if (selected === 'pharmacy')    return r.market_type === 'pharmacy' || r.name_ar?.includes('صيدل') || r.name_ar?.includes('دواء');
+    if (selected === 'bakery')      return r.market_type === 'bakery'   || r.name_ar?.includes('مخبز') || r.name_ar?.includes('خبز');
+    if (selected === 'grocery')     return r.market_type === 'grocery'  || r.name_ar?.includes('بقال');
+    return true;
+  });
+  const displayList = filtered.length > 0 ? filtered : stores;
 
   return (
     <View style={s.container}>

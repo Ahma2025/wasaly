@@ -32,6 +32,10 @@ router.get('/', async (req, res) => {
     if (category_id) { query += ` AND r.category_id = $${paramIdx++}`; params.push(category_id); }
     if (city) { query += ` AND r.city = $${paramIdx++}`; params.push(city); }
     if (search) { query += ` AND (r.name_ar ILIKE $${paramIdx} OR r.name_en ILIKE $${paramIdx})`; params.push(`%${search}%`); paramIdx++; }
+    // فلتر نوع المنشأة: مطاعم أو ماركت
+    const { store_type } = req.query;
+    if (store_type) { query += ` AND r.store_type = $${paramIdx++}`; params.push(store_type); }
+    else if (!owner_id) { query += ` AND (r.store_type = 'restaurant' OR r.store_type IS NULL)`; }
 
     const orderMap = {
       rating: 'r.rating DESC',

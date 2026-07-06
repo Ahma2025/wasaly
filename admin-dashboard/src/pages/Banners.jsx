@@ -2,8 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 
-const API = import.meta.env.VITE_API_URL || 'https://wasaly-production.up.railway.app';
-
 export default function Banners() {
   const [banners, setBanners] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -39,13 +37,9 @@ export default function Banners() {
     if (!imageFile) return null;
     const fd = new FormData();
     fd.append('file', imageFile);
-    const r = await fetch(`${API}/api/upload`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
-      body: fd,
-    });
-    const data = await r.json();
-    return data.url;
+    // axios يضبط Content-Type مع boundary تلقائياً لـ FormData
+    const r = await api.post('/upload', fd);
+    return r.url || null;
   };
 
   const submit = async (e) => {
