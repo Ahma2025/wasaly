@@ -6,7 +6,7 @@ export default function Banners() {
   const [banners, setBanners] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [form, setForm] = useState({ title_ar: '', sort_order: 0 });
+  const [form, setForm] = useState({ title_ar: '', sort_order: '' });
   const [preview, setPreview] = useState(null);
   const [imageFile, setImageFile] = useState(null);
   const fileRef = useRef();
@@ -50,9 +50,10 @@ export default function Banners() {
     try {
       const imageUrl = await uploadImage();
       if (!imageUrl) throw new Error('فشل رفع الصورة');
-      await api.post('/banners', { ...form, image: imageUrl, is_active: true });
+      const sortOrder = form.sort_order === '' ? banners.length + 1 : parseInt(form.sort_order) || 1;
+      await api.post('/banners', { ...form, sort_order: sortOrder, image: imageUrl, is_active: true });
       toast.success('تم إضافة الإعلان ✅');
-      setForm({ title_ar: '', sort_order: 0 });
+      setForm({ title_ar: '', sort_order: '' });
       setPreview(null);
       setImageFile(null);
       if (fileRef.current) fileRef.current.value = '';
@@ -119,11 +120,13 @@ export default function Banners() {
 
           {/* الترتيب */}
           <div>
-            <label className="text-xs font-semibold text-gray-600 mb-1 block">الترتيب (رقم أصغر = يظهر أول)</label>
+            <label className="text-xs font-semibold text-gray-600 mb-1 block">الترتيب (1 = يظهر أول، اتركه فاضياً للتلقائي)</label>
             <input
               type="number"
+              min="1"
               value={form.sort_order}
-              onChange={e => setForm(p => ({ ...p, sort_order: parseInt(e.target.value) || 0 }))}
+              placeholder="مثال: 1"
+              onChange={e => setForm(p => ({ ...p, sort_order: e.target.value }))}
               className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400"
             />
           </div>

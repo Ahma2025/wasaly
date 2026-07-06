@@ -36,7 +36,7 @@ export default function BannerSlider({ banners }) {
         ref.current?.scrollTo({ x: next * W, animated: true });
         return next;
       });
-    }, 3200);
+    }, 2700);
     return () => clearInterval(t);
   }, [items.length]);
 
@@ -97,7 +97,7 @@ const s = StyleSheet.create({
   wrap: { marginBottom: 6 },
   slide: {
     width: W,
-    height: 210,
+    height: 248,
     paddingHorizontal: 22,
     paddingTop: 22,
     paddingBottom: 16,
@@ -110,7 +110,7 @@ const s = StyleSheet.create({
   imgOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.32)' },
   iconWrap: { position: 'absolute', bottom: 8, left: 16 },
   textBlock: { zIndex: 1, marginTop: 'auto' },
-  title: { color: '#FFF', fontSize: 21, fontWeight: '900', textAlign: 'right', marginBottom: 6, textShadowColor: 'rgba(0,0,0,0.25)', textShadowRadius: 4 },
+  title: { color: '#FFF', fontSize: 23, fontWeight: '800', textAlign: 'right', marginBottom: 6, letterSpacing: 0.4, textShadowColor: 'rgba(0,0,0,0.55)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 8 },
   sub: { color: 'rgba(255,255,255,0.88)', fontSize: 13.5, textAlign: 'right', fontWeight: '500', lineHeight: 20 },
   orderBtn: { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
   orderBtnTxt: { color: '#FFF', fontSize: 13, fontWeight: '800' },

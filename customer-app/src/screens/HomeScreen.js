@@ -222,7 +222,9 @@ export default function HomeScreen() {
         {suggested.length > 0 && (
           <CollapsibleSection title="مطاعم مقترحة" icon="sparkles" bg={C.sec}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 4 }}>
+              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 4 }}
+              onContentSizeChange={(w) => { /* scroll to right end so first item (rightmost) shows first */ }}
+              ref={r => { if (r && suggested.length > 0) r.scrollToEnd({ animated: false }); }}>
               {suggested.map(r => <HCard key={r.id} r={r} onPress={() => go(r.id)} />)}
             </ScrollView>
           </CollapsibleSection>
