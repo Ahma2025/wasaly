@@ -20,7 +20,9 @@ const FALLBACK = [
 export default function BannerSlider({ banners }) {
   const ref = useRef(null);
   const [idx, setIdx] = useState(0);
-  const items = (banners && banners.length > 0) ? banners : FALLBACK;
+  // دمج الـ fallback مع بانرات الـ API — الـ fallback دايماً موجود
+  const apiBanners = (banners || []).filter(b => b && (b.title || b.title_ar));
+  const items = apiBanners.length > 0 ? [...apiBanners, ...FALLBACK] : FALLBACK;
 
   useEffect(() => {
     const t = setInterval(() => {
