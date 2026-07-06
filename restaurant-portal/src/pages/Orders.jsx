@@ -319,18 +319,44 @@ function OrderItems({ orderId }) {
   return (
     <div className="bg-white rounded-xl p-3">
       <p className="text-xs font-bold text-gray-500 mb-2 uppercase">الأصناف</p>
-      <div className="space-y-2">
-        {items.map((item, i) => (
-          <div key={i} className="flex justify-between items-start">
-            <div className="flex-1">
-              <span className="text-sm text-gray-800 font-semibold">{item.quantity}× {item.name_ar}</span>
-              {item.options_text && (
-                <p className="text-xs text-gray-400 mt-0.5">{item.options_text}</p>
+      <div className="space-y-3">
+        {items.map((item, i) => {
+          // options محفوظة كـ JSON string أو array
+          let opts = [];
+          try {
+            opts = typeof item.options === 'string' ? JSON.parse(item.options) : (item.options || []);
+          } catch {}
+
+          return (
+            <div key={i} className="border-b border-gray-50 pb-2 last:border-0 last:pb-0">
+              <div className="flex justify-between items-start">
+                <span className="text-sm text-gray-800 font-bold">{item.quantity}× {item.name_ar}</span>
+                <span className="text-sm font-bold text-orange-500">{parseFloat(item.subtotal || item.price * item.quantity || 0).toFixed(2)}₪</span>
+              </div>
+
+              {/* الإضافات */}
+              {opts.length > 0 && (
+                <div className="mt-1.5 space-y-0.5 pr-3">
+                  {opts.map((opt, j) => (
+                    <div key={j} className="flex justify-between items-center">
+                      <span className="text-xs text-gray-500">
+                        ✚ {opt.name_ar || opt.name || opt.label || opt}
+                      </span>
+                      {(opt.price > 0) && (
+                        <span className="text-xs text-gray-400">+{parseFloat(opt.price).toFixed(2)}₪</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ملاحظة الصنف */}
+              {item.notes && (
+                <p className="text-xs text-amber-600 mt-1 pr-3">📝 {item.notes}</p>
               )}
             </div>
-            <span className="text-sm font-bold text-gray-700">{parseFloat(item.subtotal || item.price * item.quantity || 0).toFixed(2)}₪</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
