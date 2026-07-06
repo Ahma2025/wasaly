@@ -38,6 +38,7 @@ import OrdersHistoryScreen from './src/screens/OrdersHistoryScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 import AddAddressScreen from './src/screens/AddAddressScreen';
 import RatingScreen from './src/screens/RatingScreen';
+import MarketScreen from './src/screens/MarketScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -47,22 +48,27 @@ function MainTabs() {
     <Tab.Navigator screenOptions={({ route }) => ({
       tabBarIcon: ({ focused, color, size }) => {
         const icons = {
-          'الرئيسية': focused ? 'home' : 'home-outline',
-          'بحث': focused ? 'search' : 'search-outline',
-          'سلتي': focused ? 'cart' : 'cart-outline',
-          'طلباتي': focused ? 'receipt' : 'receipt-outline',
-          'حسابي': focused ? 'person' : 'person-outline',
+          'حسابي':    focused ? 'person'       : 'person-outline',
+          'طلباتي':   focused ? 'receipt'      : 'receipt-outline',
+          'ماركت':    focused ? 'cart'         : 'cart-outline',
+          'سلتي':     focused ? 'bag'          : 'bag-outline',
+          'بحث':      focused ? 'search'       : 'search-outline',
+          'الرئيسية': focused ? 'home'         : 'home-outline',
         };
         return <Ionicons name={icons[route.name]} size={size} color={color} />;
       },
-      tabBarActiveTintColor: '#FF6B00', tabBarInactiveTintColor: '#8E8E93',
-      headerShown: false, tabBarStyle: { paddingBottom: 5, height: 60 }
+      tabBarActiveTintColor: '#FF6B00',
+      tabBarInactiveTintColor: '#8E8E93',
+      headerShown: false,
+      tabBarStyle: { paddingBottom: 5, height: 60 },
     })}>
+      {/* الترتيب من اليسار لليمين: حسابي ← طلباتي ← ماركت ← سلتي ← بحث ← الرئيسية */}
+      <Tab.Screen name="حسابي"    component={ProfileScreen} />
+      <Tab.Screen name="طلباتي"   component={OrdersHistoryScreen} />
+      <Tab.Screen name="ماركت"    component={MarketScreen} />
+      <Tab.Screen name="سلتي"     component={CartScreen} />
+      <Tab.Screen name="بحث"      component={SearchScreen} />
       <Tab.Screen name="الرئيسية" component={HomeScreen} />
-      <Tab.Screen name="بحث" component={SearchScreen} />
-      <Tab.Screen name="سلتي" component={CartScreen} />
-      <Tab.Screen name="طلباتي" component={OrdersHistoryScreen} />
-      <Tab.Screen name="حسابي" component={ProfileScreen} />
     </Tab.Navigator>
   );
 }

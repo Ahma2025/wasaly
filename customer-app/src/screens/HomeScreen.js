@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Image, RefreshControl, Dimensions, StatusBar
+  Image, RefreshControl, Dimensions, StatusBar, Animated, Pressable
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -10,18 +10,28 @@ import BannerSlider from '../components/BannerSlider';
 
 const { width } = Dimensions.get('window');
 const CARD_W = (width - 48) / 2;
-const C = { primary: '#FF6B00', bg: '#F2F2F7', white: '#FFF', text: '#1A1A2E', gray: '#6B6B6B', light: '#F8F8F8' };
+const C = { primary: '#FF6B00', bg: '#F2F2F7', white: '#FFF', text: '#1A1A2E', gray: '#6B6B6B', light: '#F8F8F8', sec: '#FFF8F4' };
 
-/* ───── كرت المطعم ───── */
+/* ── كرت مع موشن ── */
+function AnimCard({ children, style, onPress }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const press = () => Animated.spring(scale, { toValue: 0.95, useNativeDriver: true, speed: 50 }).start();
+  const release = () => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 20 }).start();
+  return (
+    <Pressable onPress={onPress} onPressIn={press} onPressOut={release}>
+      <Animated.View style={[style, { transform: [{ scale }] }]}>{children}</Animated.View>
+    </Pressable>
+  );
+}
+
+/* ── كرت الشبكة (grid) ── */
 function RCard({ r, onPress }) {
   return (
-    <TouchableOpacity style={rc.wrap} onPress={onPress} activeOpacity={0.9}>
+    <AnimCard style={rc.wrap} onPress={onPress}>
       <View style={rc.imgBox}>
         <Image source={{ uri: r.cover_image || r.logo }} style={rc.img} resizeMode="cover" />
         {(r.discount_percent > 0 || r.discount > 0) && (
-          <View style={rc.badge}>
-            <Text style={rc.badgeTxt}>خصم {r.discount_percent || r.discount}%</Text>
-          </View>
+          <View style={rc.badge}><Text style={rc.badgeTxt}>خصم {r.discount_percent || r.discount}%</Text></View>
         )}
         {!r.is_open && (
           <View style={rc.overlay}><Text style={rc.overlayTxt}>مغلق</Text></View>
@@ -34,21 +44,21 @@ function RCard({ r, onPress }) {
         <Text style={rc.name} numberOfLines={1}>{r.name_ar}</Text>
         <Text style={rc.addr} numberOfLines={1}>{r.address || r.city || ''}</Text>
         <View style={rc.meta}>
-          <Ionicons name="star" size={13} color="#FFB800" />
+          <Ionicons name="star" size={12} color="#FFB800" />
           <Text style={rc.metaTxt}>{parseFloat(r.rating || 0).toFixed(1)}</Text>
           <Text style={rc.sep}>·</Text>
-          <Ionicons name="time-outline" size={13} color={C.gray} />
+          <Ionicons name="time-outline" size={12} color={C.gray} />
           <Text style={rc.metaTxt}>{r.delivery_time_min}-{r.delivery_time_max} د</Text>
         </View>
       </View>
-    </TouchableOpacity>
+    </AnimCard>
   );
 }
 
-/* ───── كرت أفقي (مقترحة) ───── */
+/* ── كرت أفقي (مقترحة) ── */
 function HCard({ r, onPress }) {
   return (
-    <TouchableOpacity style={hc.wrap} onPress={onPress} activeOpacity={0.9}>
+    <AnimCard style={hc.wrap} onPress={onPress}>
       <Image source={{ uri: r.logo || r.cover_image }} style={hc.img} resizeMode="cover" />
       {!r.is_open && <View style={hc.closed}><Text style={hc.closedTxt}>مغلق</Text></View>}
       <Text style={hc.name} numberOfLines={2}>{r.name_ar}</Text>
@@ -56,18 +66,24 @@ function HCard({ r, onPress }) {
         <Ionicons name="star" size={12} color="#FFB800" />
         <Text style={hc.rating}>{parseFloat(r.rating || 0).toFixed(1)}</Text>
       </View>
-    </TouchableOpacity>
+    </AnimCard>
   );
 }
 
-/* ───── رأس القسم ───── */
-function SectionHead({ title, onSeeAll }) {
+/* ── رأس القسم: النص يمين، الأيقونة يسار ── */
+function SectionHead({ title, icon, onSeeAll }) {
   return (
     <View style={s.secHead}>
-      <TouchableOpacity onPress={onSeeAll}>
-        {onSeeAll && <Text style={s.seeAll}>عرض الكل</Text>}
-      </TouchableOpacity>
-      <Text style={s.secTitle}>{title}</Text>
+      {onSeeAll ? (
+        <TouchableOpacity onPress={onSeeAll} style={s.seeAllRow}>
+          <Text style={s.seeAll}>عرض الكل</Text>
+          <Ionicons name="chevron-back" size={14} color={C.primary} />
+        </TouchableOpacity>
+      ) : <View />}
+      <View style={s.secTitleRow}>
+        <Text style={s.secTitle}>{title}</Text>
+        {icon ? <Ionicons name={icon} size={20} color={C.primary} style={{ marginLeft: 6 }} /> : null}
+      </View>
     </View>
   );
 }
@@ -122,41 +138,46 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}
-      >
+      <ScrollView showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}>
+
         {/* Banner */}
         <BannerSlider banners={banners} />
 
-        {/* تصنيفات سريعة */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 12, marginBottom: 20 }}>
-          {categories.map(cat => (
-            <TouchableOpacity key={cat.id} style={s.quickCat} onPress={() => go(byCat(cat.id)[0]?.id)}>
-              <View style={s.quickCircle}>
-                <Text style={{ fontSize: 28 }}>{cat.icon || '🍽️'}</Text>
-              </View>
-              <Text style={s.quickLbl}>{cat.name_ar}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        {/* ── تصنيفات سريعة ── */}
+        <View style={[s.section, { backgroundColor: C.white, paddingVertical: 16 }]}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 12 }}>
+            {categories.map(cat => (
+              <TouchableOpacity key={cat.id} style={s.quickCat} onPress={() => go(byCat(cat.id)[0]?.id)}>
+                <View style={s.quickCircle}>
+                  <Text style={{ fontSize: 28 }}>{cat.icon || '🍽️'}</Text>
+                </View>
+                <Text style={s.quickLbl}>{cat.name_ar}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
 
-        {/* مطاعم مقترحة */}
+        <View style={s.divider} />
+
+        {/* ── مطاعم مقترحة ── */}
         {suggested.length > 0 && (
-          <View style={{ marginBottom: 24 }}>
-            <SectionHead title="🌟 مطاعم مقترحة" />
+          <View style={[s.section, { backgroundColor: C.sec, paddingTop: 4, paddingBottom: 16 }]}>
+            <SectionHead title="مطاعم مقترحة" icon="sparkles" />
             <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14 }}>
+              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingVertical: 4 }}>
               {suggested.map(r => <HCard key={r.id} r={r} onPress={() => go(r.id)} />)}
             </ScrollView>
           </View>
         )}
 
-        {/* الأعلى تقييماً */}
+        <View style={s.divider} />
+
+        {/* ── الأعلى تقييماً ── */}
         {topRated.length > 0 && (
-          <View style={s.section}>
-            <SectionHead title="⭐ الأعلى تقييماً" onSeeAll={() => {}} />
+          <View style={[s.section, { backgroundColor: C.white, paddingTop: 4, paddingBottom: 16 }]}>
+            <SectionHead title="الأعلى تقييماً" icon="star" onSeeAll={() => {}} />
             <View style={s.grid}>
               {topRated.slice(0, expanded['top'] ? topRated.length : 4).map(r => (
                 <RCard key={r.id} r={r} onPress={() => go(r.id)} />
@@ -164,31 +185,35 @@ export default function HomeScreen() {
             </View>
             {topRated.length > 4 && (
               <TouchableOpacity style={s.moreBtn} onPress={() => toggle('top')}>
-                <Text style={s.moreTxt}>{expanded['top'] ? '▲ عرض أقل' : '▼ اعرض المزيد'}</Text>
+                <Text style={s.moreTxt}>{expanded['top'] ? 'عرض أقل ▲' : 'اعرض المزيد ▼'}</Text>
               </TouchableOpacity>
             )}
           </View>
         )}
 
-        {/* أقسام التصنيفات */}
-        {categories.map(cat => {
+        {/* ── أقسام التصنيفات ── */}
+        {categories.map((cat, ci) => {
           const list = byCat(cat.id);
           if (list.length === 0) return null;
           const isExp = expanded[cat.id];
+          const bg = ci % 2 === 0 ? C.sec : C.white;
           return (
-            <View key={cat.id} style={s.section}>
-              <SectionHead title={`${cat.icon || '🍽️'} ${cat.name_ar}`} onSeeAll={() => {}} />
-              <View style={s.grid}>
-                {list.slice(0, isExp ? list.length : 4).map(r => (
-                  <RCard key={r.id} r={r} onPress={() => go(r.id)} />
-                ))}
+            <React.Fragment key={cat.id}>
+              <View style={s.divider} />
+              <View style={[s.section, { backgroundColor: bg, paddingTop: 4, paddingBottom: 16 }]}>
+                <SectionHead title={cat.name_ar} icon={null} onSeeAll={() => {}} />
+                <View style={s.grid}>
+                  {list.slice(0, isExp ? list.length : 4).map(r => (
+                    <RCard key={r.id} r={r} onPress={() => go(r.id)} />
+                  ))}
+                </View>
+                {list.length > 4 && (
+                  <TouchableOpacity style={s.moreBtn} onPress={() => toggle(cat.id)}>
+                    <Text style={s.moreTxt}>{isExp ? 'عرض أقل ▲' : 'اعرض المزيد ▼'}</Text>
+                  </TouchableOpacity>
+                )}
               </View>
-              {list.length > 4 && (
-                <TouchableOpacity style={s.moreBtn} onPress={() => toggle(cat.id)}>
-                  <Text style={s.moreTxt}>{isExp ? '▲ عرض أقل' : '▼ اعرض المزيد'}</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            </React.Fragment>
           );
         })}
 
@@ -204,9 +229,8 @@ export default function HomeScreen() {
   );
 }
 
-/* ── styles ── */
 const rc = StyleSheet.create({
-  wrap: { width: CARD_W, backgroundColor: C.white, borderRadius: 18, overflow: 'hidden', elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8 },
+  wrap: { width: CARD_W, backgroundColor: C.white, borderRadius: 18, overflow: 'hidden', elevation: 4, shadowColor: '#000', shadowOpacity: 0.10, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },
   imgBox: { width: '100%', height: 115, position: 'relative' },
   img: { width: '100%', height: '100%' },
   badge: { position: 'absolute', top: 8, right: 8, backgroundColor: C.primary, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 },
@@ -224,7 +248,7 @@ const rc = StyleSheet.create({
 });
 
 const hc = StyleSheet.create({
-  wrap: { width: 105, alignItems: 'center', position: 'relative' },
+  wrap: { width: 105, alignItems: 'center' },
   img: { width: 82, height: 82, borderRadius: 41, backgroundColor: '#EEE' },
   closed: { position: 'absolute', top: 0, left: 11, right: 11, height: 82, borderRadius: 41, backgroundColor: 'rgba(0,0,0,0.42)', justifyContent: 'center', alignItems: 'center' },
   closedTxt: { color: '#FFF', fontSize: 11, fontWeight: '800' },
@@ -239,14 +263,17 @@ const s = StyleSheet.create({
   iconBtn: { padding: 4 },
   locBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
   locTxt: { fontSize: 15, fontWeight: '800', color: C.text },
-  section: { paddingHorizontal: 16, marginBottom: 24 },
-  secHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 14 },
+  section: { width: '100%' },
+  divider: { height: 8, backgroundColor: '#EBEBF0' },
+  secHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, marginBottom: 14 },
+  secTitleRow: { flexDirection: 'row', alignItems: 'center' },
   secTitle: { fontSize: 18, fontWeight: '900', color: C.text },
+  seeAllRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   seeAll: { fontSize: 14, color: C.primary, fontWeight: '700' },
   quickCat: { alignItems: 'center', gap: 7 },
-  quickCircle: { width: 68, height: 68, borderRadius: 34, backgroundColor: C.white, alignItems: 'center', justifyContent: 'center', elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 6 },
+  quickCircle: { width: 68, height: 68, borderRadius: 34, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', elevation: 2, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4 },
   quickLbl: { fontSize: 13, fontWeight: '700', color: C.text },
-  grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 14 },
-  moreBtn: { marginTop: 12, borderWidth: 1.5, borderColor: C.primary, borderRadius: 14, paddingVertical: 11, alignItems: 'center' },
+  grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16 },
+  moreBtn: { marginTop: 14, marginHorizontal: 16, borderWidth: 1.5, borderColor: C.primary, borderRadius: 14, paddingVertical: 11, alignItems: 'center' },
   moreTxt: { color: C.primary, fontWeight: '800', fontSize: 15 },
 });

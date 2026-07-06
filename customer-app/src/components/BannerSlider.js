@@ -5,9 +5,16 @@ import { Ionicons } from '@expo/vector-icons';
 const W = Dimensions.get('window').width;
 
 const FALLBACK = [
-  { id: '1', title: 'وصلّي — التوصيل الأسرع 🚀', sub: 'اطلب من أفضل المطاعم في منطقتك', bg: '#FF6B00', icon: 'bicycle', circle: 'rgba(255,255,255,0.15)' },
-  { id: '2', title: 'عروض حصرية كل يوم 🔥', sub: 'خصومات تصل إلى 30٪ على مطاعم مختارة', bg: '#8B0000', icon: 'pricetag', circle: 'rgba(255,255,255,0.12)' },
-  { id: '3', title: 'توصيل مجاني على أول طلب 🛵', sub: 'سجّل الآن واستمتع بالخدمة', bg: '#005C4B', icon: 'gift', circle: 'rgba(255,255,255,0.12)' },
+  { id: '1',  title: 'وصلّي — التوصيل الأسرع',    sub: 'اطلب من أفضل المطاعم في منطقتك',         bg: '#FF6B00', icon: 'bicycle',      circle: 'rgba(255,255,255,0.15)' },
+  { id: '2',  title: 'عروض حصرية كل يوم 🔥',       sub: 'خصومات تصل إلى 30٪ على مطاعم مختارة',    bg: '#8B0000', icon: 'pricetag',     circle: 'rgba(255,255,255,0.12)' },
+  { id: '3',  title: 'توصيل مجاني على أول طلب',    sub: 'سجّل الآن واستمتع بالتوصيل بدون رسوم',   bg: '#005C4B', icon: 'gift',         circle: 'rgba(255,255,255,0.12)' },
+  { id: '4',  title: 'برغر يستاهل الانتظار 🍔',     sub: 'أجود أنواع البرغر على بُعد نقرة واحدة',  bg: '#7B3F00', icon: 'fast-food',    circle: 'rgba(255,255,255,0.13)' },
+  { id: '5',  title: 'بيتزا ساخنة حتى بابك 🍕',    sub: 'من الفرن لبابك خلال 30 دقيقة',            bg: '#B71C1C', icon: 'restaurant',   circle: 'rgba(255,255,255,0.12)' },
+  { id: '6',  title: 'صيدلية 24 ساعة 💊',           sub: 'اطلب دواءك من المنزل في أي وقت',          bg: '#1565C0', icon: 'medical',      circle: 'rgba(255,255,255,0.13)' },
+  { id: '7',  title: 'سوبرماركت بضغطة زر 🛒',      sub: 'توصيل احتياجاتك في أسرع وقت',             bg: '#2E7D32', icon: 'cart',         circle: 'rgba(255,255,255,0.12)' },
+  { id: '8',  title: 'مطاعم جديدة أضفناها لك ✨',   sub: 'اكتشف خيارات أكثر في منطقتك',             bg: '#6A1B9A', icon: 'star',         circle: 'rgba(255,255,255,0.13)' },
+  { id: '9',  title: 'دجاج مقرمش في 20 دقيقة 🍗',  sub: 'الأفضل في المنطقة — جرّب الآن',           bg: '#E65100', icon: 'flame',        circle: 'rgba(255,255,255,0.12)' },
+  { id: '10', title: 'قهوتك الصباحية جاهزة ☕',     sub: 'ابدأ يومك بأفضل القهوة في المدينة',        bg: '#3E2723', icon: 'cafe',         circle: 'rgba(255,255,255,0.13)' },
 ];
 
 export default function BannerSlider({ banners }) {
@@ -22,7 +29,7 @@ export default function BannerSlider({ banners }) {
         ref.current?.scrollTo({ x: next * W, animated: true });
         return next;
       });
-    }, 3500);
+    }, 3200);
     return () => clearInterval(t);
   }, [items.length]);
 
@@ -38,23 +45,24 @@ export default function BannerSlider({ banners }) {
       >
         {items.map((item, i) => (
           <View key={item.id || i} style={[s.slide, { backgroundColor: item.bg || item.color || '#FF6B00' }]}>
-            {/* دائرة زخرفية */}
             <View style={[s.circle1, { backgroundColor: item.circle || 'rgba(255,255,255,0.12)' }]} />
             <View style={[s.circle2, { backgroundColor: item.circle || 'rgba(255,255,255,0.08)' }]} />
-            {/* أيقونة */}
+            <View style={[s.circle3, { backgroundColor: item.circle || 'rgba(255,255,255,0.06)' }]} />
             <View style={s.iconWrap}>
-              <Ionicons name={item.icon || 'restaurant'} size={40} color="rgba(255,255,255,0.9)" />
+              <Ionicons name={item.icon || 'restaurant'} size={70} color="rgba(255,255,255,0.18)" />
             </View>
-            {/* نص */}
             <View style={s.textBlock}>
               <Text style={s.title}>{item.title || item.title_ar || ''}</Text>
               <Text style={s.sub} numberOfLines={2}>{item.sub || item.subtitle_ar || item.description || ''}</Text>
+            </View>
+            <View style={s.orderBtn}>
+              <Text style={s.orderBtnTxt}>اطلب الآن ←</Text>
             </View>
           </View>
         ))}
       </ScrollView>
 
-      {/* نقاط التنقل */}
+      {/* نقاط */}
       <View style={s.dots}>
         {items.map((_, i) => (
           <TouchableOpacity key={i} onPress={() => { ref.current?.scrollTo({ x: i * W, animated: true }); setIdx(i); }}>
@@ -67,22 +75,26 @@ export default function BannerSlider({ banners }) {
 }
 
 const s = StyleSheet.create({
-  wrap: { marginBottom: 8 },
+  wrap: { marginBottom: 6 },
   slide: {
     width: W,
-    height: 170,
-    paddingHorizontal: 24,
-    paddingVertical: 20,
-    justifyContent: 'flex-end',
+    height: 210,
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    paddingBottom: 16,
+    justifyContent: 'space-between',
     overflow: 'hidden',
   },
-  circle1: { position: 'absolute', width: 180, height: 180, borderRadius: 90, top: -50, left: -40 },
-  circle2: { position: 'absolute', width: 120, height: 120, borderRadius: 60, bottom: -30, right: 20 },
-  iconWrap: { position: 'absolute', top: 20, left: 24, opacity: 0.85 },
+  circle1: { position: 'absolute', width: 220, height: 220, borderRadius: 110, top: -70, left: -60 },
+  circle2: { position: 'absolute', width: 150, height: 150, borderRadius: 75, bottom: -40, right: -10 },
+  circle3: { position: 'absolute', width: 90, height: 90, borderRadius: 45, top: 10, right: 80 },
+  iconWrap: { position: 'absolute', bottom: 8, left: 16 },
   textBlock: { zIndex: 1 },
-  title: { color: '#FFF', fontSize: 19, fontWeight: '900', textAlign: 'right', marginBottom: 5, textShadowColor: 'rgba(0,0,0,0.2)', textShadowRadius: 4 },
-  sub: { color: 'rgba(255,255,255,0.88)', fontSize: 13, textAlign: 'right', fontWeight: '500' },
-  dots: { flexDirection: 'row', justifyContent: 'center', marginTop: 10, gap: 6 },
-  dot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#D1D1D6' },
-  dotOn: { width: 22, borderRadius: 4, backgroundColor: '#FF6B00' },
+  title: { color: '#FFF', fontSize: 21, fontWeight: '900', textAlign: 'right', marginBottom: 6, textShadowColor: 'rgba(0,0,0,0.25)', textShadowRadius: 4 },
+  sub: { color: 'rgba(255,255,255,0.88)', fontSize: 13.5, textAlign: 'right', fontWeight: '500', lineHeight: 20 },
+  orderBtn: { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
+  orderBtnTxt: { color: '#FFF', fontSize: 13, fontWeight: '800' },
+  dots: { flexDirection: 'row', justifyContent: 'center', marginTop: 10, gap: 5, flexWrap: 'wrap', paddingHorizontal: 20 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#D1D1D6' },
+  dotOn: { width: 20, borderRadius: 3, backgroundColor: '#FF6B00' },
 });
