@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Dimensions, TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 const W = Dimensions.get('window').width;
@@ -20,7 +20,7 @@ const FALLBACK = [
 export default function BannerSlider({ banners }) {
   const ref = useRef(null);
   const [idx, setIdx] = useState(0);
-  // دايماً الـ fallback — الإعلانات الحقيقية تُضاف من الإدمن مع صور
+  // إذا في إعلانات حقيقية من الإدمن (فيها صورة) = اعرضها فقط، وإلا الـ fallback
   const apiBanners = (banners || []).filter(b => b && b.image);
   const items = apiBanners.length > 0 ? apiBanners : FALLBACK;
 
@@ -46,21 +46,33 @@ export default function BannerSlider({ banners }) {
         onMomentumScrollEnd={e => setIdx(Math.round(e.nativeEvent.contentOffset.x / W))}
       >
         {items.map((item, i) => (
-          <View key={item.id || i} style={[s.slide, { backgroundColor: item.bg || item.color || '#FF6B00' }]}>
-            <View style={[s.circle1, { backgroundColor: item.circle || 'rgba(255,255,255,0.12)' }]} />
-            <View style={[s.circle2, { backgroundColor: item.circle || 'rgba(255,255,255,0.08)' }]} />
-            <View style={[s.circle3, { backgroundColor: item.circle || 'rgba(255,255,255,0.06)' }]} />
-            <View style={s.iconWrap}>
-              <Ionicons name={item.icon || 'restaurant'} size={70} color="rgba(255,255,255,0.18)" />
+          item.image ? (
+            /* إعلان برصورة من الإدمن */
+            <View key={item.id || i} style={s.slide}>
+              <Image source={{ uri: item.image }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              <View style={s.imgOverlay} />
+              <View style={s.textBlock}>
+                <Text style={s.title}>{item.title_ar || item.title || ''}</Text>
+              </View>
             </View>
-            <View style={s.textBlock}>
-              <Text style={s.title}>{item.title || item.title_ar || ''}</Text>
-              <Text style={s.sub} numberOfLines={2}>{item.sub || item.subtitle_ar || item.description || ''}</Text>
+          ) : (
+            /* إعلان Fallback ملوّن */
+            <View key={item.id || i} style={[s.slide, { backgroundColor: item.bg || '#FF6B00' }]}>
+              <View style={[s.circle1, { backgroundColor: item.circle || 'rgba(255,255,255,0.12)' }]} />
+              <View style={[s.circle2, { backgroundColor: item.circle || 'rgba(255,255,255,0.08)' }]} />
+              <View style={[s.circle3, { backgroundColor: item.circle || 'rgba(255,255,255,0.06)' }]} />
+              <View style={s.iconWrap}>
+                <Ionicons name={item.icon || 'restaurant'} size={70} color="rgba(255,255,255,0.18)" />
+              </View>
+              <View style={s.textBlock}>
+                <Text style={s.title}>{item.title || item.title_ar || ''}</Text>
+                <Text style={s.sub} numberOfLines={2}>{item.sub || ''}</Text>
+              </View>
+              <View style={s.orderBtn}>
+                <Text style={s.orderBtnTxt}>اطلب الآن ←</Text>
+              </View>
             </View>
-            <View style={s.orderBtn}>
-              <Text style={s.orderBtnTxt}>اطلب الآن ←</Text>
-            </View>
-          </View>
+          )
         ))}
       </ScrollView>
 
@@ -90,8 +102,9 @@ const s = StyleSheet.create({
   circle1: { position: 'absolute', width: 220, height: 220, borderRadius: 110, top: -70, left: -60 },
   circle2: { position: 'absolute', width: 150, height: 150, borderRadius: 75, bottom: -40, right: -10 },
   circle3: { position: 'absolute', width: 90, height: 90, borderRadius: 45, top: 10, right: 80 },
+  imgOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.32)' },
   iconWrap: { position: 'absolute', bottom: 8, left: 16 },
-  textBlock: { zIndex: 1 },
+  textBlock: { zIndex: 1, marginTop: 'auto' },
   title: { color: '#FFF', fontSize: 21, fontWeight: '900', textAlign: 'right', marginBottom: 6, textShadowColor: 'rgba(0,0,0,0.25)', textShadowRadius: 4 },
   sub: { color: 'rgba(255,255,255,0.88)', fontSize: 13.5, textAlign: 'right', fontWeight: '500', lineHeight: 20 },
   orderBtn: { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
