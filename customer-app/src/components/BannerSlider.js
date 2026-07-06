@@ -20,9 +20,9 @@ const FALLBACK = [
 export default function BannerSlider({ banners }) {
   const ref = useRef(null);
   const [idx, setIdx] = useState(0);
-  // دمج الـ fallback مع بانرات الـ API — الـ fallback دايماً موجود
-  const apiBanners = (banners || []).filter(b => b && (b.title || b.title_ar));
-  const items = apiBanners.length > 0 ? [...apiBanners, ...FALLBACK] : FALLBACK;
+  // دايماً الـ fallback — الإعلانات الحقيقية تُضاف من الإدمن مع صور
+  const apiBanners = (banners || []).filter(b => b && b.image);
+  const items = apiBanners.length > 0 ? apiBanners : FALLBACK;
 
   useEffect(() => {
     const t = setInterval(() => {

@@ -45,7 +45,7 @@ const Stack = createNativeStackNavigator();
 
 function MainTabs() {
   return (
-    <Tab.Navigator screenOptions={({ route }) => ({
+    <Tab.Navigator initialRouteName="الرئيسية" screenOptions={({ route }) => ({
       tabBarIcon: ({ focused, color, size }) => {
         const icons = {
           'حسابي':    focused ? 'person'       : 'person-outline',
