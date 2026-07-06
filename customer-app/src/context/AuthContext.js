@@ -36,7 +36,13 @@ export const AuthProvider = ({ children }) => {
         setUser(data.user);
         registerForPushNotifications().catch(() => {});
       }
-    } catch { await SecureStore.deleteItemAsync('token'); }
+    } catch (e) {
+      // Only clear token on auth errors — network errors should not log out the user
+      if (e?.message !== 'Network error') {
+        await SecureStore.deleteItemAsync('token');
+        setToken(null);
+      }
+    }
     finally { setLoading(false); }
   };
 

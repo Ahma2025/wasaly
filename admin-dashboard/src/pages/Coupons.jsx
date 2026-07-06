@@ -19,6 +19,8 @@ export default function Coupons() {
   };
 
   const create = async () => {
+    if (!form.code.trim()) return toast.error('أدخل كود الكوبون');
+    if (form.type !== 'free_delivery' && !form.value) return toast.error('أدخل قيمة الخصم');
     try {
       const data = await api.post('/coupons', form);
       setCoupons(prev => [data.data, ...prev]);

@@ -5,7 +5,7 @@ import api from '../utils/api';
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
 
 export default function RatingScreen({ route, navigation }) {
-  const { orderId, restaurantName, driverName } = route.params;
+  const { orderId, restaurantName, driverName } = route.params || {};
   const [foodRating, setFoodRating] = useState(0);
   const [driverRating, setDriverRating] = useState(0);
   const [comment, setComment] = useState('');

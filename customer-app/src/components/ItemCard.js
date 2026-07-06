@@ -17,8 +17,8 @@ export default function ItemCard({ item, onAdd, onPress }) {
         {!!item.description_ar && <Text style={styles.desc} numberOfLines={2}>{item.description_ar}</Text>}
         {!!item.calories && <Text style={styles.calories}>{item.calories} سعرة</Text>}
         <View style={styles.priceRow}>
-          <Text style={styles.price}>{(item.discount_price || item.price).toFixed(2)}₪</Text>
-          {!!item.discount_price && <Text style={styles.originalPrice}>{item.price.toFixed(2)}₪</Text>}
+          <Text style={styles.price}>{parseFloat(item.discount_price || item.price || 0).toFixed(2)}₪</Text>
+          {!!item.discount_price && <Text style={styles.originalPrice}>{parseFloat(item.price || 0).toFixed(2)}₪</Text>}
         </View>
       </View>
       <View style={styles.imageWrap}>

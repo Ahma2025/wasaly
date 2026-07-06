@@ -25,7 +25,10 @@ export default function RestaurantScreen() {
   const [selectedAddons, setSelectedAddons] = useState({});
   const scrollY = useRef(new Animated.Value(0)).current;
 
-  useEffect(() => { fetchRestaurant(); }, [id]);
+  useEffect(() => {
+    if (!id) { navigation.goBack(); return; }
+    fetchRestaurant();
+  }, [id]);
 
   const fetchRestaurant = async () => {
     try {

@@ -24,7 +24,7 @@ export default function Restaurants() {
 
   const fetchRestaurants = async () => {
     try {
-      const r = await api.get(`/admin/restaurants?search=${search}`);
+      const r = await api.get('/admin/restaurants', { params: { search } });
       setRestaurants(r.data || []);
     } catch { toast.error('فشل التحميل'); }
     finally { setLoading(false); }

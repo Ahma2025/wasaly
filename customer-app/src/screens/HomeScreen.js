@@ -146,14 +146,14 @@ export default function HomeScreen() {
 
   const load = async () => {
     try {
-      const [r, c, b] = await Promise.all([
+      const [r, c, b] = await Promise.allSettled([
         api.get('/restaurants?limit=60'),
         api.get('/categories'),
         api.get('/banners'),
       ]);
-      setRestaurants(r.data || []);
-      setCategories(c.data || []);
-      setBanners(b.data || []);
+      if (r.status === 'fulfilled') setRestaurants(r.value?.data || []);
+      if (c.status === 'fulfilled') setCategories(c.value?.data || []);
+      if (b.status === 'fulfilled') setBanners(b.value?.data || []);
     } catch (e) { console.error(e); }
   };
 
@@ -197,7 +197,7 @@ export default function HomeScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 12 }}>
             {categories.map(cat => (
-              <TouchableOpacity key={cat.id} style={s.quickCat} onPress={() => go(byCat(cat.id)[0]?.id)}>
+              <TouchableOpacity key={cat.id} style={s.quickCat} onPress={() => { const first = byCat(cat.id)[0]; if (first) go(first.id); }}>
                 <View style={s.quickCircle}>
                   <Text style={{ fontSize: 28 }}>{cat.icon || '🍽️'}</Text>
                 </View>

@@ -128,6 +128,11 @@ router.post('/', auth, adminOnly, async (req, res) => {
 // Update restaurant
 router.put('/:id', auth, restaurantOnly, async (req, res) => {
   try {
+    // Ownership check (admin can update any restaurant)
+    if (req.user.role !== 'admin') {
+      const { rows: own } = await pool.query('SELECT id FROM restaurants WHERE id=$1 AND owner_id=$2', [req.params.id, req.user.id]);
+      if (!own[0]) return res.status(403).json({ success: false, message: 'غير مصرح' });
+    }
     const allowed = ['name_ar','name_en','description_ar','description_en','phone','address','min_order','delivery_fee','delivery_time_min','delivery_time_max','is_open','opens_at','closes_at','tags','lat','lng','logo'];
     const updates = [];
     const values = [];
@@ -154,6 +159,10 @@ router.put('/:id', auth, restaurantOnly, async (req, res) => {
 // Toggle restaurant open/close
 router.patch('/:id/toggle', auth, restaurantOnly, async (req, res) => {
   try {
+    if (req.user.role !== 'admin') {
+      const { rows: own } = await pool.query('SELECT id FROM restaurants WHERE id=$1 AND owner_id=$2', [req.params.id, req.user.id]);
+      if (!own[0]) return res.status(403).json({ success: false, message: 'غير مصرح' });
+    }
     const { rows } = await pool.query(
       'UPDATE restaurants SET is_open = NOT is_open WHERE id=$1 RETURNING is_open', [req.params.id]
     );
@@ -166,6 +175,10 @@ router.patch('/:id/toggle', auth, restaurantOnly, async (req, res) => {
 // Get restaurant orders (for restaurant owner)
 router.get('/:id/orders', auth, restaurantOnly, async (req, res) => {
   try {
+    if (req.user.role !== 'admin') {
+      const { rows: own } = await pool.query('SELECT id FROM restaurants WHERE id=$1 AND owner_id=$2', [req.params.id, req.user.id]);
+      if (!own[0]) return res.status(403).json({ success: false, message: 'غير مصرح' });
+    }
     const { status, limit = 20, offset = 0 } = req.query;
     let q = `SELECT o.*, u.name as customer_name, u.phone as customer_phone FROM orders o
              LEFT JOIN users u ON o.customer_id = u.id WHERE o.restaurant_id=$1`;

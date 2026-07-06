@@ -23,9 +23,10 @@ export default function Login() {
       localStorage.setItem('user', JSON.stringify(data.user));
       if (['restaurant', 'restaurant_owner'].includes(data.user.role)) {
         try {
-          const rData = await api.get(`/restaurants?owner_id=${data.user.id}`);
+          const rData = await api.get('/restaurants', { params: { owner_id: data.user.id } });
           if (rData.data?.[0]) localStorage.setItem('restaurant', JSON.stringify(rData.data[0]));
-        } catch {}
+          else toast.error('تحذير: لم يتم العثور على بيانات المطعم');
+        } catch { toast.error('تحذير: فشل تحميل بيانات المطعم'); }
       }
       navigate('/');
     } catch (e) { toast.error(e.message || 'بيانات خاطئة'); }

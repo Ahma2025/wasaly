@@ -96,34 +96,15 @@ app.use('/api/webpush', require('./routes/webpush').router);
 
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
 
-// Debug push notifications from restaurant portal
+// Debug push notifications (admin-protected)
 const debugLogs = [];
 function addDebugLog(msg) {
   debugLogs.push({ time: new Date().toISOString(), msg });
   if (debugLogs.length > 50) debugLogs.shift();
-  console.log('[DEBUG-PUSH]', msg);
 }
-app.post('/debug-push', (req, res) => { addDebugLog(req.body?.msg); res.json({ ok: true }); });
-app.post('/api/debug-push', (req, res) => { addDebugLog(req.body?.msg); res.json({ ok: true }); });
-app.get('/debug-logs', (req, res) => res.json({ logs: debugLogs.slice(-20).reverse() }));
-app.get('/api/debug-logs', (req, res) => res.json({ logs: debugLogs.slice(-20).reverse() }));
-
-// Debug: test push notification to a user
-app.get('/test-push/:userId', async (req, res) => {
-  try {
-    const pool = require('./config/database');
-    const { sendFCM, getUserTokens } = require('./utils/notifications');
-    const { rows } = await pool.query('SELECT id,name,role,fcm_token,LEFT(fcm_token,20) as tok_preview FROM users WHERE id=$1', [req.params.userId]);
-    if (!rows[0]) return res.json({ error: 'User not found' });
-    const user = rows[0];
-    const bundleMap = { driver:'com.wasaly.driver', restaurant_owner:'com.wasaly.restaurant', admin:'com.wasaly.admin' };
-    const bundleId = bundleMap[user.role] || 'com.wasaly.customer';
-    const tokens = await getUserTokens(user.id);
-    if (!tokens.length) return res.json({ error: 'No token saved', user: { id:user.id, name:user.name, role:user.role } });
-    await sendFCM(tokens, '🔔 اختبار إشعار', `مرحبا ${user.name}! الإشعارات تعمل ✅`, { type:'test' }, bundleId);
-    res.json({ success:true, user:{ id:user.id, name:user.name, role:user.role }, token_preview: user.tok_preview, token_len: user.fcm_token?.length, bundle_id: bundleId });
-  } catch(e) { res.json({ error: e.message }); }
-});
+const { auth: _auth } = require('./middleware/auth');
+app.post('/api/debug-push', _auth, (req, res) => { addDebugLog(req.body?.msg); res.json({ ok: true }); });
+app.get('/api/debug-logs', _auth, (req, res) => res.json({ logs: debugLogs.slice(-20).reverse() }));
 
 // Serve restaurant portal frontend
 const portalDist = path.join(__dirname, '../restaurant-portal/dist');

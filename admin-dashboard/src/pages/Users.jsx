@@ -29,7 +29,7 @@ export default function Users() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const data = await api.get(`/admin/users?search=${search}&role=${role}&limit=50`);
+      const data = await api.get('/admin/users', { params: { search, role, limit: 50 } });
       setUsers(data.data || []);
     } catch { toast.error('خطأ في تحميل المستخدمين'); }
     finally { setLoading(false); }

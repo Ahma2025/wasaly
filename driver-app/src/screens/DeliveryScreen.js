@@ -112,6 +112,7 @@ export default function DeliveryScreen({ route, navigation }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [driverLoc, setDriverLoc] = useState(null);
   const [mapKey, setMapKey] = useState(0);
+  const [updating, setUpdating] = useState(false);
   const locationInterval = useRef(null);
   const socketRef = useRef(null);
   const webViewRef = useRef(null);
@@ -180,9 +181,10 @@ export default function DeliveryScreen({ route, navigation }) {
   };
 
   const nextStep = async () => {
-    if (!orderData) return;
+    if (!orderData || updating) return;
     const step = STEPS[currentStep];
     if (!step.nextStatus) return;
+    setUpdating(true);
     try {
       await api.patch(`/orders/${orderData.id}/status`, { status: step.nextStatus });
       if (step.nextStatus === 'delivered') {
@@ -195,6 +197,7 @@ export default function DeliveryScreen({ route, navigation }) {
         await loadOrder();
       }
     } catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }
+    finally { setUpdating(false); }
   };
 
   const openMaps = (lat, lng, label = '') => {
@@ -333,8 +336,8 @@ export default function DeliveryScreen({ route, navigation }) {
 
       {currentStep < STEPS.length - 1 && currentStep_obj?.buttonLabel && (
         <View style={styles.footer}>
-          <TouchableOpacity style={styles.nextBtn} onPress={nextStep}>
-            <Text style={styles.nextBtnText}>{currentStep_obj.buttonLabel}</Text>
+          <TouchableOpacity style={[styles.nextBtn, updating && { opacity: 0.6 }]} onPress={nextStep} disabled={updating}>
+            <Text style={styles.nextBtnText}>{updating ? 'جاري التحديث...' : currentStep_obj.buttonLabel}</Text>
             <Ionicons name="checkmark-circle" size={22} color="#FFF" />
           </TouchableOpacity>
         </View>

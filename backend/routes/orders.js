@@ -29,18 +29,24 @@ async function getDeliveryFee(restaurantLat, restaurantLng, deliveryLat, deliver
 // Find nearest available driver and notify them
 async function assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, excludeDriverIds = []) {
   try {
+    const safeLat = parseFloat(restaurantLat) || 31.9;
+    const safeLng = parseFloat(restaurantLng) || 35.2;
+    const params = [safeLat, safeLng];
+    let paramIdx = 3;
+
     let q = `SELECT d.*, u.name, u.phone, u.fcm_token FROM drivers d
              JOIN users u ON d.user_id=u.id
              WHERE d.is_online=true AND d.is_busy=false`;
     if (excludeDriverIds.length > 0) {
-      q += ` AND d.user_id NOT IN (${excludeDriverIds.join(',')})`;
+      params.push(excludeDriverIds);
+      q += ` AND NOT (d.user_id = ANY($${paramIdx++}::uuid[]))`;
     }
     q += ` ORDER BY (
-      (d.current_lat - ${restaurantLat || 31.9}) * (d.current_lat - ${restaurantLat || 31.9}) +
-      (d.current_lng - ${restaurantLng || 35.2}) * (d.current_lng - ${restaurantLng || 35.2})
+      (d.current_lat - $1) * (d.current_lat - $1) +
+      (d.current_lng - $2) * (d.current_lng - $2)
     ) ASC LIMIT 1`;
 
-    const { rows: drivers } = await pool.query(q, []);
+    const { rows: drivers } = await pool.query(q, params);
     if (!drivers[0]) return null;
 
     const driver = drivers[0];
