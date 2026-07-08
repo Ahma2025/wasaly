@@ -247,28 +247,7 @@ function OrderCard({ order, token, isExpanded, onToggle, onAccept, onUpdateStatu
           <OrderItems orderId={order.id} />
 
           {/* Price Summary */}
-          <div className="bg-white rounded-xl p-3 space-y-1">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">المجموع الفرعي</span>
-              <span className="font-semibold">{parseFloat(order.subtotal || 0).toFixed(2)}₪</span>
-            </div>
-            {isDelivery && (
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">رسوم التوصيل</span>
-                <span className="font-semibold">{parseFloat(order.delivery_fee || 0).toFixed(2)}₪</span>
-              </div>
-            )}
-            {order.discount > 0 && (
-              <div className="flex justify-between text-sm text-green-600">
-                <span>خصم</span>
-                <span>-{parseFloat(order.discount).toFixed(2)}₪</span>
-              </div>
-            )}
-            <div className="flex justify-between font-black text-base border-t pt-1 mt-1">
-              <span>الإجمالي</span>
-              <span className="text-orange-500">{parseFloat(order.total || 0).toFixed(2)}₪</span>
-            </div>
-          </div>
+          <OrderSummary order={order} isDelivery={isDelivery} />
 
           {/* Notes */}
           {order.notes && (
@@ -304,6 +283,50 @@ function OrderCard({ order, token, isExpanded, onToggle, onAccept, onUpdateStatu
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function OrderSummary({ order, isDelivery }) {
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    api.get(`/orders/${order.id}`).then(r => setItems(r.data?.items || [])).catch(() => {});
+  }, [order.id]);
+
+  const itemsSubtotal = items.reduce((sum, item) => {
+    let opts = [];
+    try { opts = typeof item.options === 'string' ? JSON.parse(item.options) : (item.options || []); } catch {}
+    const addonsPrice = opts.reduce((s, o) => s + parseFloat(o.price || 0), 0);
+    return sum + (parseFloat(item.price || 0) + addonsPrice) * item.quantity;
+  }, 0);
+
+  const subtotal = items.length > 0 ? itemsSubtotal : parseFloat(order.subtotal || 0);
+  const deliveryFee = parseFloat(order.delivery_fee || 0);
+  const discount = parseFloat(order.discount || 0);
+  const total = subtotal + (isDelivery ? deliveryFee : 0) - discount;
+
+  return (
+    <div className="bg-white rounded-xl p-3 space-y-1">
+      <div className="flex justify-between text-sm">
+        <span className="text-gray-500">المجموع الفرعي</span>
+        <span className="font-semibold">{subtotal.toFixed(2)}₪</span>
+      </div>
+      {isDelivery && (
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500">رسوم التوصيل</span>
+          <span className="font-semibold">{deliveryFee.toFixed(2)}₪</span>
+        </div>
+      )}
+      {discount > 0 && (
+        <div className="flex justify-between text-sm text-green-600">
+          <span>خصم</span>
+          <span>-{discount.toFixed(2)}₪</span>
+        </div>
+      )}
+      <div className="flex justify-between font-black text-base border-t pt-1 mt-1">
+        <span>الإجمالي</span>
+        <span className="text-orange-500">{total.toFixed(2)}₪</span>
+      </div>
     </div>
   );
 }
