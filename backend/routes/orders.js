@@ -103,10 +103,12 @@ router.post('/', auth, async (req, res) => {
       );
       if (!menuItems[0]) return res.status(400).json({ success: false, message: `الصنف ${item.id} غير متاح` });
       const mi = menuItems[0];
-      const itemPrice = mi.discount_price || mi.price;
+      const basePrice = parseFloat(mi.discount_price || mi.price || 0);
+      const addonsPrice = (item.options || []).reduce((s, o) => s + parseFloat(o.price || 0), 0);
+      const itemPrice = basePrice + addonsPrice;
       const itemTotal = itemPrice * item.quantity;
       subtotal += itemTotal;
-      orderItems.push({ ...mi, quantity: item.quantity, options: item.options, notes: item.notes, subtotal: itemTotal });
+      orderItems.push({ ...mi, quantity: item.quantity, options: item.options, notes: item.notes, subtotal: itemTotal, unitPrice: itemPrice });
     }
 
     if (subtotal < (restaurant.min_order || 0)) {
@@ -154,7 +156,7 @@ router.post('/', auth, async (req, res) => {
       await pool.query(
         `INSERT INTO order_items (order_id, item_id, menu_item_id, name_ar, price, quantity, subtotal, options, notes)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [order.id, item.id, item.id, item.name_ar, item.discount_price || item.price,
+        [order.id, item.id, item.id, item.name_ar, item.unitPrice || item.discount_price || item.price,
          item.quantity, item.subtotal, JSON.stringify(item.options || []), item.notes || '']
       );
     }

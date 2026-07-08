@@ -39,7 +39,11 @@ export const CartProvider = ({ children }) => {
     setItems([{ ...item, _key: item.id, quantity: 1 }]);
   };
 
-  const total = items.reduce((sum, i) => sum + (i.discount_price || i.price) * i.quantity, 0);
+  const total = items.reduce((sum, i) => {
+    const base = parseFloat(i.discount_price || i.price || 0);
+    const addons = (i.addons || []).reduce((s, a) => s + parseFloat(a.price || 0), 0);
+    return sum + (base + addons) * i.quantity;
+  }, 0);
   const count = items.reduce((sum, i) => sum + i.quantity, 0);
 
   return (

@@ -94,7 +94,7 @@ export default function CartScreen() {
         id: i.id,
         quantity: i.quantity,
         price: parseFloat(i.discount_price || i.price),
-        options: i.selectedOptions || []
+        options: i.addons || i.selectedOptions || []
       }));
 
       const body = {
@@ -161,10 +161,12 @@ export default function CartScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.itemName}>{item.name_ar || item.name}</Text>
-                {item.selectedOptions?.length > 0 && (
-                  <Text style={styles.itemOptions}>{item.selectedOptions.map(o => o.name).join(' • ')}</Text>
+                {item.addons?.length > 0 && (
+                  <Text style={styles.itemOptions}>{item.addons.map(a => a.name).join(' • ')}</Text>
                 )}
-                <Text style={styles.itemPrice}>{((parseFloat(item.discount_price || item.price)) * item.quantity).toFixed(2)}₪</Text>
+                <Text style={styles.itemPrice}>{
+                  ((parseFloat(item.discount_price || item.price) + (item.addons || []).reduce((s,a) => s + parseFloat(a.price||0), 0)) * item.quantity).toFixed(2)
+                }₪</Text>
               </View>
             </View>
           ))}
