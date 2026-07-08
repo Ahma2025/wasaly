@@ -1,0 +1,116 @@
+name: Android All Apps → APK
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  build-all:
+    name: Build All 4 Android APKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      # ─── CUSTOMER APP (Expo) ────────────────────────────────────────────────
+      - name: "[Customer] Install & Prebuild"
+        working-directory: customer-app
+        run: |
+          npm install --legacy-peer-deps
+          npx expo prebuild --platform android --no-install
+
+      - name: "[Customer] Build APK"
+        working-directory: customer-app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Customer-APK
+          path: customer-app/android/app/build/outputs/apk/release/*.apk
+          retention-days: 14
+
+      # ─── DRIVER APP (Expo) ──────────────────────────────────────────────────
+      - name: "[Driver] Install & Prebuild"
+        working-directory: driver-app
+        run: |
+          npm install --legacy-peer-deps
+          npx expo prebuild --platform android --no-install
+
+      - name: "[Driver] Build APK"
+        working-directory: driver-app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Driver-APK
+          path: driver-app/android/app/build/outputs/apk/release/*.apk
+          retention-days: 14
+
+      # ─── ADMIN DASHBOARD (Capacitor) ────────────────────────────────────────
+      - name: "[Admin] Install & Build web"
+        working-directory: admin-dashboard
+        run: |
+          npm install --legacy-peer-deps
+          npm run build
+          npx cap sync android
+
+      - name: "[Admin] Build APK"
+        working-directory: admin-dashboard/android
+        run: |
+          # sign release with debug keystore so the APK is installable
+          sed -i 's/release {/release {\n            signingConfig signingConfigs.debug/' app/build.gradle
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Admin-APK
+          path: admin-dashboard/android/app/build/outputs/apk/release/*.apk
+          retention-days: 14
+
+      # ─── RESTAURANT PORTAL (Capacitor) ──────────────────────────────────────
+      - name: "[Restaurant] Install & Build web"
+        working-directory: restaurant-portal
+        run: |
+          npm install --legacy-peer-deps
+          npm run build
+          npx cap sync android
+
+      - name: "[Restaurant] Build APK"
+        working-directory: restaurant-portal/android
+        run: |
+          # sign release with debug keystore so the APK is installable
+          sed -i 's/release {/release {\n            signingConfig signingConfigs.debug/' app/build.gradle
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Restaurant-APK
+          path: restaurant-portal/android/app/build/outputs/apk/release/*.apk
+          retention-days: 14
