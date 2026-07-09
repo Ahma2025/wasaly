@@ -1,4 +1,4 @@
-name: Android All Apps → APK
+name: Android All Apps → AAB
 
 on:
   push:
@@ -6,12 +6,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: android-apk
+  group: android-aab
   cancel-in-progress: true
 
 jobs:
   build-all:
-    name: Build All 4 Android APKs
+    name: Build All 4 Android AABs (signed)
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -29,45 +29,58 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
-      # ─── CUSTOMER APP (Expo) ────────────────────────────────────────────────
-      - name: "[Customer] Install & Prebuild"
+      - name: Write upload keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KS_B64" | base64 --decode > $RUNNER_TEMP/wasaly-upload.keystore
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/wasaly-upload.keystore" >> $GITHUB_ENV
+
+      # ─── CUSTOMER APP (Expo — committed android folder) ─────────────────────
+      - name: "[Customer] Install"
         working-directory: customer-app
-        run: |
-          npm install --legacy-peer-deps
-          npx expo prebuild --platform android --no-install
+        run: npm install --legacy-peer-deps
 
-      - name: "[Customer] Build APK"
+      - name: "[Customer] Build signed AAB"
         working-directory: customer-app/android
+        env:
+          ORG_GRADLE_PROJECT_WASALY_STORE_FILE: ${{ env.KEYSTORE_PATH }}
+          ORG_GRADLE_PROJECT_WASALY_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_WASALY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_WASALY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew bundleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Customer-APK
-          path: customer-app/android/app/build/outputs/apk/release/*.apk
-          retention-days: 14
+          name: Customer-AAB
+          path: customer-app/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
 
-      # ─── DRIVER APP (Expo) ──────────────────────────────────────────────────
-      - name: "[Driver] Install & Prebuild"
+      # ─── DRIVER APP (Expo — committed android folder) ───────────────────────
+      - name: "[Driver] Install"
         working-directory: driver-app
-        run: |
-          npm install --legacy-peer-deps
-          npx expo prebuild --platform android --no-install
+        run: npm install --legacy-peer-deps
 
-      - name: "[Driver] Build APK"
+      - name: "[Driver] Build signed AAB"
         working-directory: driver-app/android
+        env:
+          ORG_GRADLE_PROJECT_WASALY_STORE_FILE: ${{ env.KEYSTORE_PATH }}
+          ORG_GRADLE_PROJECT_WASALY_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_WASALY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_WASALY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew bundleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Driver-APK
-          path: driver-app/android/app/build/outputs/apk/release/*.apk
-          retention-days: 14
+          name: Driver-AAB
+          path: driver-app/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
 
       # ─── ADMIN DASHBOARD (Capacitor) ────────────────────────────────────────
       - name: "[Admin] Install & Build web"
@@ -77,20 +90,23 @@ jobs:
           npm run build
           npx cap sync android
 
-      - name: "[Admin] Build APK"
+      - name: "[Admin] Build signed AAB"
         working-directory: admin-dashboard/android
+        env:
+          ORG_GRADLE_PROJECT_WASALY_STORE_FILE: ${{ env.KEYSTORE_PATH }}
+          ORG_GRADLE_PROJECT_WASALY_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_WASALY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_WASALY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          # sign release with debug keystore so the APK is installable
-          sed -i 's/release {/release {\n            signingConfig signingConfigs.debug/' app/build.gradle
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew bundleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Admin-APK
-          path: admin-dashboard/android/app/build/outputs/apk/release/*.apk
-          retention-days: 14
+          name: Admin-AAB
+          path: admin-dashboard/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
 
       # ─── RESTAURANT PORTAL (Capacitor) ──────────────────────────────────────
       - name: "[Restaurant] Install & Build web"
@@ -100,17 +116,20 @@ jobs:
           npm run build
           npx cap sync android
 
-      - name: "[Restaurant] Build APK"
+      - name: "[Restaurant] Build signed AAB"
         working-directory: restaurant-portal/android
+        env:
+          ORG_GRADLE_PROJECT_WASALY_STORE_FILE: ${{ env.KEYSTORE_PATH }}
+          ORG_GRADLE_PROJECT_WASALY_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_WASALY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_WASALY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          # sign release with debug keystore so the APK is installable
-          sed -i 's/release {/release {\n            signingConfig signingConfigs.debug/' app/build.gradle
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew bundleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Restaurant-APK
-          path: restaurant-portal/android/app/build/outputs/apk/release/*.apk
-          retention-days: 14
+          name: Restaurant-AAB
+          path: restaurant-portal/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
