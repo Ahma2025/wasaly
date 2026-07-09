@@ -50,13 +50,20 @@ jobs:
           ORG_GRADLE_PROJECT_WASALY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew bundleRelease --no-daemon
+          ./gradlew bundleRelease assembleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: Customer-AAB
           path: customer-app/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Customer-APK
+          path: customer-app/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       # ─── DRIVER APP (Expo — committed android folder) ───────────────────────
@@ -73,13 +80,20 @@ jobs:
           ORG_GRADLE_PROJECT_WASALY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew bundleRelease --no-daemon
+          ./gradlew bundleRelease assembleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: Driver-AAB
           path: driver-app/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Driver-APK
+          path: driver-app/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       # ─── ADMIN DASHBOARD (Capacitor) ────────────────────────────────────────
@@ -99,13 +113,20 @@ jobs:
           ORG_GRADLE_PROJECT_WASALY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew bundleRelease --no-daemon
+          ./gradlew bundleRelease assembleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: Admin-AAB
           path: admin-dashboard/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Admin-APK
+          path: admin-dashboard/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       # ─── RESTAURANT PORTAL (Capacitor) ──────────────────────────────────────
@@ -125,11 +146,18 @@ jobs:
           ORG_GRADLE_PROJECT_WASALY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew bundleRelease --no-daemon
+          ./gradlew bundleRelease assembleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: Restaurant-AAB
           path: restaurant-portal/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Restaurant-APK
+          path: restaurant-portal/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
