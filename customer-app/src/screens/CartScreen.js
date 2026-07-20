@@ -12,7 +12,7 @@ const COLORS = { primary: '#FF6B00', bg: '#F8F9FA', card: '#FFF', text: '#1A1A2E
 
 export default function CartScreen() {
   const navigation = useNavigation();
-  const { items, total, count, removeItem, addItem, clearCart, restaurantId, restaurantName } = useCart();
+  const { items, total, count, removeItem, addItem, clearCart, restaurantId, restaurantName, updateItemNote } = useCart();
   const { user } = useAuth();
 
   const [deliveryType, setDeliveryType] = useState('delivery'); // 'delivery' | 'pickup'
@@ -94,7 +94,8 @@ export default function CartScreen() {
         id: i.id,
         quantity: i.quantity,
         price: parseFloat(i.discount_price || i.price),
-        options: i.addons || i.selectedOptions || []
+        options: i.addons || i.selectedOptions || [],
+        notes: i.notes || ''
       }));
 
       const body = {
@@ -167,10 +168,33 @@ export default function CartScreen() {
                 <Text style={styles.itemPrice}>{
                   ((parseFloat(item.discount_price || item.price) + (item.addons || []).reduce((s,a) => s + parseFloat(a.price||0), 0)) * item.quantity).toFixed(2)
                 }₪</Text>
+                <TextInput
+                  style={styles.itemNoteInput}
+                  placeholder="ملاحظة (بدون بصل، حار زيادة...)"
+                  placeholderTextColor={COLORS.gray}
+                  value={item.notes || ''}
+                  onChangeText={(t) => updateItemNote(item._key, t)}
+                />
               </View>
             </View>
           ))}
         </View>
+
+        {/* شريط تقدّم التوصيل المجاني */}
+        {deliveryType === 'delivery' && (
+          <View style={styles.freeDelivCard}>
+            {total >= 50 ? (
+              <Text style={styles.freeDelivDone}>🎉 مبروك! حصلت على توصيل مجاني</Text>
+            ) : (
+              <>
+                <Text style={styles.freeDelivText}>أضف <Text style={{ fontWeight: '900', color: COLORS.primary }}>{(50 - total).toFixed(2)}₪</Text> واحصل على توصيل مجاني 🚚</Text>
+                <View style={styles.freeDelivBar}>
+                  <View style={[styles.freeDelivFill, { width: `${Math.min(100, (total / 50) * 100)}%` }]} />
+                </View>
+              </>
+            )}
+          </View>
+        )}
 
         {/* Delivery Type */}
         <View style={styles.card}>
@@ -319,6 +343,12 @@ const styles = StyleSheet.create({
   qty: { fontSize: 15, fontWeight: '700', color: COLORS.text, minWidth: 20, textAlign: 'center' },
   itemName: { fontSize: 14, fontWeight: '600', color: COLORS.text },
   itemOptions: { fontSize: 11, color: COLORS.gray, marginTop: 2 },
+  itemNoteInput: { marginTop: 6, borderWidth: 1, borderColor: '#EEE', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, fontSize: 12, color: COLORS.text, backgroundColor: '#FAFAFA' },
+  freeDelivCard: { backgroundColor: '#FFF7F2', margin: 12, marginBottom: 0, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#FFE0CC' },
+  freeDelivText: { fontSize: 13, color: COLORS.text, textAlign: 'center', marginBottom: 8 },
+  freeDelivDone: { fontSize: 13, color: COLORS.green, fontWeight: '800', textAlign: 'center' },
+  freeDelivBar: { height: 8, backgroundColor: '#FFE0CC', borderRadius: 4, overflow: 'hidden' },
+  freeDelivFill: { height: '100%', backgroundColor: COLORS.primary, borderRadius: 4 },
   itemPrice: { fontSize: 13, color: COLORS.primary, fontWeight: '700', marginTop: 2 },
   toggleRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   toggleBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E5EA', backgroundColor: '#F8F8F8' },

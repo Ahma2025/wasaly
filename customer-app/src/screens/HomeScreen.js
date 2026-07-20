@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
 import BannerSlider from '../components/BannerSlider';
+import SkeletonCard from '../components/SkeletonCard';
 
 // تفعيل LayoutAnimation على Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -142,6 +143,7 @@ export default function HomeScreen() {
   const [restaurants, setRestaurants] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState('recommended');
   const suggestedRef = useRef(null);
 
   useEffect(() => { load(); }, []);
@@ -167,9 +169,15 @@ export default function HomeScreen() {
   }, []);
 
   const go = (id) => navigation.navigate('Restaurant', { restaurantId: id });
-  const byCat = (id) => restaurants.filter(r => r.category_id === id);
+  const sorted = React.useMemo(() => {
+    const arr = [...restaurants];
+    if (sortBy === 'rating') arr.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    else if (sortBy === 'fastest') arr.sort((a, b) => (a.delivery_time_min || 99) - (b.delivery_time_min || 99));
+    return arr;
+  }, [restaurants, sortBy]);
+  const byCat = (id) => sorted.filter(r => r.category_id === id);
   const topRated = [...restaurants].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 10);
-  const suggested = restaurants.slice(0, 8);
+  const suggested = sorted.slice(0, 8);
 
   useEffect(() => {
     if (suggested.length > 0) {
@@ -179,8 +187,9 @@ export default function HomeScreen() {
   }, [suggested.length]);
 
   if (loading) return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.bg }}>
-      <ActivityIndicator size="large" color={C.primary} />
+    <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: 60, paddingHorizontal: 16 }}>
+      <View style={{ height: 200, backgroundColor: '#E5E5EA', borderRadius: 18, marginBottom: 16 }} />
+      {[1, 2, 3].map(i => <SkeletonCard key={i} />)}
     </View>
   );
 
@@ -225,6 +234,23 @@ export default function HomeScreen() {
         </View>
 
         <View style={s.divider} />
+
+        {/* فرز المطاعم */}
+        <View style={{ backgroundColor: C.white, paddingVertical: 10 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 8 }}>
+            {[
+              { k: 'recommended', l: 'مقترح ✨' },
+              { k: 'rating', l: 'الأعلى تقييماً ⭐' },
+              { k: 'fastest', l: 'الأسرع توصيلاً 🛵' },
+            ].map(opt => (
+              <TouchableOpacity key={opt.k} onPress={() => setSortBy(opt.k)}
+                style={[s.sortChip, sortBy === opt.k && s.sortChipOn]}>
+                <Text style={[s.sortChipTxt, sortBy === opt.k && s.sortChipTxtOn]}>{opt.l}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
 
         {/* مطاعم مقترحة */}
         {suggested.length > 0 && (
@@ -324,4 +350,8 @@ const s = StyleSheet.create({
   grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16 },
   moreBtn: { marginTop: 14, marginHorizontal: 16, borderWidth: 1.5, borderColor: C.primary, borderRadius: 14, paddingVertical: 11, alignItems: 'center' },
   moreTxt: { color: C.primary, fontWeight: '800', fontSize: 15 },
+  sortChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: C.bg, borderWidth: 1, borderColor: '#E5E5EA' },
+  sortChipOn: { backgroundColor: C.primary, borderColor: C.primary },
+  sortChipTxt: { fontSize: 13, fontWeight: '700', color: C.text },
+  sortChipTxtOn: { color: '#FFF' },
 });

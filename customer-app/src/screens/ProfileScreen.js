@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Switch } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Switch, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
@@ -59,6 +59,20 @@ export default function ProfileScreen({ navigation }) {
         </View>
       </View>
 
+      {/* دعوة الأصدقاء */}
+      {!!profile?.referral_code && (
+        <TouchableOpacity
+          style={styles.referCard}
+          onPress={() => Share.share({ message: `حمّل تطبيق وصلّي واستخدم كود الدعوة "${profile.referral_code}" لتحصل على 10₪ هدية! 🎁🛵` })}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.referTitle}>🎁 ادعُ أصدقاءك واربح</Text>
+            <Text style={styles.referSub}>كودك: <Text style={styles.referCode}>{profile.referral_code}</Text> — أنت وصديقك تاخذوا 10₪</Text>
+          </View>
+          <Ionicons name="share-social" size={22} color="#FFF" />
+        </TouchableOpacity>
+      )}
+
       {/* Edit Name */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -106,6 +120,19 @@ export default function ProfileScreen({ navigation }) {
         <Text style={styles.logoutText}>تسجيل الخروج</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity
+        style={styles.deleteAccBtn}
+        onPress={() => Alert.alert('حذف الحساب', 'سيتم حذف حسابك وبياناتك نهائياً. هل أنت متأكد؟', [
+          { text: 'إلغاء', style: 'cancel' },
+          { text: 'حذف نهائياً', style: 'destructive', onPress: async () => {
+            try { await api.delete('/users/me'); logout(); }
+            catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }
+          } }
+        ])}
+      >
+        <Text style={styles.deleteAccText}>حذف الحساب نهائياً</Text>
+      </TouchableOpacity>
+
       <View style={{ height: 40 }} />
     </ScrollView>
   );
@@ -124,6 +151,10 @@ const styles = StyleSheet.create({
   tierLabel: { fontSize: 12, color: COLORS.gray, fontWeight: '600' },
   points: { fontSize: 18, fontWeight: '900', color: COLORS.text },
   pointsValue: { fontSize: 11, color: COLORS.primary, fontWeight: '700', marginTop: 1 },
+  referCard: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginBottom: 8, backgroundColor: COLORS.primary, borderRadius: 18, padding: 16, elevation: 3 },
+  referTitle: { color: '#FFF', fontWeight: '900', fontSize: 15 },
+  referSub: { color: 'rgba(255,255,255,0.9)', fontSize: 12, marginTop: 3 },
+  referCode: { fontWeight: '900', color: '#FFF', letterSpacing: 1 },
   walletRight: { alignItems: 'flex-end' },
   walletLabel: { fontSize: 12, color: COLORS.gray },
   walletBalance: { fontSize: 20, fontWeight: '900', color: COLORS.primary },
@@ -139,4 +170,6 @@ const styles = StyleSheet.create({
   menuLabel: { fontSize: 15, fontWeight: '600', color: COLORS.text },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FFF0EE', borderRadius: 16, padding: 16, justifyContent: 'center', marginHorizontal: 16, marginBottom: 12, elevation: 1 },
   logoutText: { color: '#FF3B30', fontWeight: '700', fontSize: 16 },
+  deleteAccBtn: { alignItems: 'center', paddingVertical: 10, marginHorizontal: 16 },
+  deleteAccText: { color: '#8E8E93', fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
 });

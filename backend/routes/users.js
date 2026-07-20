@@ -106,4 +106,20 @@ router.get('/loyalty', auth, async (req, res) => {
   res.json({ success: true, data: { ...user[0], transactions } });
 });
 
+// حذف الحساب نهائياً (مطلوب من Google Play)
+router.delete('/me', auth, async (req, res) => {
+  try {
+    // إخفاء البيانات الشخصية بدل الحذف الكامل (للحفاظ على سجل الطلبات المرتبط)
+    await pool.query(
+      `UPDATE users SET name='مستخدم محذوف', email=NULL, phone=CONCAT('deleted_', id), password_hash=NULL,
+        fcm_token=NULL, is_active=false WHERE id=$1`,
+      [req.user.id]
+    );
+    res.json({ success: true, message: 'تم حذف الحساب' });
+  } catch (e) {
+    console.error('delete account error:', e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
+  }
+});
+
 module.exports = router;

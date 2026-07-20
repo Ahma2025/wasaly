@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Animated, Alert, Modal, Pressable } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Animated, Alert, Modal, Pressable, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import api from '../utils/api';
@@ -126,6 +126,9 @@ export default function RestaurantScreen() {
         <TouchableOpacity style={styles.favBtn} onPress={toggleFavorite}>
           <Ionicons name={isFavorite ? 'heart' : 'heart-outline'} size={22} color={isFavorite ? '#FF3B30' : '#FFF'} />
         </TouchableOpacity>
+        <TouchableOpacity style={styles.shareBtn} onPress={() => Share.share({ message: `جرّب ${restaurant.name_ar} على تطبيق وصلّي 🛵 — توصيل الطعام الأسرع!` })}>
+          <Ionicons name="share-social-outline" size={20} color="#FFF" />
+        </TouchableOpacity>
       </Animated.View>
 
       <ScrollView
@@ -231,6 +234,7 @@ const styles = StyleSheet.create({
   logoHero: { width: 120, height: 120, borderRadius: 16, position: 'absolute', borderWidth: 3, borderColor: 'rgba(255,255,255,0.3)' },
   backBtn: { position: 'absolute', top: 50, left: 16, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 20, padding: 8 },
   favBtn: { position: 'absolute', top: 50, right: 16, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 20, padding: 8 },
+  shareBtn: { position: 'absolute', top: 50, right: 62, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 20, padding: 8 },
   infoCard: { backgroundColor: '#FFF', margin: 16, borderRadius: 16, padding: 16, flexDirection: 'row', elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8 },
   logo: { width: 70, height: 70, borderRadius: 12 },
   name: { fontSize: 18, fontWeight: '800', color: COLORS.text },

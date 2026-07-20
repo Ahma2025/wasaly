@@ -1,11 +1,42 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const CartContext = createContext();
+const CART_KEY = 'wasaly_cart_v1';
 
 export const CartProvider = ({ children }) => {
   const [items, setItems] = useState([]);
   const [restaurantId, setRestaurantId] = useState(null);
   const [restaurantName, setRestaurantName] = useState('');
+  const [hydrated, setHydrated] = useState(false);
+  const saveTimer = useRef(null);
+
+  // استرجاع السلة المحفوظة عند فتح التطبيق
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(CART_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw);
+          if (saved.items?.length) {
+            setItems(saved.items);
+            setRestaurantId(saved.restaurantId || null);
+            setRestaurantName(saved.restaurantName || '');
+          }
+        }
+      } catch {}
+      setHydrated(true);
+    })();
+  }, []);
+
+  // حفظ السلة تلقائياً عند أي تغيير (بعد الاسترجاع)
+  useEffect(() => {
+    if (!hydrated) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      AsyncStorage.setItem(CART_KEY, JSON.stringify({ items, restaurantId, restaurantName })).catch(() => {});
+    }, 300);
+  }, [items, restaurantId, restaurantName, hydrated]);
 
   const addItem = useCallback((item, restaurant) => {
     if (restaurantId && restaurantId !== restaurant.id) {
@@ -30,7 +61,10 @@ export const CartProvider = ({ children }) => {
     });
   }, []);
 
-  const clearCart = () => { setItems([]); setRestaurantId(null); setRestaurantName(''); };
+  const clearCart = () => {
+    setItems([]); setRestaurantId(null); setRestaurantName('');
+    AsyncStorage.removeItem(CART_KEY).catch(() => {});
+  };
 
   // إعادة طلب سابق كامل بضغطة — يستبدل السلة الحالية
   const reorder = (newItems, restaurant) => {
@@ -44,10 +78,14 @@ export const CartProvider = ({ children }) => {
   };
 
   const clearAndAdd = (item, restaurant) => {
-    clearCart();
     setRestaurantId(restaurant.id);
     setRestaurantName(restaurant.name_ar);
     setItems([{ ...item, _key: item.id + JSON.stringify(item.addons || []), quantity: 1 }]);
+  };
+
+  // تحديث ملاحظة صنف معيّن
+  const updateItemNote = (key, note) => {
+    setItems(prev => prev.map(i => i._key === key ? { ...i, notes: note } : i));
   };
 
   const total = items.reduce((sum, i) => {
@@ -58,7 +96,7 @@ export const CartProvider = ({ children }) => {
   const count = items.reduce((sum, i) => sum + i.quantity, 0);
 
   return (
-    <CartContext.Provider value={{ items, restaurantId, restaurantName, total, count, addItem, removeItem, clearCart, clearAndAdd, reorder }}>
+    <CartContext.Provider value={{ items, restaurantId, restaurantName, total, count, addItem, removeItem, clearCart, clearAndAdd, reorder, updateItemNote }}>
       {children}
     </CartContext.Provider>
   );

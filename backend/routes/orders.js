@@ -136,6 +136,22 @@ router.post('/', auth, async (req, res) => {
       deliveryFee = await getDeliveryFee(restaurant.lat, restaurant.lng, delivery_lat, delivery_lng);
     }
 
+    // 🎁 خصم أول طلب — إذا ما إله أي طلب سابق
+    let firstOrderDiscount = 0;
+    try {
+      const { rows: prev } = await pool.query('SELECT COUNT(*)::int AS c FROM orders WHERE customer_id=$1', [req.user.id]);
+      if (prev[0] && prev[0].c === 0) {
+        firstOrderDiscount = Math.min(10, subtotal * 0.15); // 15% حتى 10₪
+        discount += firstOrderDiscount;
+      }
+    } catch (e) {}
+
+    // 🚚 توصيل مجاني فوق 50₪
+    const FREE_DELIVERY_THRESHOLD = 50;
+    if (order_type === 'delivery' && subtotal >= FREE_DELIVERY_THRESHOLD) {
+      deliveryFee = 0;
+    }
+
     const total = Math.max(0, subtotal + deliveryFee - discount);
     const pointsEarned = Math.floor(total * 10);
     const orderNumber = generateOrderNumber();

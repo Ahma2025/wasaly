@@ -94,7 +94,7 @@ router.post('/verify-otp', async (req, res) => {
 // Register with email/password
 router.post('/register', async (req, res) => {
   try {
-    let { name, email, phone, password, city } = req.body;
+    let { name, email, phone, password, city, referred_by } = req.body;
     if (phone) phone = phone.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
     const existing = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
     if (existing.rows[0]) return res.status(400).json({ success: false, message: 'رقم الهاتف مسجل مسبقاً' });
@@ -106,6 +106,20 @@ router.post('/register', async (req, res) => {
       [name, email || null, phone, hash, referralCode, city || null]
     );
     const user = rows[0];
+
+    // 🎁 مكافأة الدعوة — إذا سجّل بكود صديق، الاثنين ياخدوا 10₪ محفظة
+    if (referred_by) {
+      try {
+        const { rows: refRows } = await pool.query('SELECT id FROM users WHERE referral_code=$1', [String(referred_by).toUpperCase()]);
+        if (refRows[0] && refRows[0].id !== user.id) {
+          const REWARD = 10;
+          // كافئ الداعي والمدعوّ (10₪ محفظة لكل طرف)
+          await pool.query('UPDATE users SET wallet_balance = COALESCE(wallet_balance,0) + $1 WHERE id=$2', [REWARD, refRows[0].id]);
+          await pool.query('UPDATE users SET wallet_balance = COALESCE(wallet_balance,0) + $1 WHERE id=$2', [REWARD, user.id]);
+          user.wallet_balance = (parseFloat(user.wallet_balance) || 0) + REWARD;
+        }
+      } catch (e) { console.error('referral reward error:', e.message); }
+    }
     res.status(201).json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
   } catch (e) {
     console.error(e.message);

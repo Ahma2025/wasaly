@@ -15,6 +15,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [city, setCity] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [loading, setLoading] = useState(false);
 
   const normalizePhone = (p) => p.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\s|-/g, '');
@@ -37,7 +38,7 @@ export default function LoginScreen() {
     if (password.length < 6) return Alert.alert('خطأ', 'كلمة المرور 6 أحرف على الأقل');
     setLoading(true);
     try {
-      const res = await api.post('/auth/register', { name, phone: normalizePhone(phone), password, city });
+      const res = await api.post('/auth/register', { name, phone: normalizePhone(phone), password, city, referred_by: referralCode.trim() || undefined });
       await login(res.token, res.user);
     } catch (e) {
       Alert.alert('خطأ', e.message || 'حدث خطأ، حاول مجدداً');
@@ -68,6 +69,7 @@ export default function LoginScreen() {
             <>
               <TextInput style={styles.input} placeholder="الاسم الكامل" value={name} onChangeText={setName} />
               <TextInput style={styles.input} placeholder="المدينة" value={city} onChangeText={setCity} />
+              <TextInput style={styles.input} placeholder="كود دعوة (اختياري) — 10₪ هدية 🎁" value={referralCode} onChangeText={setReferralCode} autoCapitalize="characters" />
             </>
           )}
           <TextInput style={styles.input} placeholder="رقم الهاتف" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
