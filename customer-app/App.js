@@ -38,6 +38,7 @@ import OrdersHistoryScreen from './src/screens/OrdersHistoryScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 import AddAddressScreen from './src/screens/AddAddressScreen';
 import RatingScreen from './src/screens/RatingScreen';
+import FavoritesScreen from './src/screens/FavoritesScreen';
 import MarketScreen from './src/screens/MarketScreen';
 
 const Tab = createBottomTabNavigator();
@@ -87,6 +88,7 @@ function AppNavigator() {
           <Stack.Screen name="Notifications" component={NotificationsScreen} />
           <Stack.Screen name="AddAddress" component={AddAddressScreen} options={{ presentation: 'modal' }} />
           <Stack.Screen name="Rating" component={RatingScreen} options={{ presentation: 'modal' }} />
+          <Stack.Screen name="Favorites" component={FavoritesScreen} />
         </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} />

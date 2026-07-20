@@ -144,6 +144,8 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('recommended');
+  const [openOnly, setOpenOnly] = useState(false);
+  const [recentRests, setRecentRests] = useState([]);
   const suggestedRef = useRef(null);
 
   useEffect(() => { load(); }, []);
@@ -156,9 +158,27 @@ export default function HomeScreen() {
         api.get('/categories'),
         api.get('/banners'),
       ]);
-      if (r.status === 'fulfilled') setRestaurants(r.value?.data || []);
+      const allRests = r.status === 'fulfilled' ? (r.value?.data || []) : [];
+      if (r.status === 'fulfilled') setRestaurants(allRests);
       if (c.status === 'fulfilled') setCategories(c.value?.data || []);
       if (b.status === 'fulfilled') setBanners(b.value?.data || []);
+
+      // مطاعم طلبت منها مؤخراً
+      try {
+        const my = await api.get('/orders/my');
+        const orders = my?.data || [];
+        const seen = new Set();
+        const recent = [];
+        for (const o of orders) {
+          if (o.restaurant_id && !seen.has(o.restaurant_id)) {
+            seen.add(o.restaurant_id);
+            const rest = allRests.find(x => x.id === o.restaurant_id);
+            if (rest) recent.push(rest);
+          }
+          if (recent.length >= 8) break;
+        }
+        setRecentRests(recent);
+      } catch {}
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -170,11 +190,20 @@ export default function HomeScreen() {
 
   const go = (id) => navigation.navigate('Restaurant', { restaurantId: id });
   const sorted = React.useMemo(() => {
-    const arr = [...restaurants];
+    let arr = [...restaurants];
+    if (openOnly) arr = arr.filter(r => r.is_open);
     if (sortBy === 'rating') arr.sort((a, b) => (b.rating || 0) - (a.rating || 0));
     else if (sortBy === 'fastest') arr.sort((a, b) => (a.delivery_time_min || 99) - (b.delivery_time_min || 99));
     return arr;
-  }, [restaurants, sortBy]);
+  }, [restaurants, sortBy, openOnly]);
+
+  const surpriseMe = () => {
+    const pool = restaurants.filter(r => r.is_open);
+    const list = pool.length ? pool : restaurants;
+    if (!list.length) return;
+    const pick = list[Math.floor(Math.random() * list.length)];
+    go(pick.id);
+  };
   const byCat = (id) => sorted.filter(r => r.category_id === id);
   const topRated = [...restaurants].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 10);
   const suggested = sorted.slice(0, 8);
@@ -235,10 +264,16 @@ export default function HomeScreen() {
 
         <View style={s.divider} />
 
-        {/* فرز المطاعم */}
+        {/* فرز المطاعم + فاجئني + المفتوحة الآن */}
         <View style={{ backgroundColor: C.white, paddingVertical: 10 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 8 }}>
+            <TouchableOpacity onPress={surpriseMe} style={[s.sortChip, { backgroundColor: '#FFF0E8', borderColor: C.primary }]}>
+              <Text style={[s.sortChipTxt, { color: C.primary }]}>فاجئني 🎲</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setOpenOnly(v => !v)} style={[s.sortChip, openOnly && s.sortChipOn]}>
+              <Text style={[s.sortChipTxt, openOnly && s.sortChipTxtOn]}>المفتوحة الآن 🟢</Text>
+            </TouchableOpacity>
             {[
               { k: 'recommended', l: 'مقترح ✨' },
               { k: 'rating', l: 'الأعلى تقييماً ⭐' },
@@ -251,6 +286,19 @@ export default function HomeScreen() {
             ))}
           </ScrollView>
         </View>
+
+        {/* اطلب مرة أخرى */}
+        {recentRests.length > 0 && (
+          <>
+            <View style={s.divider} />
+            <CollapsibleSection title="اطلب مرة أخرى" icon="repeat" bg={C.white}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 4 }}>
+                {recentRests.map(r => <HCard key={r.id} r={r} onPress={() => go(r.id)} />)}
+              </ScrollView>
+            </CollapsibleSection>
+          </>
+        )}
 
         {/* مطاعم مقترحة */}
         {suggested.length > 0 && (

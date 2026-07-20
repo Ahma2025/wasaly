@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Switch, Share } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Switch, Share, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
@@ -115,6 +115,17 @@ export default function ProfileScreen({ navigation }) {
         </View>
       </View>
 
+      <TouchableOpacity style={styles.rateAppBtn} onPress={() => navigation.navigate('Favorites')}>
+        <Ionicons name="heart" size={20} color="#FF3B30" />
+        <Text style={styles.rateAppText}>مطاعمي المفضلة</Text>
+        <Ionicons name="chevron-back" size={18} color={COLORS.gray} style={{ marginLeft: 'auto' }} />
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.rateAppBtn} onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.wasaly.customer')}>
+        <Ionicons name="star" size={20} color="#FFB800" />
+        <Text style={styles.rateAppText}>قيّم التطبيق ⭐</Text>
+      </TouchableOpacity>
+
       <TouchableOpacity style={styles.logoutBtn} onPress={() => Alert.alert('تسجيل الخروج', 'هل أنت متأكد؟', [{ text: 'إلغاء', style: 'cancel' }, { text: 'خروج', style: 'destructive', onPress: logout }])}>
         <Ionicons name="log-out-outline" size={20} color="#FF3B30" />
         <Text style={styles.logoutText}>تسجيل الخروج</Text>
@@ -170,6 +181,8 @@ const styles = StyleSheet.create({
   menuLabel: { fontSize: 15, fontWeight: '600', color: COLORS.text },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FFF0EE', borderRadius: 16, padding: 16, justifyContent: 'center', marginHorizontal: 16, marginBottom: 12, elevation: 1 },
   logoutText: { color: '#FF3B30', fontWeight: '700', fontSize: 16 },
+  rateAppBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FFF', borderRadius: 16, padding: 16, justifyContent: 'center', marginHorizontal: 16, marginBottom: 12, elevation: 1 },
+  rateAppText: { color: COLORS.text, fontWeight: '700', fontSize: 16 },
   deleteAccBtn: { alignItems: 'center', paddingVertical: 10, marginHorizontal: 16 },
   deleteAccText: { color: '#8E8E93', fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
 });

@@ -23,6 +23,7 @@ export default function RestaurantScreen() {
   const [loading, setLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState(null);
   const [selectedAddons, setSelectedAddons] = useState({});
+  const [dietFilter, setDietFilter] = useState('all');
   const scrollY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -157,12 +158,31 @@ export default function RestaurantScreen() {
           ))}
         </ScrollView>
 
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, marginBottom: 4 }}>
+          {[
+            { k: 'all', l: 'الكل' },
+            { k: 'spicy', l: 'حار 🌶️' },
+            { k: 'veg', l: 'نباتي 🌿' },
+            { k: 'offers', l: 'عروض 🏷️' },
+          ].map(f => (
+            <TouchableOpacity key={f.k} onPress={() => setDietFilter(f.k)}
+              style={[styles.dietChip, dietFilter === f.k && styles.dietChipOn]}>
+              <Text style={[styles.dietChipTxt, dietFilter === f.k && { color: '#FFF' }]}>{f.l}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
         {menu[activeCategory] && (
           <View style={styles.menuSection}>
             <Text style={styles.catTitle}>{menu[activeCategory].name_ar}</Text>
-            {menu[activeCategory].items?.map(item => (
-              <ItemCard key={item.id} item={item} onAdd={() => openItem(item)} onPress={() => openItem(item)} />
-            ))}
+            {(menu[activeCategory].items || [])
+              .filter(item => dietFilter === 'all'
+                || (dietFilter === 'spicy' && item.is_spicy)
+                || (dietFilter === 'veg' && item.is_vegetarian)
+                || (dietFilter === 'offers' && item.discount_price))
+              .map(item => (
+                <ItemCard key={item.id} item={item} onAdd={() => openItem(item)} onPress={() => openItem(item)} />
+              ))}
           </View>
         )}
         <View style={{ height: 100 }} />
@@ -250,6 +270,9 @@ const styles = StyleSheet.create({
   catTabTextActive: { color: '#FFF', fontWeight: '700' },
   menuSection: { paddingHorizontal: 16 },
   catTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text, marginBottom: 12 },
+  dietChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, marginRight: 8, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E5E5EA' },
+  dietChipOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  dietChipTxt: { fontSize: 13, fontWeight: '700', color: COLORS.text },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%', paddingBottom: 34 },
   sheetHandle: { width: 40, height: 4, backgroundColor: '#E5E5EA', borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 4 },

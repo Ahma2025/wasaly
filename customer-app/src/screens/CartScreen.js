@@ -20,6 +20,8 @@ export default function CartScreen() {
   const [selectedAddress, setSelectedAddress] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [notes, setNotes] = useState('');
+  const [tip, setTip] = useState(0);
+  const [leaveAtDoor, setLeaveAtDoor] = useState(false);
   const [loading, setLoading] = useState(false);
   const submittingRef = useRef(false);
   const [deliveryFee, setDeliveryFee] = useState(0);
@@ -102,7 +104,8 @@ export default function CartScreen() {
         restaurant_id: restaurantId,
         items: orderItems,
         payment_method: paymentMethod,
-        notes,
+        notes: [notes, leaveAtDoor ? '🚪 اترك الطلب على الباب' : ''].filter(Boolean).join(' — '),
+        tip: parseFloat(tip) || 0,
         total_amount: finalTotal,
         order_type: deliveryType,
       };
@@ -126,7 +129,7 @@ export default function CartScreen() {
     }
   };
 
-  const finalTotal = deliveryType === 'delivery' ? total + deliveryFee : total;
+  const finalTotal = (deliveryType === 'delivery' ? total + deliveryFee : total) + (parseFloat(tip) || 0);
 
   if (items.length === 0) {
     return (
@@ -179,6 +182,16 @@ export default function CartScreen() {
             </View>
           ))}
         </View>
+
+        {/* شريط الحد الأدنى للطلب */}
+        {!!restaurantInfo?.min_order && total < restaurantInfo.min_order && (
+          <View style={[styles.freeDelivCard, { backgroundColor: '#FFF9E6', borderColor: '#FFE9A8' }]}>
+            <Text style={styles.freeDelivText}>الحد الأدنى للطلب <Text style={{ fontWeight: '900' }}>{restaurantInfo.min_order}₪</Text> — أضف <Text style={{ fontWeight: '900', color: COLORS.primary }}>{(restaurantInfo.min_order - total).toFixed(2)}₪</Text> للمتابعة</Text>
+            <View style={styles.freeDelivBar}>
+              <View style={[styles.freeDelivFill, { backgroundColor: '#FFB800', width: `${Math.min(100, (total / restaurantInfo.min_order) * 100)}%` }]} />
+            </View>
+          </View>
+        )}
 
         {/* شريط تقدّم التوصيل المجاني */}
         {deliveryType === 'delivery' && (
@@ -279,6 +292,25 @@ export default function CartScreen() {
           ))}
         </View>
 
+        {/* بقشيش السائق + اترك على الباب */}
+        {deliveryType === 'delivery' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>🛵 خيارات التوصيل</Text>
+            <Text style={styles.tipLabel}>بقشيش للسائق (اختياري)</Text>
+            <View style={styles.tipRow}>
+              {[0, 2, 5, 10].map(v => (
+                <TouchableOpacity key={v} onPress={() => setTip(v)} style={[styles.tipChip, tip === v && styles.tipChipOn]}>
+                  <Text style={[styles.tipChipTxt, tip === v && { color: '#FFF' }]}>{v === 0 ? 'بدون' : `${v}₪`}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity style={styles.doorRow} onPress={() => setLeaveAtDoor(v => !v)}>
+              <Ionicons name={leaveAtDoor ? 'checkbox' : 'square-outline'} size={22} color={COLORS.primary} />
+              <Text style={styles.doorText}>اترك الطلب على الباب 🚪</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Notes */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>📝 ملاحظات للمطعم</Text>
@@ -306,6 +338,12 @@ export default function CartScreen() {
               {deliveryType === 'pickup' ? 'مجاني' : `${deliveryFee}₪`}
             </Text>
           </View>
+          {parseFloat(tip) > 0 && (
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>بقشيش السائق</Text>
+              <Text style={styles.summaryVal}>{parseFloat(tip).toFixed(2)}₪</Text>
+            </View>
+          )}
           <View style={[styles.summaryRow, { borderTopWidth: 1, borderTopColor: '#F0F0F0', paddingTop: 10, marginTop: 4 }]}>
             <Text style={[styles.summaryLabel, { fontWeight: '800', fontSize: 16, color: COLORS.text }]}>الإجمالي</Text>
             <Text style={[styles.summaryVal, { fontWeight: '900', fontSize: 18, color: COLORS.primary }]}>{finalTotal.toFixed(2)}₪</Text>
@@ -349,6 +387,13 @@ const styles = StyleSheet.create({
   freeDelivDone: { fontSize: 13, color: COLORS.green, fontWeight: '800', textAlign: 'center' },
   freeDelivBar: { height: 8, backgroundColor: '#FFE0CC', borderRadius: 4, overflow: 'hidden' },
   freeDelivFill: { height: '100%', backgroundColor: COLORS.primary, borderRadius: 4 },
+  tipLabel: { fontSize: 13, color: COLORS.gray, marginBottom: 8 },
+  tipRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  tipChip: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E5EA', backgroundColor: '#FAFAFA' },
+  tipChipOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  tipChipTxt: { fontSize: 14, fontWeight: '800', color: COLORS.text },
+  doorRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 4 },
+  doorText: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
   itemPrice: { fontSize: 13, color: COLORS.primary, fontWeight: '700', marginTop: 2 },
   toggleRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   toggleBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E5EA', backgroundColor: '#F8F8F8' },

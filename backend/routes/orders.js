@@ -86,8 +86,9 @@ router.post('/', auth, async (req, res) => {
     const {
       restaurant_id, address_id, items, payment_method = 'cash',
       notes, coupon_code, delivery_address, delivery_lat, delivery_lng,
-      order_type = 'delivery'
+      order_type = 'delivery', tip = 0
     } = req.body;
+    const tipAmount = Math.max(0, parseFloat(tip) || 0);
 
     const { rows: restaurants } = await pool.query(
       'SELECT * FROM restaurants WHERE id=$1 AND is_active=true', [restaurant_id]
@@ -152,7 +153,7 @@ router.post('/', auth, async (req, res) => {
       deliveryFee = 0;
     }
 
-    const total = Math.max(0, subtotal + deliveryFee - discount);
+    const total = Math.max(0, subtotal + deliveryFee - discount) + tipAmount;
     const pointsEarned = Math.floor(total * 10);
     const orderNumber = generateOrderNumber();
 
