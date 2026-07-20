@@ -351,7 +351,11 @@ export default function OrderTrackingScreen() {
         )}
 
         {isDelivered && (
-          <TouchableOpacity style={styles.rateBtn} onPress={() => navigation.navigate('Rating', { orderId: id })}>
+          <TouchableOpacity style={styles.rateBtn} onPress={() => navigation.navigate('Rating', {
+            orderId: id,
+            restaurantName: order?.restaurant_name || order?.restaurant?.name_ar,
+            driverName: order?.driver_name,
+          })}>
             <Text style={styles.rateBtnText}>⭐ قيّم تجربتك</Text>
           </TouchableOpacity>
         )}

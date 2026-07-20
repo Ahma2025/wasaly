@@ -27,6 +27,7 @@ export default function DriverHome() {
   const [location, setLocation] = useState(null);
   const [activeOrder, setActiveOrder] = useState(null);
   const [todayStats, setTodayStats] = useState({ deliveries: 0, earnings: 0 });
+  const [driverRating, setDriverRating] = useState(0);
   const [pendingOrder, setPendingOrder] = useState(null);
   const [orderTimer, setOrderTimer] = useState(60);
   const socketRef = useRef(null);
@@ -85,6 +86,7 @@ export default function DriverHome() {
       const driver = r.data || r;
       const online = !!(driver.is_online || driver.isOnline);
       setIsOnline(online);
+      if (driver.rating != null) setDriverRating(parseFloat(driver.rating) || 0);
       if (online) startLocationInterval();
     } catch {}
   };
@@ -270,6 +272,11 @@ export default function DriverHome() {
           <Text style={styles.statIcon}>💰</Text>
           <Text style={styles.statVal}>{todayStats.earnings.toFixed(2)}₪</Text>
           <Text style={styles.statLabel}>أرباح اليوم</Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statIcon}>⭐</Text>
+          <Text style={styles.statVal}>{driverRating > 0 ? driverRating.toFixed(1) : '—'}</Text>
+          <Text style={styles.statLabel}>تقييمك</Text>
         </View>
       </View>
 

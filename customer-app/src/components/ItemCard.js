@@ -9,7 +9,8 @@ export default function ItemCard({ item, onAdd, onPress }) {
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
       <View style={styles.info}>
         <View style={styles.badges}>
-          {!!item.is_new && <View style={styles.badge}><Text style={styles.badgeText}>جديد</Text></View>}
+          {(!!item.is_popular || !!item.is_bestseller) && <View style={[styles.badge, styles.badgeHot]}><Text style={styles.badgeHotText}>🔥 الأكثر طلباً</Text></View>}
+          {!!item.is_new && <View style={styles.badge}><Text style={styles.badgeText}>✨ جديد</Text></View>}
           {!!item.is_spicy && <Text>🌶️</Text>}
           {!!item.is_vegetarian && <Text>🌿</Text>}
         </View>
@@ -29,6 +30,11 @@ export default function ItemCard({ item, onAdd, onPress }) {
             <Text style={{ fontSize: 30 }}>🍽️</Text>
           </View>
         )}
+        {!!item.discount_price && parseFloat(item.price) > 0 && (
+          <View style={styles.discountBadge}>
+            <Text style={styles.discountText}>-{Math.round((1 - parseFloat(item.discount_price) / parseFloat(item.price)) * 100)}%</Text>
+          </View>
+        )}
         <TouchableOpacity style={styles.addBtn} onPress={onAdd}>
           <Ionicons name="add" size={20} color="#FFF" />
         </TouchableOpacity>
@@ -43,6 +49,10 @@ const styles = StyleSheet.create({
   badges: { flexDirection: 'row', gap: 4, marginBottom: 4 },
   badge: { backgroundColor: '#E8F5E9', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   badgeText: { fontSize: 10, color: '#2E7D32', fontWeight: '700' },
+  badgeHot: { backgroundColor: '#FFF0E8' },
+  badgeHotText: { fontSize: 10, color: '#FF6B00', fontWeight: '800' },
+  discountBadge: { position: 'absolute', top: -4, left: -4, backgroundColor: '#FF3B30', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+  discountText: { color: '#FFF', fontSize: 10, fontWeight: '900' },
   name: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 4 },
   desc: { fontSize: 12, color: COLORS.gray, lineHeight: 18, marginBottom: 6 },
   calories: { fontSize: 11, color: COLORS.gray, marginBottom: 6 },

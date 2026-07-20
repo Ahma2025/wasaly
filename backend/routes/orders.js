@@ -434,6 +434,15 @@ router.post('/:id/rate', auth, async (req, res) => {
         total_reviews = (SELECT COUNT(*) FROM reviews WHERE restaurant_id=$1) WHERE id=$1`,
       [order.restaurant_id]
     );
+    // تحديث معدّل تقييم السائق (كان ناقص)
+    if (order.driver_id) {
+      await pool.query(
+        `UPDATE drivers SET
+          rating = COALESCE((SELECT AVG(driver_rating) FROM reviews WHERE driver_id=$1 AND driver_rating IS NOT NULL), 0)
+         WHERE user_id=$1`,
+        [order.driver_id]
+      );
+    }
     res.json({ success: true });
   } catch (e) {
     console.error(e.message);

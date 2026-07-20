@@ -50,6 +50,7 @@ export default function ProfileScreen({ navigation }) {
           <View>
             <Text style={styles.tierLabel}>مستوى {tierMeta.label}</Text>
             <Text style={styles.points}>{profile?.loyalty_points || 0} نقطة</Text>
+            <Text style={styles.pointsValue}>≈ {((profile?.loyalty_points || 0) / 100 * 5).toFixed(1)}₪ خصم</Text>
           </View>
         </View>
         <View style={styles.walletRight}>
@@ -122,6 +123,7 @@ const styles = StyleSheet.create({
   tierEmoji: { fontSize: 32 },
   tierLabel: { fontSize: 12, color: COLORS.gray, fontWeight: '600' },
   points: { fontSize: 18, fontWeight: '900', color: COLORS.text },
+  pointsValue: { fontSize: 11, color: COLORS.primary, fontWeight: '700', marginTop: 1 },
   walletRight: { alignItems: 'flex-end' },
   walletLabel: { fontSize: 12, color: COLORS.gray },
   walletBalance: { fontSize: 20, fontWeight: '900', color: COLORS.primary },

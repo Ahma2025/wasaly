@@ -32,6 +32,17 @@ export const CartProvider = ({ children }) => {
 
   const clearCart = () => { setItems([]); setRestaurantId(null); setRestaurantName(''); };
 
+  // إعادة طلب سابق كامل بضغطة — يستبدل السلة الحالية
+  const reorder = (newItems, restaurant) => {
+    setRestaurantId(restaurant.id);
+    setRestaurantName(restaurant.name_ar || '');
+    setItems((newItems || []).map(it => ({
+      ...it,
+      _key: it.id + JSON.stringify(it.addons || []),
+      quantity: it.quantity || 1,
+    })));
+  };
+
   const clearAndAdd = (item, restaurant) => {
     clearCart();
     setRestaurantId(restaurant.id);
@@ -47,7 +58,7 @@ export const CartProvider = ({ children }) => {
   const count = items.reduce((sum, i) => sum + i.quantity, 0);
 
   return (
-    <CartContext.Provider value={{ items, restaurantId, restaurantName, total, count, addItem, removeItem, clearCart, clearAndAdd }}>
+    <CartContext.Provider value={{ items, restaurantId, restaurantName, total, count, addItem, removeItem, clearCart, clearAndAdd, reorder }}>
       {children}
     </CartContext.Provider>
   );

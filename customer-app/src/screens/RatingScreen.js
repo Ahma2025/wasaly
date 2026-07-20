@@ -27,7 +27,7 @@ export default function RatingScreen({ route, navigation }) {
     if (!foodRating) return Alert.alert('خطأ', 'قيّم الطعام على الأقل');
     setSaving(true);
     try {
-      await api.post(`/orders/${orderId}/rate`, { food_rating: foodRating, driver_rating: driverRating, comment });
+      await api.post(`/orders/${orderId}/rate`, { restaurant_rating: foodRating, driver_rating: driverRating, comment });
       Alert.alert('شكراً!', 'تم إرسال تقييمك', [{ text: 'حسناً', onPress: () => navigation.navigate('Main', { screen: 'الرئيسية' }) }]);
     } catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }
     finally { setSaving(false); }

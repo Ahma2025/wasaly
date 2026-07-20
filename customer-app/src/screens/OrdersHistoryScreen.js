@@ -1,8 +1,9 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import api from '../utils/api';
+import { useCart } from '../context/CartContext';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', green: '#34C759', red: '#FF3B30', bg: '#F8F9FA' };
 
@@ -20,11 +21,38 @@ const ACTIVE = ['pending', 'confirmed', 'preparing', 'ready', 'on_the_way'];
 
 export default function OrdersHistoryScreen() {
   const navigation = useNavigation();
+  const { reorder } = useCart();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [reordering, setReordering] = useState(null);
 
   useFocusEffect(useCallback(() => { fetchOrders(); }, []));
+
+  const handleReorder = async (order) => {
+    setReordering(order.id);
+    try {
+      const data = await api.get(`/orders/${order.id}`);
+      const full = data.data || data;
+      const items = (full.items || []).map(it => {
+        let opts = [];
+        try { opts = typeof it.options === 'string' ? JSON.parse(it.options) : (it.options || []); } catch {}
+        const addonsSum = opts.reduce((s, o) => s + parseFloat(o.price || 0), 0);
+        const base = Math.max(0, parseFloat(it.price || 0) - addonsSum); // السعر المخزّن يشمل الإضافات
+        return {
+          id: it.menu_item_id || it.item_id || it.id,
+          name_ar: it.name_ar,
+          price: base,
+          addons: opts,
+          quantity: it.quantity || 1,
+        };
+      });
+      if (items.length === 0) { Alert.alert('تنبيه', 'تعذّر إعادة الطلب'); return; }
+      reorder(items, { id: full.restaurant_id, name_ar: full.restaurant_name });
+      navigation.navigate('سلتي');
+    } catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }
+    finally { setReordering(null); }
+  };
 
   const fetchOrders = async () => {
     try {
@@ -72,7 +100,7 @@ export default function OrdersHistoryScreen() {
         {history.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>الطلبات السابقة</Text>
-            {history.map(o => <OrderCard key={o.id} order={o} navigation={navigation} />)}
+            {history.map(o => <OrderCard key={o.id} order={o} navigation={navigation} onReorder={handleReorder} reordering={reordering === o.id} />)}
           </View>
         )}
         <View style={{ height: 20 }} />
@@ -81,7 +109,7 @@ export default function OrdersHistoryScreen() {
   );
 }
 
-function OrderCard({ order, navigation, isActive }) {
+function OrderCard({ order, navigation, isActive, onReorder, reordering }) {
   const s = STATUS_MAP[order.status] || { label: order.status, color: COLORS.gray, bg: '#F5F5F5', icon: 'help-circle-outline' };
   return (
     <TouchableOpacity
@@ -114,6 +142,24 @@ function OrderCard({ order, navigation, isActive }) {
           <Ionicons name="chevron-forward" size={14} color={COLORS.primary} />
         </View>
       )}
+
+      {!isActive && onReorder && (
+        <TouchableOpacity
+          style={styles.reorderBtn}
+          onPress={() => onReorder(order)}
+          disabled={reordering}
+          activeOpacity={0.8}
+        >
+          {reordering ? (
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          ) : (
+            <>
+              <Ionicons name="repeat" size={16} color={COLORS.primary} />
+              <Text style={styles.reorderText}>أعد الطلب</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      )}
     </TouchableOpacity>
   );
 }
@@ -142,4 +188,6 @@ const styles = StyleSheet.create({
   totalAmount: { fontSize: 16, fontWeight: '900', color: COLORS.primary },
   trackRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F5F5F5' },
   trackText: { flex: 1, fontSize: 12, color: COLORS.primary, fontWeight: '700' },
+  reorderBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.primary, backgroundColor: '#FFF7F2' },
+  reorderText: { fontSize: 14, color: COLORS.primary, fontWeight: '800' },
 });
