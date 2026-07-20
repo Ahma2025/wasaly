@@ -78,7 +78,8 @@ export default function RestaurantScreen() {
   const confirmAddItem = () => {
     if (!selectedItem) return;
     const addonsFlat = Object.entries(selectedAddons).flatMap(([group, items]) => items.map(a => ({ group, ...a })));
-    const itemWithAddons = { ...selectedItem, addons: addonsFlat, price: parseFloat(selectedItem.price) + getAddonPrice() };
+    // نخزّن السعر الأساسي فقط؛ الإضافات تُحسب مرة واحدة في CartContext/CartScreen (تجنّب الحساب المزدوج)
+    const itemWithAddons = { ...selectedItem, addons: addonsFlat };
     const result = addItem(itemWithAddons, restaurant);
     if (result?.conflict) {
       Alert.alert('مطعم مختلف', `سلتك من ${result.restaurant}. هل تبدأ من جديد؟`, [

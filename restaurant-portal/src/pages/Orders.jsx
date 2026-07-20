@@ -48,6 +48,8 @@ export default function Orders() {
       }
     });
     socket.on('order_updated', () => fetchOrders());
+    socket.on('order_status', () => fetchOrders());
+    socket.on('driver_assigned', () => fetchOrders());
     return () => socket.disconnect();
   }, []);
 

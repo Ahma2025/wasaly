@@ -12,9 +12,9 @@ export const CartProvider = ({ children }) => {
       return { conflict: true, restaurant: restaurantName };
     }
     setRestaurantId(restaurant.id);
-    setRestaurantName(restaurant.name_ar);
+    if (restaurant.name_ar) setRestaurantName(restaurant.name_ar);
     setItems(prev => {
-      const key = item.id + JSON.stringify(item.selectedOptions || []);
+      const key = item.id + JSON.stringify(item.addons || item.selectedOptions || []);
       const existing = prev.find(i => i._key === key);
       if (existing) return prev.map(i => i._key === key ? { ...i, quantity: i.quantity + 1 } : i);
       return [...prev, { ...item, _key: key, quantity: 1 }];
@@ -36,7 +36,7 @@ export const CartProvider = ({ children }) => {
     clearCart();
     setRestaurantId(restaurant.id);
     setRestaurantName(restaurant.name_ar);
-    setItems([{ ...item, _key: item.id, quantity: 1 }]);
+    setItems([{ ...item, _key: item.id + JSON.stringify(item.addons || []), quantity: 1 }]);
   };
 
   const total = items.reduce((sum, i) => {
