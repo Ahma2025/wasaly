@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 
 const CartContext = createContext();
 const CART_KEY = 'wasaly_cart_v1';
@@ -10,6 +11,7 @@ export const CartProvider = ({ children }) => {
   const [restaurantName, setRestaurantName] = useState('');
   const [hydrated, setHydrated] = useState(false);
   const saveTimer = useRef(null);
+  const reminderId = useRef(null);
 
   // استرجاع السلة المحفوظة عند فتح التطبيق
   useEffect(() => {
@@ -37,6 +39,29 @@ export const CartProvider = ({ children }) => {
       AsyncStorage.setItem(CART_KEY, JSON.stringify({ items, restaurantId, restaurantName })).catch(() => {});
     }, 300);
   }, [items, restaurantId, restaurantName, hydrated]);
+
+  // تذكير السلة المتروكة — إشعار محلي بعد 90 دقيقة، يُلغى عند إفراغ السلة
+  useEffect(() => {
+    if (!hydrated) return;
+    (async () => {
+      try {
+        if (reminderId.current) {
+          await Notifications.cancelScheduledNotificationAsync(reminderId.current);
+          reminderId.current = null;
+        }
+        const n = items.reduce((s, i) => s + i.quantity, 0);
+        if (n > 0) {
+          reminderId.current = await Notifications.scheduleNotificationAsync({
+            content: {
+              title: '🛒 سلتك بتنطرك!',
+              body: `عندك ${n} صنف بالسلة${restaurantName ? ' من ' + restaurantName : ''} — كمّل طلبك قبل ما يبرد 😋`,
+            },
+            trigger: { seconds: 90 * 60 },
+          });
+        }
+      } catch {}
+    })();
+  }, [items, hydrated, restaurantName]);
 
   const addItem = useCallback((item, restaurant) => {
     if (restaurantId && restaurantId !== restaurant.id) {
