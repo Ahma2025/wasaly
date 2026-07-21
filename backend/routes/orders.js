@@ -473,7 +473,7 @@ router.patch('/:id/cancel', auth, async (req, res) => {
 // Rate order
 router.post('/:id/rate', auth, async (req, res) => {
   try {
-    const { restaurant_rating, driver_rating, comment } = req.body;
+    const { restaurant_rating, driver_rating, comment, images } = req.body;
     const { rows: orders } = await pool.query(
       "SELECT * FROM orders WHERE id=$1 AND customer_id=$2 AND status='delivered'",
       [req.params.id, req.user.id]
@@ -482,9 +482,9 @@ router.post('/:id/rate', auth, async (req, res) => {
     const order = orders[0];
 
     await pool.query(
-      `INSERT INTO reviews (order_id, customer_id, restaurant_id, driver_id, restaurant_rating, driver_rating, comment)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (order_id) DO NOTHING`,
-      [order.id, req.user.id, order.restaurant_id, order.driver_id, restaurant_rating, driver_rating, comment]
+      `INSERT INTO reviews (order_id, customer_id, restaurant_id, driver_id, restaurant_rating, driver_rating, comment, images)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (order_id) DO NOTHING`,
+      [order.id, req.user.id, order.restaurant_id, order.driver_id, restaurant_rating, driver_rating, comment, JSON.stringify(images || [])]
     );
     await pool.query(
       'UPDATE orders SET rating_restaurant=$1, rating_driver=$2, review_text=$3 WHERE id=$4',

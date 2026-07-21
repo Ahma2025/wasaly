@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Image, ScrollView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import api from '../utils/api';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
@@ -9,7 +11,25 @@ export default function RatingScreen({ route, navigation }) {
   const [foodRating, setFoodRating] = useState(0);
   const [driverRating, setDriverRating] = useState(0);
   const [comment, setComment] = useState('');
+  const [images, setImages] = useState([]);
+  const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const addPhoto = async () => {
+    if (images.length >= 3) return Alert.alert('تنبيه', 'حد أقصى 3 صور');
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return Alert.alert('تنبيه', 'نحتاج إذن الصور');
+      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.6 });
+      if (res.canceled || !res.assets?.[0]) return;
+      setUploading(true);
+      const form = new FormData();
+      form.append('file', { uri: res.assets[0].uri, name: 'review.jpg', type: 'image/jpeg' });
+      const up = await api.post('/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (up.url) setImages(arr => [...arr, up.url]);
+    } catch { Alert.alert('خطأ', 'فشل رفع الصورة'); }
+    finally { setUploading(false); }
+  };
 
   const QUICK_COMMENTS = ['طعام لذيذ', 'خدمة سريعة', 'سائق محترم', 'سيعاد الطلب', 'التغليف ممتاز'];
 
@@ -27,7 +47,7 @@ export default function RatingScreen({ route, navigation }) {
     if (!foodRating) return Alert.alert('خطأ', 'قيّم الطعام على الأقل');
     setSaving(true);
     try {
-      await api.post(`/orders/${orderId}/rate`, { restaurant_rating: foodRating, driver_rating: driverRating, comment });
+      await api.post(`/orders/${orderId}/rate`, { restaurant_rating: foodRating, driver_rating: driverRating, comment, images });
       Alert.alert('شكراً!', 'تم إرسال تقييمك', [{ text: 'حسناً', onPress: () => navigation.navigate('Main', { screen: 'الرئيسية' }) }]);
     } catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }
     finally { setSaving(false); }
@@ -64,6 +84,24 @@ export default function RatingScreen({ route, navigation }) {
 
         <TextInput style={styles.commentInput} placeholder="أضف تعليقاً..." value={comment} onChangeText={setComment} multiline numberOfLines={3} />
 
+        {/* صور المراجعة */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoRow}>
+          {images.map((uri, i) => (
+            <View key={i} style={styles.photoWrap}>
+              <Image source={{ uri }} style={styles.photo} />
+              <TouchableOpacity style={styles.photoDel} onPress={() => setImages(arr => arr.filter((_, j) => j !== i))}>
+                <Ionicons name="close" size={13} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+          ))}
+          {images.length < 3 && (
+            <TouchableOpacity style={styles.photoAdd} onPress={addPhoto} disabled={uploading}>
+              <Ionicons name={uploading ? 'hourglass-outline' : 'camera'} size={22} color={COLORS.primary} />
+              <Text style={styles.photoAddTxt}>{uploading ? '...' : 'صورة'}</Text>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
+
         <TouchableOpacity style={styles.submitBtn} onPress={submit} disabled={saving}>
           <Text style={styles.submitText}>{saving ? 'جاري الإرسال...' : 'إرسال التقييم'}</Text>
         </TouchableOpacity>
@@ -93,7 +131,13 @@ const styles = StyleSheet.create({
   quickTag: { backgroundColor: '#FFF', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: '#E5E5EA' },
   quickTagActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   quickText: { fontSize: 13, fontWeight: '600', color: COLORS.text },
-  commentInput: { width: '100%', borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 14, padding: 12, fontSize: 14, color: COLORS.text, backgroundColor: '#FFF', marginBottom: 16 },
+  commentInput: { width: '100%', borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 14, padding: 12, fontSize: 14, color: COLORS.text, backgroundColor: '#FFF', marginBottom: 12 },
+  photoRow: { gap: 10, paddingVertical: 4, marginBottom: 12 },
+  photoWrap: { position: 'relative' },
+  photo: { width: 64, height: 64, borderRadius: 12 },
+  photoDel: { position: 'absolute', top: -6, right: -6, backgroundColor: '#FF3B30', width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFF' },
+  photoAdd: { width: 64, height: 64, borderRadius: 12, borderWidth: 1.5, borderColor: '#FFE0CC', borderStyle: 'dashed', backgroundColor: '#FFF8F4', alignItems: 'center', justifyContent: 'center' },
+  photoAddTxt: { fontSize: 11, color: COLORS.primary, fontWeight: '700', marginTop: 2 },
   submitBtn: { width: '100%', backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, alignItems: 'center' },
   submitText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
   skipBtn: { marginTop: 12 },
