@@ -33,6 +33,17 @@ export default function CartScreen() {
   const [couponDiscount, setCouponDiscount] = useState(0);
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponMsg, setCouponMsg] = useState('');
+  const [loyaltyPoints, setLoyaltyPoints] = useState(0);
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [usePoints, setUsePoints] = useState(false);
+  const [useWallet, setUseWallet] = useState(false);
+
+  useEffect(() => {
+    api.get('/users/profile').then(d => {
+      setLoyaltyPoints(parseInt(d.data?.loyalty_points || 0));
+      setWalletBalance(parseFloat(d.data?.wallet_balance || 0));
+    }).catch(() => {});
+  }, []);
 
   const applyCoupon = async () => {
     const code = couponInput.trim();
@@ -127,6 +138,8 @@ export default function CartScreen() {
         items: orderItems,
         payment_method: paymentMethod,
         coupon_code: couponCode || undefined,
+        redeem_points: usePoints ? Math.round(redeemValue / 0.05) : 0,
+        use_wallet: useWallet,
         notes: [notes, leaveAtDoor ? '🚪 اترك الطلب على الباب' : ''].filter(Boolean).join(' — '),
         tip: parseFloat(tip) || 0,
         total_amount: finalTotal,
@@ -172,7 +185,11 @@ export default function CartScreen() {
     }
   };
 
-  const finalTotal = Math.max(0, (deliveryType === 'delivery' ? total + deliveryFee : total) - couponDiscount) + (parseFloat(tip) || 0);
+  const goodsTotal = (deliveryType === 'delivery' ? total + deliveryFee : total) - couponDiscount;
+  const redeemValue = usePoints ? Math.min(loyaltyPoints * 0.05, Math.max(0, goodsTotal)) : 0;
+  const dueBeforeWallet = Math.max(0, goodsTotal - redeemValue) + (parseFloat(tip) || 0);
+  const walletUsed = useWallet ? Math.min(walletBalance, dueBeforeWallet) : 0;
+  const finalTotal = Math.max(0, dueBeforeWallet - walletUsed);
 
   if (items.length === 0) {
     return (
@@ -368,6 +385,26 @@ export default function CartScreen() {
           />
         </View>
 
+        {/* Loyalty + Wallet */}
+        {(loyaltyPoints >= 100 || walletBalance > 0) && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>🏆 نقاطي ومحفظتي</Text>
+            {loyaltyPoints >= 100 && (
+              <TouchableOpacity style={styles.useRow} onPress={() => setUsePoints(v => !v)}>
+                <Ionicons name={usePoints ? 'checkbox' : 'square-outline'} size={22} color={COLORS.primary} />
+                <Text style={styles.useText}>استخدم نقاطي ({loyaltyPoints} نقطة ≈ {(loyaltyPoints * 0.05).toFixed(1)}₪)</Text>
+              </TouchableOpacity>
+            )}
+            {walletBalance > 0 && (
+              <TouchableOpacity style={styles.useRow} onPress={() => setUseWallet(v => !v)}>
+                <Ionicons name={useWallet ? 'checkbox' : 'square-outline'} size={22} color={COLORS.primary} />
+                <Text style={styles.useText}>ادفع من محفظتي ({walletBalance.toFixed(2)}₪)</Text>
+              </TouchableOpacity>
+            )}
+            <Text style={styles.cashbackHint}>💰 بتربح كاش باك 2% على هالطلب</Text>
+          </View>
+        )}
+
         {/* Coupon */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🎟️ كود الخصم</Text>
@@ -418,6 +455,18 @@ export default function CartScreen() {
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>بقشيش السائق</Text>
               <Text style={styles.summaryVal}>{parseFloat(tip).toFixed(2)}₪</Text>
+            </View>
+          )}
+          {redeemValue > 0 && (
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabel, { color: COLORS.green }]}>خصم النقاط</Text>
+              <Text style={[styles.summaryVal, { color: COLORS.green }]}>-{redeemValue.toFixed(2)}₪</Text>
+            </View>
+          )}
+          {walletUsed > 0 && (
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabel, { color: COLORS.green }]}>من المحفظة</Text>
+              <Text style={[styles.summaryVal, { color: COLORS.green }]}>-{walletUsed.toFixed(2)}₪</Text>
             </View>
           )}
           <View style={[styles.summaryRow, { borderTopWidth: 1, borderTopColor: '#F0F0F0', paddingTop: 10, marginTop: 4 }]}>
@@ -497,6 +546,9 @@ const styles = StyleSheet.create({
   couponApplied: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#EDFFF3', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#C3F5D8' },
   couponAppliedTxt: { flex: 1, fontSize: 14, fontWeight: '700', color: '#1A5C33' },
   couponMsg: { fontSize: 12, fontWeight: '700', marginTop: 8 },
+  useRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  useText: { fontSize: 14, fontWeight: '700', color: COLORS.text, flex: 1 },
+  cashbackHint: { fontSize: 12, color: COLORS.primary, fontWeight: '700', marginTop: 4 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   summaryLabel: { fontSize: 14, color: COLORS.gray },
   summaryVal: { fontSize: 14, fontWeight: '600', color: COLORS.text },

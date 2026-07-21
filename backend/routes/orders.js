@@ -86,7 +86,8 @@ router.post('/', auth, async (req, res) => {
     const {
       restaurant_id, address_id, items, payment_method = 'cash',
       notes, coupon_code, delivery_address, delivery_lat, delivery_lng,
-      order_type = 'delivery', tip = 0
+      order_type = 'delivery', tip = 0,
+      redeem_points = 0, use_wallet = false
     } = req.body;
     const tipAmount = Math.max(0, parseFloat(tip) || 0);
 
@@ -153,8 +154,30 @@ router.post('/', auth, async (req, res) => {
       deliveryFee = 0;
     }
 
-    const total = Math.max(0, subtotal + deliveryFee - discount) + tipAmount;
-    const pointsEarned = Math.floor(total * 10);
+    // 🏆 استبدال نقاط الولاء (100 نقطة = 5₪)
+    let pointsRedeemed = 0, redeemValue = 0;
+    const wantRedeem = Math.max(0, parseInt(redeem_points) || 0);
+    if (wantRedeem > 0) {
+      const { rows: ur } = await pool.query('SELECT loyalty_points FROM users WHERE id=$1', [req.user.id]);
+      const available = parseInt(ur[0]?.loyalty_points || 0);
+      const usablePoints = Math.min(wantRedeem, available);
+      const maxValue = Math.max(0, subtotal + deliveryFee - discount);
+      redeemValue = Math.min(usablePoints * 0.05, maxValue);
+      pointsRedeemed = Math.round(redeemValue / 0.05);
+    }
+
+    const dueBeforeWallet = Math.max(0, subtotal + deliveryFee - discount - redeemValue) + tipAmount;
+
+    // 💳 دفع جزئي من المحفظة
+    let walletUsed = 0;
+    if (use_wallet) {
+      const { rows: uw } = await pool.query('SELECT wallet_balance FROM users WHERE id=$1', [req.user.id]);
+      const bal = parseFloat(uw[0]?.wallet_balance || 0);
+      walletUsed = Math.min(bal, dueBeforeWallet);
+    }
+
+    const total = Math.max(0, dueBeforeWallet - walletUsed);
+    const pointsEarned = Math.floor((subtotal + deliveryFee - discount) * 10);
     const orderNumber = generateOrderNumber();
 
     const { rows: newOrders } = await pool.query(
@@ -175,6 +198,28 @@ router.post('/', auth, async (req, res) => {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [order.id, item.id, item.id, item.name_ar, item.unitPrice || item.discount_price || item.price,
          item.quantity, item.subtotal, JSON.stringify(item.options || []), item.notes || '']
+      );
+    }
+
+    // 🏆 خصم النقاط المستبدلة
+    if (pointsRedeemed > 0) {
+      await pool.query('UPDATE users SET loyalty_points = GREATEST(0, loyalty_points - $1) WHERE id=$2', [pointsRedeemed, req.user.id]);
+    }
+    // 💳 خصم المبلغ المستخدم من المحفظة + تسجيل الحركة
+    if (walletUsed > 0) {
+      await pool.query('UPDATE users SET wallet_balance = GREATEST(0, wallet_balance - $1) WHERE id=$2', [walletUsed, req.user.id]);
+      await pool.query(
+        `INSERT INTO wallet_transactions (user_id, type, amount, description_ar, description_en) VALUES ($1,'debit',$2,$3,'Order payment')`,
+        [req.user.id, walletUsed, `دفع طلب #${orderNumber}`]
+      );
+    }
+    // 💰 كاش باك 2% للمحفظة على كل طلب
+    const cashback = Math.round(subtotal * 0.02 * 100) / 100;
+    if (cashback > 0) {
+      await pool.query('UPDATE users SET wallet_balance = wallet_balance + $1 WHERE id=$2', [cashback, req.user.id]);
+      await pool.query(
+        `INSERT INTO wallet_transactions (user_id, type, amount, description_ar, description_en) VALUES ($1,'credit',$2,$3,'Cashback')`,
+        [req.user.id, cashback, `كاش باك طلب #${orderNumber}`]
       );
     }
 
