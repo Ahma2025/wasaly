@@ -119,8 +119,28 @@ export default function CartScreen() {
       }
 
       const data = await api.post('/orders', body);
+      const orderId = data.data?.id || data.id;
       clearCart();
-      navigation.replace('OrderTracking', { orderId: data.data?.id || data.id });
+
+      // الدفع بالبطاقة → افتح صفحة Lahza الآمنة
+      if (paymentMethod === 'card') {
+        try {
+          const initRes = await api.post('/payments/lahza/init', { order_id: orderId });
+          if (initRes.authorization_url) {
+            navigation.replace('PaymentWebView', {
+              authorizationUrl: initRes.authorization_url,
+              reference: initRes.reference,
+              orderId,
+            });
+            return;
+          }
+          Alert.alert('الدفع بالبطاقة', 'تعذّر بدء الدفع الإلكتروني. طلبك محفوظ ويمكنك الدفع عند الاستلام.');
+        } catch (err) {
+          Alert.alert('الدفع بالبطاقة', err.message || 'الدفع الإلكتروني غير متاح حالياً. طلبك محفوظ للدفع عند الاستلام.');
+        }
+      }
+
+      navigation.replace('OrderTracking', { orderId });
     } catch (e) {
       Alert.alert('خطأ', e.message || 'فشل في إتمام الطلب');
     } finally {

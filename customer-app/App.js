@@ -40,6 +40,7 @@ import AddAddressScreen from './src/screens/AddAddressScreen';
 import RatingScreen from './src/screens/RatingScreen';
 import FavoritesScreen from './src/screens/FavoritesScreen';
 import MarketScreen from './src/screens/MarketScreen';
+import PaymentWebViewScreen from './src/screens/PaymentWebViewScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -89,6 +90,7 @@ function AppNavigator() {
           <Stack.Screen name="AddAddress" component={AddAddressScreen} options={{ presentation: 'modal' }} />
           <Stack.Screen name="Rating" component={RatingScreen} options={{ presentation: 'modal' }} />
           <Stack.Screen name="Favorites" component={FavoritesScreen} />
+          <Stack.Screen name="PaymentWebView" component={PaymentWebViewScreen} />
         </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} />
