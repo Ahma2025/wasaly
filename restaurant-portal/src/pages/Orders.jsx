@@ -23,6 +23,29 @@ const STATUS_COLORS = {
   cancelled:  'bg-red-100 text-red-600 border-red-200'
 };
 
+// نغمة تنبيه لطلب جديد (Web Audio — بدون ملف صوت)
+function playNewOrderChime() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const beep = (freq, start, dur) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(gain); gain.connect(ctx.destination);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+      gain.gain.exponentialRampToValueAtTime(0.5, ctx.currentTime + start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + dur);
+    };
+    // نغمة صاعدة مرتين تلفت الانتباه
+    beep(880, 0, 0.18); beep(1174, 0.2, 0.18); beep(880, 0.5, 0.18); beep(1174, 0.7, 0.22);
+  } catch {}
+}
+
 export default function Orders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -42,6 +65,7 @@ export default function Orders() {
     socketRef.current = socket;
     socket.on('new_order', (order) => {
       if (order.restaurant_id === restaurant.id) {
+        playNewOrderChime();
         toast('🔔 طلب جديد!', { icon: '🛍️', duration: 6000 });
         showBrowserNotification('🛎️ طلب جديد!', `طلب #${order.order_number || ''} ينتظر موافقتك`, { order_id: order.order_id });
         fetchOrders();
