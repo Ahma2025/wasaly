@@ -8,7 +8,7 @@ import * as Location from 'expo-location';
 import api from '../utils/api';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
-const LABELS = ['المنزل', 'العمل', 'أخرى'];
+const LABELS = [{ k: 'المنزل', e: '🏠' }, { k: 'العمل', e: '💼' }, { k: 'أخرى', e: '📍' }];
 
 export default function AddAddressScreen({ navigation }) {
   const [label, setLabel] = useState('المنزل');
@@ -69,8 +69,8 @@ export default function AddAddressScreen({ navigation }) {
           <Text style={styles.sectionTitle}>نوع العنوان</Text>
           <View style={styles.labelRow}>
             {LABELS.map(l => (
-              <TouchableOpacity key={l} style={[styles.labelBtn, label === l && styles.labelBtnActive]} onPress={() => setLabel(l)}>
-                <Text style={[styles.labelText, label === l && { color: '#FFF' }]}>{l}</Text>
+              <TouchableOpacity key={l.k} style={[styles.labelBtn, label === l.k && styles.labelBtnActive]} onPress={() => setLabel(l.k)}>
+                <Text style={[styles.labelText, label === l.k && { color: '#FFF' }]}>{l.e} {l.k}</Text>
               </TouchableOpacity>
             ))}
           </View>

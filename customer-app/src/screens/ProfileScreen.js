@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Switch, Share, Linking } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Switch, Share, Linking, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -20,8 +21,28 @@ export default function ProfileScreen({ navigation }) {
   }, []);
 
   const save = async () => {
-    try { await api.put('/users/profile', { name }); setProfile(p => ({ ...p, name })); setEditing(false); }
+    try { await api.put('/users/profile', { name, email: profile?.email || null, avatar: profile?.avatar || null }); setProfile(p => ({ ...p, name })); setEditing(false); }
     catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }
+  };
+
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const pickAvatar = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return Alert.alert('تنبيه', 'نحتاج إذن الصور');
+      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.6 });
+      if (res.canceled || !res.assets?.[0]) return;
+      setUploadingAvatar(true);
+      const asset = res.assets[0];
+      const form = new FormData();
+      form.append('file', { uri: asset.uri, name: 'avatar.jpg', type: 'image/jpeg' });
+      const up = await api.post('/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (up.url) {
+        await api.put('/users/profile', { name: profile?.name, email: profile?.email || null, avatar: up.url });
+        setProfile(p => ({ ...p, avatar: up.url }));
+      }
+    } catch { Alert.alert('خطأ', 'فشل رفع الصورة'); }
+    finally { setUploadingAvatar(false); }
   };
 
   const tier = profile?.loyalty_tier || 'bronze';
@@ -38,7 +59,12 @@ export default function ProfileScreen({ navigation }) {
     <ScrollView style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: tierMeta.color }]}>
-        <View style={styles.avatar}><Text style={styles.avatarText}>{profile?.name?.[0] || '?'}</Text></View>
+        <TouchableOpacity style={styles.avatar} onPress={pickAvatar} activeOpacity={0.8}>
+          {profile?.avatar
+            ? <Image source={{ uri: profile.avatar }} style={styles.avatarImg} />
+            : <Text style={styles.avatarText}>{profile?.name?.[0] || '?'}</Text>}
+          <View style={styles.avatarCam}><Ionicons name={uploadingAvatar ? 'hourglass' : 'camera'} size={14} color="#FFF" /></View>
+        </TouchableOpacity>
         <Text style={styles.headerName}>{profile?.name}</Text>
         <Text style={styles.headerPhone}>{profile?.phone}</Text>
       </View>
@@ -153,6 +179,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   header: { paddingTop: 60, paddingBottom: 40, alignItems: 'center', borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
   avatar: { width: 84, height: 84, borderRadius: 42, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center', marginBottom: 10, borderWidth: 3, borderColor: 'rgba(255,255,255,0.5)' },
+  avatarImg: { width: '100%', height: '100%', borderRadius: 42 },
+  avatarCam: { position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderRadius: 13, backgroundColor: '#FF6B00', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFF' },
   avatarText: { fontSize: 32, fontWeight: '900', color: '#FFF' },
   headerName: { fontSize: 22, fontWeight: '900', color: '#FFF' },
   headerPhone: { fontSize: 14, color: 'rgba(255,255,255,0.85)', marginTop: 4 },
