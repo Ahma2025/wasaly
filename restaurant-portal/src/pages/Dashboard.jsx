@@ -49,7 +49,7 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="p-4 space-y-4" dir="rtl">
+    <div className="p-4 space-y-4 animate-fade-up" dir="rtl">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-black text-gray-900">الرئيسية</h1>
         <span className={`px-3 py-1 rounded-full text-xs font-bold ${restaurant.is_open ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
@@ -58,7 +58,7 @@ export default function Dashboard() {
       </div>
 
       {/* Today Highlight */}
-      <div className="bg-gradient-to-r from-orange-500 to-orange-600 rounded-2xl p-4 text-white">
+      <div className="bg-gradient-to-r from-orange-500 to-orange-600 rounded-3xl p-5 text-white shadow-brand">
         <p className="text-white/80 text-xs font-semibold mb-2">اليوم</p>
         <div className="flex justify-between items-end">
           <div>
@@ -75,19 +75,19 @@ export default function Dashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-soft hover:shadow-card hover:-translate-y-0.5">
           <p className="text-gray-400 text-xs">إيرادات الشهر</p>
           <p className="text-xl font-black text-gray-900 mt-1">{totalRevenue.toFixed(0)}₪</p>
         </div>
-        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-soft hover:shadow-card hover:-translate-y-0.5">
           <p className="text-gray-400 text-xs">طلبات الشهر</p>
           <p className="text-xl font-black text-gray-900 mt-1">{totalOrders}</p>
         </div>
-        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-soft hover:shadow-card hover:-translate-y-0.5">
           <p className="text-gray-400 text-xs">متوسط الطلب</p>
           <p className="text-xl font-black text-gray-900 mt-1">{avgOrder}₪</p>
         </div>
-        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-soft hover:shadow-card hover:-translate-y-0.5">
           <p className="text-gray-400 text-xs">تم التوصيل</p>
           <p className="text-xl font-black text-green-600 mt-1">{deliveredCount}</p>
         </div>
@@ -95,7 +95,7 @@ export default function Dashboard() {
 
       {/* Revenue Chart */}
       {sales.length > 0 ? (
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+        <div className="bg-white rounded-2xl p-4 shadow-soft border border-gray-100">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-bold text-gray-900">الإيرادات</h2>
             <div className="flex gap-1">
@@ -129,7 +129,7 @@ export default function Dashboard() {
 
       {/* Weekly Comparison */}
       {last7.length > 0 && (
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+        <div className="bg-white rounded-2xl p-4 shadow-soft border border-gray-100">
           <h2 className="font-bold text-gray-900 mb-1">📅 آخر 7 أيام</h2>
           <div className="flex gap-4 mb-3">
             <div>
@@ -155,7 +155,7 @@ export default function Dashboard() {
 
       {/* Top Items */}
       {topItems.length > 0 && (
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+        <div className="bg-white rounded-2xl p-4 shadow-soft border border-gray-100">
           <h2 className="font-bold text-gray-900 mb-3">🏆 الأصناف الأكثر مبيعاً</h2>
           <div className="space-y-3">
             {topItems.map((item, i) => (
@@ -182,7 +182,7 @@ export default function Dashboard() {
 
       {/* Orders by Status */}
       {stats?.ordersByStatus?.length > 0 && (
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+        <div className="bg-white rounded-2xl p-4 shadow-soft border border-gray-100">
           <h2 className="font-bold text-gray-900 mb-3">📦 حالات الطلبات</h2>
           <div className="space-y-2">
             {stats.ordersByStatus.map((s, i) => {
