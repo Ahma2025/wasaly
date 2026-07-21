@@ -159,7 +159,7 @@ export default function CartScreen() {
           {items.map(item => (
             <View key={item._key} style={styles.itemRow}>
               <View style={styles.qtyControl}>
-                <TouchableOpacity onPress={() => removeItem(item._key)} style={styles.qtyBtn}><Text style={styles.qtyBtnText}>−</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => removeItem(item._key)} style={styles.qtyBtn}><Text style={[styles.qtyBtnText, { color: COLORS.primary }]}>−</Text></TouchableOpacity>
                 <Text style={styles.qty}>{item.quantity}</Text>
                 <TouchableOpacity onPress={() => addItem(item, { id: restaurantId })} style={[styles.qtyBtn, { backgroundColor: COLORS.primary }]}><Text style={styles.qtyBtnText}>+</Text></TouchableOpacity>
               </View>
@@ -370,14 +370,14 @@ const styles = StyleSheet.create({
   title: { fontSize: 17, fontWeight: '800', color: COLORS.text },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16, backgroundColor: COLORS.bg },
   emptyTitle: { fontSize: 20, fontWeight: '700', color: COLORS.text },
-  shopBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 28, paddingVertical: 13, borderRadius: 14 },
+  shopBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 5 } },
   shopBtnText: { color: '#FFF', fontWeight: '800', fontSize: 15 },
-  card: { backgroundColor: '#FFF', margin: 12, marginBottom: 0, borderRadius: 18, padding: 16, elevation: 2, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8 },
+  card: { backgroundColor: '#FFF', margin: 12, marginBottom: 0, borderRadius: 18, padding: 16, elevation: 2, shadowColor: '#1A1A2E', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   cardTitle: { fontSize: 14, fontWeight: '800', color: COLORS.text, marginBottom: 12 },
   itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F8F8F8', gap: 12 },
   qtyControl: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  qtyBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F0F0F0', justifyContent: 'center', alignItems: 'center' },
-  qtyBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16, lineHeight: 20 },
+  qtyBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#FFF0E8', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFE0CC' },
+  qtyBtnText: { color: '#FFF', fontWeight: '900', fontSize: 17, lineHeight: 21 },
   qty: { fontSize: 15, fontWeight: '700', color: COLORS.text, minWidth: 20, textAlign: 'center' },
   itemName: { fontSize: 14, fontWeight: '600', color: COLORS.text },
   itemOptions: { fontSize: 11, color: COLORS.gray, marginTop: 2 },
@@ -417,6 +417,6 @@ const styles = StyleSheet.create({
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   summaryLabel: { fontSize: 14, color: COLORS.gray },
   summaryVal: { fontSize: 14, fontWeight: '600', color: COLORS.text },
-  orderBtn: { position: 'absolute', bottom: 20, left: 16, right: 16, backgroundColor: COLORS.primary, borderRadius: 18, padding: 17, alignItems: 'center', elevation: 6, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 10 },
-  orderBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
+  orderBtn: { position: 'absolute', bottom: 20, left: 16, right: 16, backgroundColor: COLORS.primary, borderRadius: 18, padding: 18, alignItems: 'center', elevation: 10, shadowColor: COLORS.primary, shadowOpacity: 0.45, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
+  orderBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16, letterSpacing: 0.3 },
 });
