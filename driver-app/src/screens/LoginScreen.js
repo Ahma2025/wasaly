@@ -58,12 +58,12 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   inner: { flex: 1, justifyContent: 'center', padding: 24 },
-  emoji: { fontSize: 64, textAlign: 'center', marginBottom: 8 },
-  title: { fontSize: 32, fontWeight: '900', textAlign: 'center', color: COLORS.primary },
+  emoji: { fontSize: 56, textAlign: 'center', textAlignVertical: 'center', lineHeight: 100, width: 100, height: 100, borderRadius: 32, backgroundColor: '#FFF3EC', alignSelf: 'center', marginBottom: 12, overflow: 'hidden' },
+  title: { fontSize: 34, fontWeight: '900', textAlign: 'center', color: COLORS.primary, letterSpacing: 0.5 },
   subtitle: { fontSize: 16, textAlign: 'center', color: COLORS.gray, marginBottom: 40 },
   label: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 8 },
-  input: { borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 14, padding: 14, fontSize: 16, backgroundColor: '#FFF', marginBottom: 16 },
-  btn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, alignItems: 'center', marginTop: 8 },
-  btnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
+  input: { borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 14, padding: 15, fontSize: 16, backgroundColor: '#FFF', marginBottom: 16 },
+  btn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 17, alignItems: 'center', marginTop: 8, elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
+  btnText: { color: '#FFF', fontWeight: '900', fontSize: 16, letterSpacing: 0.3 },
   note: { textAlign: 'center', color: COLORS.gray, marginTop: 24, fontSize: 13 },
 });
