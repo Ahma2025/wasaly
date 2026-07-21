@@ -28,6 +28,28 @@ export default function CartScreen() {
   const [calculatingFee, setCalculatingFee] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
   const [restaurantInfo, setRestaurantInfo] = useState(null);
+  const [couponInput, setCouponInput] = useState('');
+  const [couponCode, setCouponCode] = useState(null);
+  const [couponDiscount, setCouponDiscount] = useState(0);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponMsg, setCouponMsg] = useState('');
+
+  const applyCoupon = async () => {
+    const code = couponInput.trim();
+    if (!code) return;
+    Keyboard.dismiss();
+    setCouponLoading(true); setCouponMsg('');
+    try {
+      const res = await api.post('/coupons/validate', { code, subtotal: total });
+      const d = parseFloat(res.data?.discount || 0);
+      setCouponCode(code); setCouponDiscount(d);
+      setCouponMsg(`✅ تم تطبيق خصم ${d.toFixed(2)}₪`);
+    } catch (e) {
+      setCouponCode(null); setCouponDiscount(0);
+      setCouponMsg('❌ ' + (e.message || 'الكوبون غير صالح'));
+    } finally { setCouponLoading(false); }
+  };
+  const removeCoupon = () => { setCouponCode(null); setCouponDiscount(0); setCouponInput(''); setCouponMsg(''); };
 
   useEffect(() => { getUserLocation(); fetchRestaurantInfo(); }, []);
   useFocusEffect(useCallback(() => { fetchAddresses(); }, []));
@@ -104,6 +126,7 @@ export default function CartScreen() {
         restaurant_id: restaurantId,
         items: orderItems,
         payment_method: paymentMethod,
+        coupon_code: couponCode || undefined,
         notes: [notes, leaveAtDoor ? '🚪 اترك الطلب على الباب' : ''].filter(Boolean).join(' — '),
         tip: parseFloat(tip) || 0,
         total_amount: finalTotal,
@@ -149,7 +172,7 @@ export default function CartScreen() {
     }
   };
 
-  const finalTotal = (deliveryType === 'delivery' ? total + deliveryFee : total) + (parseFloat(tip) || 0);
+  const finalTotal = Math.max(0, (deliveryType === 'delivery' ? total + deliveryFee : total) - couponDiscount) + (parseFloat(tip) || 0);
 
   if (items.length === 0) {
     return (
@@ -345,6 +368,33 @@ export default function CartScreen() {
           />
         </View>
 
+        {/* Coupon */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🎟️ كود الخصم</Text>
+          {couponCode ? (
+            <View style={styles.couponApplied}>
+              <Ionicons name="pricetag" size={18} color={COLORS.green} />
+              <Text style={styles.couponAppliedTxt}>{couponCode} — خصم {couponDiscount.toFixed(2)}₪</Text>
+              <TouchableOpacity onPress={removeCoupon}><Ionicons name="close-circle" size={22} color={COLORS.gray} /></TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.couponRow}>
+              <TextInput
+                style={styles.couponInput}
+                placeholder="أدخل كود الخصم"
+                value={couponInput}
+                onChangeText={setCouponInput}
+                autoCapitalize="characters"
+                placeholderTextColor={COLORS.gray}
+              />
+              <TouchableOpacity style={styles.couponBtn} onPress={applyCoupon} disabled={couponLoading}>
+                {couponLoading ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.couponBtnTxt}>تطبيق</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
+          {!!couponMsg && <Text style={[styles.couponMsg, { color: couponCode ? COLORS.green : COLORS.red }]}>{couponMsg}</Text>}
+        </View>
+
         {/* Summary */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🧮 ملخص الطلب</Text>
@@ -352,6 +402,12 @@ export default function CartScreen() {
             <Text style={styles.summaryLabel}>المجموع الفرعي</Text>
             <Text style={styles.summaryVal}>{total.toFixed(2)}₪</Text>
           </View>
+          {couponDiscount > 0 && (
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabel, { color: COLORS.green }]}>خصم الكوبون</Text>
+              <Text style={[styles.summaryVal, { color: COLORS.green }]}>-{couponDiscount.toFixed(2)}₪</Text>
+            </View>
+          )}
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>رسوم التوصيل</Text>
             <Text style={[styles.summaryVal, deliveryType === 'pickup' && { color: COLORS.green }]}>
@@ -434,6 +490,13 @@ const styles = StyleSheet.create({
   payOptionActive: { borderColor: COLORS.primary, backgroundColor: '#FFF5EE' },
   payLabel: { flex: 1, fontSize: 14, color: COLORS.text },
   notesInput: { borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 12, padding: 12, minHeight: 75, textAlignVertical: 'top', fontSize: 14, color: COLORS.text },
+  couponRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  couponInput: { flex: 1, borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, color: COLORS.text, backgroundColor: '#FAFAFB', letterSpacing: 1 },
+  couponBtn: { backgroundColor: COLORS.primary, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', minWidth: 78 },
+  couponBtnTxt: { color: '#FFF', fontWeight: '800', fontSize: 14 },
+  couponApplied: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#EDFFF3', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#C3F5D8' },
+  couponAppliedTxt: { flex: 1, fontSize: 14, fontWeight: '700', color: '#1A5C33' },
+  couponMsg: { fontSize: 12, fontWeight: '700', marginTop: 8 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   summaryLabel: { fontSize: 14, color: COLORS.gray },
   summaryVal: { fontSize: 14, fontWeight: '600', color: COLORS.text },

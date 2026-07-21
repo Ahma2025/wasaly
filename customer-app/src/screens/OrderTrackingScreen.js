@@ -134,9 +134,15 @@ export default function OrderTrackingScreen() {
   const [driverLoc, setDriverLoc] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mapKey, setMapKey] = useState(0);
+  const [now, setNow] = useState(Date.now());
   const webViewRef = useRef(null);
   const socketRef = useRef(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     fetchOrder();
@@ -271,6 +277,17 @@ export default function OrderTrackingScreen() {
             {isCancelled ? '❌ تم إلغاء الطلب' : currentStep?.label}
           </Text>
           <Text style={styles.statusDesc}>{isCancelled ? 'للاستفسار تواصل مع الدعم' : currentStep?.desc}</Text>
+          {!isCancelled && !isDelivered && order.estimated_delivery_time && (() => {
+            const mins = Math.round((new Date(order.estimated_delivery_time).getTime() - now) / 60000);
+            return (
+              <View style={styles.etaBox}>
+                <Ionicons name="time" size={16} color={COLORS.primary} />
+                <Text style={styles.etaText}>
+                  {mins > 0 ? `الوصول المتوقّع خلال ~${mins} دقيقة` : 'طلبك في طريقه، وصولك قريب جداً 🎉'}
+                </Text>
+              </View>
+            );
+          })()}
         </View>
 
         {/* Progress Steps */}
@@ -382,6 +399,8 @@ const styles = StyleSheet.create({
   statusCard: { backgroundColor: '#FFF', borderRadius: 18, padding: 18, alignItems: 'center', borderWidth: 2, borderColor: '#FFE0CC', elevation: 2 },
   statusTitle: { fontSize: 20, fontWeight: '900', color: COLORS.primary, marginBottom: 6 },
   statusDesc: { fontSize: 13, color: COLORS.gray },
+  etaBox: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, backgroundColor: '#FFF5EE', borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12, alignSelf: 'flex-start' },
+  etaText: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
   card: { backgroundColor: '#FFF', borderRadius: 18, padding: 16, elevation: 1 },
   cardTitle: { fontSize: 14, fontWeight: '800', color: COLORS.text, marginBottom: 10 },
   stepRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 10 },
