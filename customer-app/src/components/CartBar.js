@@ -28,10 +28,10 @@ export default function CartBar({ count, total, onPress }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', bottom: 20, left: 16, right: 16 },
-  bar: { backgroundColor: '#FF6B00', borderRadius: 16, flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, elevation: 8, shadowColor: '#FF6B00', shadowOpacity: 0.4, shadowRadius: 10 },
-  badge: { backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2 },
-  badgeText: { color: '#FFF', fontWeight: '800', fontSize: 14 },
-  text: { flex: 1, color: '#FFF', fontWeight: '700', fontSize: 15, textAlign: 'center' },
-  total: { color: '#FFF', fontWeight: '800', fontSize: 15 }
+  wrap: { position: 'absolute', bottom: 22, left: 16, right: 16 },
+  bar: { backgroundColor: '#FF6B00', borderRadius: 18, flexDirection: 'row', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 18, elevation: 10, shadowColor: '#FF6B00', shadowOpacity: 0.45, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
+  badge: { backgroundColor: 'rgba(255,255,255,0.28)', borderRadius: 13, minWidth: 26, height: 26, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' },
+  badgeText: { color: '#FFF', fontWeight: '900', fontSize: 14 },
+  text: { flex: 1, color: '#FFF', fontWeight: '800', fontSize: 15, textAlign: 'center', letterSpacing: 0.3 },
+  total: { color: '#FFF', fontWeight: '900', fontSize: 16 }
 });

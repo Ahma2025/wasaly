@@ -11,9 +11,9 @@ export default function CategoryPill({ item, selected, onPress }) {
 }
 
 const styles = StyleSheet.create({
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E5E5EA' },
-  pillActive: { backgroundColor: '#FF6B00', borderColor: '#FF6B00' },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 15, paddingVertical: 9, borderRadius: 22, backgroundColor: '#FFF', borderWidth: 1.5, borderColor: '#EDEDF0' },
+  pillActive: { backgroundColor: '#FF6B00', borderColor: '#FF6B00', elevation: 4, shadowColor: '#FF6B00', shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },
   icon: { fontSize: 16 },
-  label: { fontSize: 13, fontWeight: '600', color: '#1A1A2E' },
+  label: { fontSize: 13, fontWeight: '700', color: '#1A1A2E' },
   labelActive: { color: '#FFF' }
 });

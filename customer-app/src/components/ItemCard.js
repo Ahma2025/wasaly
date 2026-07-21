@@ -44,22 +44,22 @@ export default function ItemCard({ item, onAdd, onPress }) {
 }
 
 const styles = StyleSheet.create({
-  card: { flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 12, marginBottom: 12, padding: 12, borderWidth: 1, borderColor: '#F0F0F0' },
+  card: { flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 16, marginBottom: 12, padding: 12, borderWidth: 1, borderColor: '#F2F2F5', elevation: 2, shadowColor: '#1A1A2E', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   info: { flex: 1, paddingRight: 12 },
   badges: { flexDirection: 'row', gap: 4, marginBottom: 4 },
-  badge: { backgroundColor: '#E8F5E9', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  badgeText: { fontSize: 10, color: '#2E7D32', fontWeight: '700' },
+  badge: { backgroundColor: '#E8F5E9', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 },
+  badgeText: { fontSize: 10, color: '#2E7D32', fontWeight: '800' },
   badgeHot: { backgroundColor: '#FFF0E8' },
   badgeHotText: { fontSize: 10, color: '#FF6B00', fontWeight: '800' },
-  discountBadge: { position: 'absolute', top: -4, left: -4, backgroundColor: '#FF3B30', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+  discountBadge: { position: 'absolute', top: -4, left: -4, backgroundColor: '#FF3B30', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3, elevation: 3, shadowColor: '#FF3B30', shadowOpacity: 0.4, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
   discountText: { color: '#FFF', fontSize: 10, fontWeight: '900' },
-  name: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 4 },
+  name: { fontSize: 15, fontWeight: '800', color: COLORS.text, marginBottom: 4 },
   desc: { fontSize: 12, color: COLORS.gray, lineHeight: 18, marginBottom: 6 },
   calories: { fontSize: 11, color: COLORS.gray, marginBottom: 6 },
   priceRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  price: { fontSize: 15, fontWeight: '800', color: COLORS.primary },
+  price: { fontSize: 16, fontWeight: '900', color: COLORS.primary },
   originalPrice: { fontSize: 12, color: COLORS.gray, textDecorationLine: 'line-through' },
   imageWrap: { position: 'relative' },
-  image: { width: 90, height: 90, borderRadius: 10 },
-  addBtn: { position: 'absolute', bottom: -6, right: -6, backgroundColor: COLORS.primary, borderRadius: 14, width: 28, height: 28, justifyContent: 'center', alignItems: 'center', elevation: 4 }
+  image: { width: 92, height: 92, borderRadius: 14 },
+  addBtn: { position: 'absolute', bottom: -8, right: -8, backgroundColor: COLORS.primary, borderRadius: 16, width: 32, height: 32, justifyContent: 'center', alignItems: 'center', elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.5, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, borderWidth: 2, borderColor: '#FFF' }
 });

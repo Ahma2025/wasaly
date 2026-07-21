@@ -43,21 +43,21 @@ export default function RestaurantCard({ restaurant: r, onPress }) {
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: '#FFF', borderRadius: 16, marginBottom: 16, overflow: 'hidden', elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8 },
-  image: { width: '100%', height: 140, resizeMode: 'cover' },
-  closedOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)', height: 140, justifyContent: 'center', alignItems: 'center' },
-  closedText: { color: '#FFF', fontSize: 18, fontWeight: '800' },
-  featuredBadge: { position: 'absolute', top: 10, left: 10, backgroundColor: COLORS.primary, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  featuredText: { color: '#FFF', fontSize: 11, fontWeight: '700' },
-  info: { padding: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  logo: { width: 40, height: 40, borderRadius: 8 },
-  name: { fontSize: 15, fontWeight: '800', color: COLORS.text },
-  category: { fontSize: 12, color: COLORS.gray },
-  discountBadge: { backgroundColor: '#FFE5D9', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
-  discountText: { color: COLORS.primary, fontSize: 11, fontWeight: '700' },
-  stats: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 },
+  card: { backgroundColor: '#FFF', borderRadius: 20, marginBottom: 18, overflow: 'hidden', elevation: 5, shadowColor: '#1A1A2E', shadowOpacity: 0.10, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
+  image: { width: '100%', height: 158, resizeMode: 'cover' },
+  closedOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(20,20,35,0.55)', height: 158, justifyContent: 'center', alignItems: 'center' },
+  closedText: { color: '#FFF', fontSize: 18, fontWeight: '800', letterSpacing: 0.5 },
+  featuredBadge: { position: 'absolute', top: 12, left: 12, backgroundColor: COLORS.primary, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, elevation: 4, shadowColor: COLORS.primary, shadowOpacity: 0.5, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },
+  featuredText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
+  info: { padding: 14 },
+  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  logo: { width: 44, height: 44, borderRadius: 12, borderWidth: 2, borderColor: '#FFF', elevation: 3, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  name: { fontSize: 16, fontWeight: '800', color: COLORS.text },
+  category: { fontSize: 12, color: COLORS.gray, marginTop: 1 },
+  discountBadge: { backgroundColor: '#FFE5D9', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  discountText: { color: COLORS.primary, fontSize: 11, fontWeight: '800' },
+  stats: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5 },
   stat: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  statText: { fontSize: 12, color: COLORS.gray },
-  dot: { color: COLORS.gray, fontSize: 12 }
+  statText: { fontSize: 12, color: COLORS.gray, fontWeight: '600' },
+  dot: { color: '#D1D1D6', fontSize: 12 }
 });
