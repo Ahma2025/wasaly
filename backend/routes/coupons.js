@@ -9,7 +9,7 @@ router.post('/validate', auth, async (req, res) => {
     const { rows } = await pool.query(
       `SELECT * FROM coupons WHERE code=$1 AND is_active=true
        AND (expires_at IS NULL OR expires_at > NOW())
-       AND (max_uses IS NULL OR uses_count < max_uses)
+       AND (usage_limit IS NULL OR usage_count < usage_limit)
        AND min_order <= $2`,
       [code, subtotal || 0]
     );
@@ -34,15 +34,17 @@ router.post('/validate', auth, async (req, res) => {
 // Create coupon (admin)
 router.post('/', auth, adminOnly, async (req, res) => {
   try {
-    const { code, type = 'fixed', value, min_order, max_discount, max_uses, usage_limit, expires_at } = req.body;
-    const uses = parseInt(max_uses || usage_limit || 100) || 100;
+    const { code, type = 'percentage', value, min_order, max_discount, max_uses, usage_limit, expires_at } = req.body;
+    const usesRaw = max_uses ?? usage_limit;
+    const uses = (usesRaw !== undefined && usesRaw !== null && usesRaw !== '') ? parseInt(usesRaw) : null;
+    // أعمدة موجودة في سكيمتَي الإنتاج (Postgres) والمحلي (SQLite) معاً
     const { rows } = await pool.query(
-      `INSERT INTO coupons (code, type, value, min_order, max_discount, max_uses, usage_limit, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$6,$7) RETURNING *`,
+      `INSERT INTO coupons (code, type, value, min_order, max_discount, usage_limit, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
       [
         String(code).trim().toUpperCase(),
         type,
-        value ? parseFloat(value) : null,
+        value ? parseFloat(value) : 0,
         min_order ? parseFloat(min_order) : 0,
         max_discount ? parseFloat(max_discount) : null,
         uses,

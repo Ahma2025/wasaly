@@ -129,7 +129,7 @@ router.post('/', auth, async (req, res) => {
         const c = coupons[0];
         if (c.type === 'percentage') discount = Math.min(subtotal * c.value / 100, c.max_discount || subtotal);
         else if (c.type === 'fixed') discount = Math.min(c.value, subtotal);
-        await pool.query('UPDATE coupons SET usage_count = usage_count + 1, uses_count = uses_count + 1 WHERE code=$1', [coupon_code]);
+        await pool.query('UPDATE coupons SET usage_count = usage_count + 1 WHERE code=$1', [coupon_code]);
       }
     }
 
