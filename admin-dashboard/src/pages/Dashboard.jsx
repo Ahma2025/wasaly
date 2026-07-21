@@ -4,7 +4,7 @@ import api from '../utils/api';
 import toast from 'react-hot-toast';
 
 const StatCard = ({ icon, label, value, sub, color }) => (
-  <div className={`rounded-2xl p-4 text-white ${color}`}>
+  <div className={`rounded-2xl p-4 text-white shadow-card hover:-translate-y-0.5 ${color}`}>
     <div className="text-2xl mb-2">{icon}</div>
     <p className="text-white/80 text-xs">{label}</p>
     <p className="text-2xl font-black mt-0.5">{value ?? '-'}</p>
@@ -28,7 +28,7 @@ export default function Dashboard() {
   const statusLabels = { pending: 'قيد الانتظار', confirmed: 'مقبول', preparing: 'يُحضَّر', on_the_way: 'في الطريق', delivered: 'تم التوصيل', cancelled: 'ملغي' };
 
   return (
-    <div className="p-4 space-y-4" dir="rtl">
+    <div className="p-4 space-y-4 animate-fade-up" dir="rtl">
       <h1 className="text-lg font-black text-gray-900">لوحة التحكم</h1>
 
       {/* KPI Grid */}
@@ -40,7 +40,7 @@ export default function Dashboard() {
       </div>
 
       {/* Today Revenue */}
-      <div className="bg-gradient-to-r from-orange-500 to-red-500 rounded-2xl p-5 text-white">
+      <div className="bg-gradient-to-r from-orange-500 to-red-500 rounded-3xl p-5 text-white shadow-[0_8px_24px_rgba(255,80,0,0.35)]">
         <p className="text-white/80 text-sm">إيرادات اليوم</p>
         <p className="text-4xl font-black">{parseFloat(data?.revenueToday || 0).toFixed(2)}₪</p>
         {data?.pendingOrders > 0 && (
@@ -50,7 +50,7 @@ export default function Dashboard() {
 
       {/* Weekly Revenue Chart */}
       {data?.weeklyRevenue?.length > 0 ? (
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+        <div className="bg-white rounded-2xl p-4 shadow-soft border border-gray-100">
           <h2 className="font-bold text-gray-900 mb-3">إيرادات آخر 7 أيام</h2>
           <ResponsiveContainer width="100%" height={180}>
             <AreaChart data={data.weeklyRevenue}>
@@ -71,7 +71,7 @@ export default function Dashboard() {
 
       {/* Orders by status */}
       {data?.ordersByStatus?.length > 0 && (
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+        <div className="bg-white rounded-2xl p-4 shadow-soft border border-gray-100">
           <h2 className="font-bold text-gray-900 mb-3">الطلبات حسب الحالة</h2>
           <div className="space-y-2">
             {data.ordersByStatus.map((s, i) => (

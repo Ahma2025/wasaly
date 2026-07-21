@@ -35,15 +35,15 @@ function BottomNav() {
   const { pathname } = useLocation();
   const allNav = [...NAV, ...NAV2];
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 safe-area-bottom" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+    <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur border-t border-gray-100 z-50 safe-area-bottom shadow-[0_-4px_20px_rgba(26,26,46,0.06)]" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <div className="flex overflow-x-auto">
         {allNav.map(item => {
           const active = item.to === '/' ? pathname === '/' : pathname.startsWith(item.to);
           return (
             <button key={item.to} onClick={() => navigate(item.to)}
-              className={`flex-shrink-0 flex flex-col items-center py-2 px-3 gap-0.5 transition-colors min-w-[60px] ${active ? 'text-orange-500' : 'text-gray-400'}`}>
-              <span className="text-lg">{item.icon}</span>
-              <span className="text-[9px] font-semibold whitespace-nowrap">{item.label}</span>
+              className={`flex-shrink-0 flex flex-col items-center py-2 px-3 gap-0.5 min-w-[60px] ${active ? 'text-orange-500' : 'text-gray-400'}`}>
+              <span className={`text-lg w-10 h-7 flex items-center justify-center rounded-full ${active ? 'bg-orange-50' : ''}`}>{item.icon}</span>
+              <span className="text-[9px] font-bold whitespace-nowrap">{item.label}</span>
             </button>
           );
         })}
@@ -60,8 +60,8 @@ function BottomNav() {
 function AppLayout() {
   return (
     <div className="min-h-screen bg-gray-50" dir="rtl">
-      <header className="sticky top-0 z-40 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 shadow-sm">
-        <div className="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center text-white font-black text-lg">و</div>
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-gray-100 px-4 py-3 flex items-center gap-3 shadow-soft">
+        <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl flex items-center justify-center text-white font-black text-lg shadow-brand">و</div>
         <div>
           <h1 className="font-black text-gray-900 leading-none text-base">وصلّي</h1>
           <p className="text-[10px] text-gray-400">لوحة الإدارة</p>
