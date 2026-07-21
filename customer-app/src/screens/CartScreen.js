@@ -37,6 +37,14 @@ export default function CartScreen() {
   const [walletBalance, setWalletBalance] = useState(0);
   const [usePoints, setUsePoints] = useState(false);
   const [useWallet, setUseWallet] = useState(false);
+  const [schedule, setSchedule] = useState('now');
+  const SCHEDULE_OPTS = [
+    { k: 'now', l: 'الآن ⚡' },
+    { k: '1h', l: 'خلال ساعة' },
+    { k: '2h', l: 'بعد ساعتين' },
+    { k: 'eve', l: 'مساءً 🌙' },
+  ];
+  const scheduleLabel = { '1h': 'خلال ساعة', '2h': 'بعد ساعتين', eve: 'مساءً' }[schedule];
 
   useEffect(() => {
     api.get('/users/profile').then(d => {
@@ -140,7 +148,7 @@ export default function CartScreen() {
         coupon_code: couponCode || undefined,
         redeem_points: usePoints ? Math.round(redeemValue / 0.05) : 0,
         use_wallet: useWallet,
-        notes: [notes, leaveAtDoor ? '🚪 اترك الطلب على الباب' : ''].filter(Boolean).join(' — '),
+        notes: [notes, leaveAtDoor ? '🚪 اترك الطلب على الباب' : '', scheduleLabel ? `⏰ توصيل مجدول: ${scheduleLabel}` : ''].filter(Boolean).join(' — '),
         tip: parseFloat(tip) || 0,
         total_amount: finalTotal,
         order_type: deliveryType,
@@ -370,6 +378,18 @@ export default function CartScreen() {
             </TouchableOpacity>
           </View>
         )}
+
+        {/* وقت التوصيل */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🕐 وقت التوصيل</Text>
+          <View style={styles.tipRow}>
+            {SCHEDULE_OPTS.map(o => (
+              <TouchableOpacity key={o.k} onPress={() => setSchedule(o.k)} style={[styles.tipChip, schedule === o.k && styles.tipChipOn]}>
+                <Text style={[styles.tipChipTxt, schedule === o.k && { color: '#FFF' }, { fontSize: 12 }]}>{o.l}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
         {/* Notes */}
         <View style={styles.card}>

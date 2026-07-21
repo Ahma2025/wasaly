@@ -145,6 +145,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('recommended');
   const [openOnly, setOpenOnly] = useState(false);
+  const [freeDelivOnly, setFreeDelivOnly] = useState(false);
   const [recentRests, setRecentRests] = useState([]);
   const suggestedRef = useRef(null);
 
@@ -192,10 +193,11 @@ export default function HomeScreen() {
   const sorted = React.useMemo(() => {
     let arr = [...restaurants];
     if (openOnly) arr = arr.filter(r => r.is_open);
+    if (freeDelivOnly) arr = arr.filter(r => Number(r.delivery_fee) === 0);
     if (sortBy === 'rating') arr.sort((a, b) => (b.rating || 0) - (a.rating || 0));
     else if (sortBy === 'fastest') arr.sort((a, b) => (a.delivery_time_min || 99) - (b.delivery_time_min || 99));
     return arr;
-  }, [restaurants, sortBy, openOnly]);
+  }, [restaurants, sortBy, openOnly, freeDelivOnly]);
 
   const surpriseMe = () => {
     const pool = restaurants.filter(r => r.is_open);
@@ -273,6 +275,9 @@ export default function HomeScreen() {
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setOpenOnly(v => !v)} style={[s.sortChip, openOnly && s.sortChipOn]}>
               <Text style={[s.sortChipTxt, openOnly && s.sortChipTxtOn]}>المفتوحة الآن 🟢</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setFreeDelivOnly(v => !v)} style={[s.sortChip, freeDelivOnly && s.sortChipOn]}>
+              <Text style={[s.sortChipTxt, freeDelivOnly && s.sortChipTxtOn]}>توصيل مجاني 🚚</Text>
             </TouchableOpacity>
             {[
               { k: 'recommended', l: 'مقترح ✨' },
