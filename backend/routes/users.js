@@ -24,7 +24,11 @@ router.get('/profile', auth, async (req, res) => {
 router.put('/profile', auth, async (req, res) => {
   try {
     const { name, email, avatar } = req.body;
-    const { rows } = await pool.query('UPDATE users SET name=$1, email=$2, avatar=$3, updated_at=NOW() WHERE id=$4 RETURNING id,name,email,phone,avatar', [name, email, avatar, req.user.id]);
+    const { rows } = await pool.query(
+      `UPDATE users SET name = COALESCE($1, name), email = COALESCE($2, email), avatar = COALESCE($3, avatar)
+       WHERE id=$4 RETURNING id,name,email,phone,avatar`,
+      [name ?? null, email ?? null, avatar ?? null, req.user.id]
+    );
     res.json({ success: true, data: rows[0] });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });

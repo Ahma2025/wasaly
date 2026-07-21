@@ -20,6 +20,68 @@ function compressToBase64(file, maxPx = 500, quality = 0.78) {
   });
 }
 
+// خريطة تفاعلية: اضغط أو اسحب الدبوس لتحديد موقع المطعم
+function LocationPicker({ lat, lng, onPick }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadLeaflet = async () => {
+      if (window.L) return window.L;
+      if (!document.getElementById('leaflet-css')) {
+        const link = document.createElement('link');
+        link.id = 'leaflet-css';
+        link.rel = 'stylesheet';
+        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+        document.head.appendChild(link);
+      }
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+        s.onload = resolve; s.onerror = reject;
+        document.body.appendChild(s);
+      });
+      return window.L;
+    };
+
+    loadLeaflet().then((L) => {
+      if (cancelled || !containerRef.current || mapRef.current) return;
+      const startLat = parseFloat(lat) || 32.3130;
+      const startLng = parseFloat(lng) || 35.0290;
+      const map = L.map(containerRef.current).setView([startLat, startLng], 14);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+      const marker = L.marker([startLat, startLng], { draggable: true }).addTo(map);
+      mapRef.current = map; markerRef.current = marker;
+      const commit = (ll) => onPick(ll.lat.toFixed(6), ll.lng.toFixed(6));
+      map.on('click', (e) => { marker.setLatLng(e.latlng); commit(e.latlng); });
+      marker.on('dragend', () => commit(marker.getLatLng()));
+      setTimeout(() => map.invalidateSize(), 250);
+    }).catch(() => setFailed(true));
+
+    return () => { cancelled = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
+  }, []);
+
+  // مزامنة زر "موقعي الآن" مع الدبوس
+  useEffect(() => {
+    if (mapRef.current && markerRef.current && lat && lng) {
+      const p = [parseFloat(lat), parseFloat(lng)];
+      markerRef.current.setLatLng(p);
+      mapRef.current.setView(p);
+    }
+  }, [lat, lng]);
+
+  if (failed) return (
+    <div className="flex flex-col items-center justify-center h-28 bg-gray-50 rounded-xl text-gray-400 gap-1">
+      <span className="text-2xl">🗺️</span>
+      <p className="text-xs">تعذّر تحميل الخريطة — استخدم الإحداثيات اليدوية بالأسفل</p>
+    </div>
+  );
+  return <div ref={containerRef} style={{ width: '100%', height: '260px', borderRadius: '12px', overflow: 'hidden', zIndex: 0 }} />;
+}
+
 export default function Settings() {
   const [restaurant, setRestaurant] = useState(JSON.parse(localStorage.getItem('restaurant') || '{}'));
   const [form, setForm] = useState({
@@ -212,22 +274,27 @@ export default function Settings() {
             📡 موقعي الآن
           </button>
         </div>
-        <p className="text-xs text-gray-400">اضغط "موقعي الآن" لتحديد موقع مطعمك تلقائياً عبر GPS</p>
-        {form.lat && form.lng ? (
-          <>
-            <iframe title="map"
-              src={`https://www.openstreetmap.org/export/embed.html?bbox=${parseFloat(form.lng)-0.01},${parseFloat(form.lat)-0.01},${parseFloat(form.lng)+0.01},${parseFloat(form.lat)+0.01}&layer=mapnik&marker=${form.lat},${form.lng}`}
-              style={{ width: '100%', height: '220px', border: 'none', borderRadius: '12px' }} />
-            <p className="text-xs text-gray-500 text-center">
-              📌 {parseFloat(form.lat).toFixed(5)}, {parseFloat(form.lng).toFixed(5)}
-            </p>
-          </>
-        ) : (
-          <div className="flex flex-col items-center justify-center h-28 bg-gray-50 rounded-xl text-gray-400 gap-2">
-            <span className="text-3xl">🗺️</span>
-            <p className="text-xs">اضغط "موقعي الآن" لتحديد الموقع</p>
-          </div>
+        <p className="text-xs text-gray-400">👆 اضغط على الخريطة أو اسحب الدبوس 📍 لتحديد موقع مطعمك بالضبط — أو استخدم "موقعي الآن"</p>
+
+        <LocationPicker lat={form.lat} lng={form.lng} onPick={(la, ln) => setForm(f => ({ ...f, lat: la, lng: ln }))} />
+
+        {form.lat && form.lng && (
+          <p className="text-xs text-green-600 text-center font-bold">📌 الموقع المحدد: {parseFloat(form.lat).toFixed(5)}, {parseFloat(form.lng).toFixed(5)}</p>
         )}
+
+        {/* إدخال يدوي للإحداثيات (اختياري) */}
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[11px] text-gray-500 mb-1 block">خط العرض (lat)</label>
+            <input className="w-full border border-gray-200 rounded-xl p-2.5 text-sm" type="number" step="any" placeholder="32.31300"
+              value={form.lat} onChange={e => setForm(f => ({ ...f, lat: e.target.value }))} />
+          </div>
+          <div>
+            <label className="text-[11px] text-gray-500 mb-1 block">خط الطول (lng)</label>
+            <input className="w-full border border-gray-200 rounded-xl p-2.5 text-sm" type="number" step="any" placeholder="35.02900"
+              value={form.lng} onChange={e => setForm(f => ({ ...f, lng: e.target.value }))} />
+          </div>
+        </div>
       </div>
 
       {/* Delivery Settings */}

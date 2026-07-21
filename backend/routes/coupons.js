@@ -34,11 +34,20 @@ router.post('/validate', auth, async (req, res) => {
 // Create coupon (admin)
 router.post('/', auth, adminOnly, async (req, res) => {
   try {
-    const { code, type, value, min_order, max_discount, usage_limit, user_usage_limit, restaurant_id, starts_at, expires_at } = req.body;
+    const { code, type = 'fixed', value, min_order, max_discount, max_uses, usage_limit, expires_at } = req.body;
+    const uses = parseInt(max_uses || usage_limit || 100) || 100;
     const { rows } = await pool.query(
-      `INSERT INTO coupons (code, type, value, min_order, max_discount, usage_limit, user_usage_limit, restaurant_id, starts_at, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [code, type, value, min_order, max_discount, usage_limit, user_usage_limit, restaurant_id, starts_at, expires_at]
+      `INSERT INTO coupons (code, type, value, min_order, max_discount, max_uses, usage_limit, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$6,$7) RETURNING *`,
+      [
+        String(code).trim().toUpperCase(),
+        type,
+        value ? parseFloat(value) : null,
+        min_order ? parseFloat(min_order) : 0,
+        max_discount ? parseFloat(max_discount) : null,
+        uses,
+        expires_at ? expires_at : null,
+      ]
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (e) {

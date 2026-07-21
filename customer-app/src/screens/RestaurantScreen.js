@@ -255,7 +255,7 @@ const styles = StyleSheet.create({
   backBtn: { position: 'absolute', top: 50, left: 16, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 20, padding: 8 },
   favBtn: { position: 'absolute', top: 50, right: 16, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 20, padding: 8 },
   shareBtn: { position: 'absolute', top: 50, right: 62, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 20, padding: 8 },
-  infoCard: { backgroundColor: '#FFF', margin: 16, marginTop: -28, borderRadius: 20, padding: 16, flexDirection: 'row', elevation: 6, shadowColor: '#1A1A2E', shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
+  infoCard: { backgroundColor: '#FFF', margin: 16, marginTop: 12, borderRadius: 20, padding: 16, flexDirection: 'row', elevation: 6, shadowColor: '#1A1A2E', shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
   logo: { width: 72, height: 72, borderRadius: 16, borderWidth: 2, borderColor: '#FFF', elevation: 3, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
   name: { fontSize: 18, fontWeight: '800', color: COLORS.text },
   desc: { fontSize: 13, color: COLORS.gray, marginTop: 2 },

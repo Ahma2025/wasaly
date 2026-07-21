@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 
-const MAX_KM = 5;
+const MAX_KM = 100;
 
 export default function DeliveryZones() {
   const [zones, setZones] = useState([]);
