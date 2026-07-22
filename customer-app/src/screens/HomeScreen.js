@@ -254,7 +254,7 @@ export default function HomeScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 12 }}>
             {categories.map(cat => (
-              <TouchableOpacity key={cat.id} style={s.quickCat} onPress={() => { const first = byCat(cat.id)[0]; if (first) go(first.id); }}>
+              <TouchableOpacity key={cat.id} style={s.quickCat} onPress={() => navigation.navigate('Category', { categoryId: cat.id, categoryName: cat.name_ar })}>
                 <View style={s.quickCircle}>
                   <Text style={{ fontSize: 28 }}>{cat.icon || '🍽️'}</Text>
                 </View>
