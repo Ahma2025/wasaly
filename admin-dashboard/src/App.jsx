@@ -60,7 +60,8 @@ function BottomNav() {
 function AppLayout() {
   return (
     <div className="min-h-screen bg-gray-50" dir="rtl">
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-gray-100 px-4 py-3 flex items-center gap-3 shadow-soft">
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-gray-100 px-4 flex items-center gap-3 shadow-soft"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)', paddingBottom: '16px' }}>
         <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl flex items-center justify-center text-white font-black text-lg shadow-brand">و</div>
         <div>
           <h1 className="font-black text-gray-900 leading-none text-base">وصلّي</h1>

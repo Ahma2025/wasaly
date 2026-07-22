@@ -52,7 +52,8 @@ function Layout() {
   return (
     <div className="min-h-screen bg-gray-50" dir="rtl">
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-gray-100 px-4 py-3 flex items-center gap-3 shadow-soft">
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-gray-100 px-4 flex items-center gap-3 shadow-soft"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)', paddingBottom: '16px' }}>
         <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center text-lg ring-2 ring-white shadow-soft overflow-hidden">
           {restaurant.logo ? <img src={restaurant.logo} className="w-10 h-10 rounded-xl object-cover" /> : '🏪'}
         </div>
