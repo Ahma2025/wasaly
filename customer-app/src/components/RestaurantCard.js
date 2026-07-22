@@ -1,10 +1,11 @@
 import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93' };
+import { useTheme } from '../context/ThemeContext';
 
 export default function RestaurantCard({ restaurant: r, onPress }) {
+  const { colors: COLORS } = useTheme();
+  const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
       <Image source={{ uri: r.cover_image || r.logo }} style={styles.image} />
@@ -42,8 +43,8 @@ export default function RestaurantCard({ restaurant: r, onPress }) {
   );
 }
 
-const styles = StyleSheet.create({
-  card: { backgroundColor: '#FFF', borderRadius: 20, marginBottom: 18, overflow: 'hidden', elevation: 5, shadowColor: '#1A1A2E', shadowOpacity: 0.10, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
+const makeStyles = (COLORS) => StyleSheet.create({
+  card: { backgroundColor: COLORS.card, borderRadius: 20, marginBottom: 18, overflow: 'hidden', elevation: 5, shadowColor: '#000', shadowOpacity: 0.10, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
   image: { width: '100%', height: 158, resizeMode: 'cover' },
   closedOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(20,20,35,0.55)', height: 158, justifyContent: 'center', alignItems: 'center' },
   closedText: { color: '#FFF', fontSize: 18, fontWeight: '800', letterSpacing: 0.5 },
@@ -51,13 +52,13 @@ const styles = StyleSheet.create({
   featuredText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
   info: { padding: 14 },
   row: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  logo: { width: 44, height: 44, borderRadius: 12, borderWidth: 2, borderColor: '#FFF', elevation: 3, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  logo: { width: 44, height: 44, borderRadius: 12, borderWidth: 2, borderColor: COLORS.card, elevation: 3, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
   name: { fontSize: 16, fontWeight: '800', color: COLORS.text },
   category: { fontSize: 12, color: COLORS.gray, marginTop: 1 },
-  discountBadge: { backgroundColor: '#FFE5D9', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  discountBadge: { backgroundColor: COLORS.tint, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
   discountText: { color: COLORS.primary, fontSize: 11, fontWeight: '800' },
   stats: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5 },
   stat: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   statText: { fontSize: 12, color: COLORS.gray, fontWeight: '600' },
-  dot: { color: '#D1D1D6', fontSize: 12 }
+  dot: { color: COLORS.border, fontSize: 12 }
 });

@@ -1,10 +1,11 @@
 import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93' };
+import { useTheme } from '../context/ThemeContext';
 
 export default function ItemCard({ item, onAdd, onPress }) {
+  const { colors: COLORS } = useTheme();
+  const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
       <View style={styles.info}>
@@ -26,7 +27,7 @@ export default function ItemCard({ item, onAdd, onPress }) {
         {item.image ? (
           <Image source={{ uri: item.image }} style={styles.image} />
         ) : (
-          <View style={[styles.image, { backgroundColor: '#F0F0F0', justifyContent: 'center', alignItems: 'center' }]}>
+          <View style={[styles.image, { backgroundColor: COLORS.inputBg, justifyContent: 'center', alignItems: 'center' }]}>
             <Text style={{ fontSize: 30 }}>🍽️</Text>
           </View>
         )}
@@ -43,8 +44,8 @@ export default function ItemCard({ item, onAdd, onPress }) {
   );
 }
 
-const styles = StyleSheet.create({
-  card: { flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 16, marginBottom: 12, padding: 12, borderWidth: 1, borderColor: '#F2F2F5', elevation: 2, shadowColor: '#1A1A2E', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+const makeStyles = (COLORS) => StyleSheet.create({
+  card: { flexDirection: 'row', backgroundColor: COLORS.card, borderRadius: 16, marginBottom: 12, padding: 12, borderWidth: 1, borderColor: COLORS.line, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   info: { flex: 1, paddingRight: 12 },
   badges: { flexDirection: 'row', gap: 4, marginBottom: 4 },
   badge: { backgroundColor: '#E8F5E9', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 },
@@ -61,5 +62,5 @@ const styles = StyleSheet.create({
   originalPrice: { fontSize: 12, color: COLORS.gray, textDecorationLine: 'line-through' },
   imageWrap: { position: 'relative' },
   image: { width: 92, height: 92, borderRadius: 14 },
-  addBtn: { position: 'absolute', bottom: -8, right: -8, backgroundColor: COLORS.primary, borderRadius: 16, width: 32, height: 32, justifyContent: 'center', alignItems: 'center', elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.5, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, borderWidth: 2, borderColor: '#FFF' }
+  addBtn: { position: 'absolute', bottom: -8, right: -8, backgroundColor: COLORS.primary, borderRadius: 16, width: 32, height: 32, justifyContent: 'center', alignItems: 'center', elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.5, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, borderWidth: 2, borderColor: COLORS.card }
 });

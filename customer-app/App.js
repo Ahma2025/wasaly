@@ -26,6 +26,7 @@ class ErrorBoundary extends React.Component {
 }
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { CartProvider } from './src/context/CartContext';
+import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
@@ -46,6 +47,7 @@ const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
 function MainTabs() {
+  const { colors } = useTheme();
   return (
     <Tab.Navigator initialRouteName="الرئيسية" screenOptions={({ route }) => ({
       tabBarIcon: ({ focused, color, size }) => {
@@ -59,10 +61,10 @@ function MainTabs() {
         };
         return <Ionicons name={icons[route.name]} size={size} color={color} />;
       },
-      tabBarActiveTintColor: '#FF6B00',
-      tabBarInactiveTintColor: '#8E8E93',
+      tabBarActiveTintColor: colors.primary,
+      tabBarInactiveTintColor: colors.faint,
       headerShown: false,
-      tabBarStyle: { paddingBottom: 5, height: 60 },
+      tabBarStyle: { paddingBottom: 5, height: 60, backgroundColor: colors.card, borderTopColor: colors.border },
     })}>
       {/* الترتيب من اليسار لليمين: حسابي ← طلباتي ← ماركت ← سلتي ← بحث ← الرئيسية */}
       <Tab.Screen name="حسابي"    component={ProfileScreen} />
@@ -150,14 +152,16 @@ function MainApp() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AuthProvider>
-        <CartProvider>
-          <NavigationContainer ref={navigationRef}>
-            <AppNavigator />
-          </NavigationContainer>
-          <KeyboardToolbar />
-        </CartProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <CartProvider>
+            <NavigationContainer ref={navigationRef}>
+              <AppNavigator />
+            </NavigationContainer>
+            <KeyboardToolbar />
+          </CartProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </GestureHandlerRootView>
   );
 }

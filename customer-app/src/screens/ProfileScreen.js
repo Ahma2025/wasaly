@@ -4,13 +4,15 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA', green: '#34C759' };
+import { useTheme } from '../context/ThemeContext';
 
 const TIER_META = { bronze: { color: '#CD7F32', emoji: '🥉', label: 'برونز' }, silver: { color: '#C0C0C0', emoji: '🥈', label: 'فضي' }, gold: { color: '#FFD700', emoji: '🥇', label: 'ذهبي' }, platinum: { color: '#5856D6', emoji: '💎', label: 'بلاتيني' } };
 
 export default function ProfileScreen({ navigation }) {
   const { user, logout } = useAuth();
+  const { colors, pref, setTheme } = useTheme();
+  const COLORS = colors;
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const [profile, setProfile] = useState(null);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
@@ -130,6 +132,22 @@ export default function ProfileScreen({ navigation }) {
         ))}
       </View>
 
+      {/* المظهر (الوضع الليلي) */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { marginBottom: 12 }]}>المظهر 🌙</Text>
+        <View style={styles.themeRow}>
+          {[{ k: 'system', l: 'النظام', i: 'phone-portrait-outline' }, { k: 'light', l: 'فاتح', i: 'sunny-outline' }, { k: 'dark', l: 'داكن', i: 'moon-outline' }].map(o => {
+            const active = (pref || 'system') === o.k;
+            return (
+              <TouchableOpacity key={o.k} style={[styles.themeChip, active && styles.themeChipOn]} onPress={() => setTheme(o.k)}>
+                <Ionicons name={o.i} size={18} color={active ? '#FFF' : COLORS.sub} />
+                <Text style={[styles.themeChipTxt, active && { color: '#FFF' }]}>{o.l}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
       {/* Notifications Toggle */}
       <View style={styles.section}>
         <View style={styles.menuItem}>
@@ -175,16 +193,16 @@ export default function ProfileScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   header: { paddingTop: 60, paddingBottom: 40, alignItems: 'center', borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
   avatar: { width: 84, height: 84, borderRadius: 42, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center', marginBottom: 10, borderWidth: 3, borderColor: 'rgba(255,255,255,0.5)' },
   avatarImg: { width: '100%', height: '100%', borderRadius: 42 },
-  avatarCam: { position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderRadius: 13, backgroundColor: '#FF6B00', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFF' },
+  avatarCam: { position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderRadius: 13, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: COLORS.card },
   avatarText: { fontSize: 32, fontWeight: '900', color: '#FFF' },
   headerName: { fontSize: 22, fontWeight: '900', color: '#FFF' },
   headerPhone: { fontSize: 14, color: 'rgba(255,255,255,0.85)', marginTop: 4 },
-  loyaltyCard: { margin: 16, marginTop: -22, backgroundColor: '#FFF', borderRadius: 20, padding: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 6, shadowColor: '#1A1A2E', shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
+  loyaltyCard: { margin: 16, marginTop: -22, backgroundColor: COLORS.card, borderRadius: 20, padding: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 6, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
   loyaltyLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   tierEmoji: { fontSize: 32 },
   tierLabel: { fontSize: 12, color: COLORS.gray, fontWeight: '600' },
@@ -197,20 +215,24 @@ const styles = StyleSheet.create({
   walletRight: { alignItems: 'flex-end' },
   walletLabel: { fontSize: 12, color: COLORS.gray },
   walletBalance: { fontSize: 20, fontWeight: '900', color: COLORS.primary },
-  section: { backgroundColor: '#FFF', borderRadius: 18, marginHorizontal: 16, marginBottom: 12, padding: 16, elevation: 2, shadowColor: '#1A1A2E', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 3 } },
+  section: { backgroundColor: COLORS.card, borderRadius: 18, marginHorizontal: 16, marginBottom: 12, padding: 16, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 3 } },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text },
-  field: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
+  field: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.line },
   fieldLabel: { fontSize: 12, color: COLORS.gray, marginBottom: 3 },
   fieldValue: { fontSize: 15, fontWeight: '600', color: COLORS.text },
-  fieldInput: { fontSize: 15, color: COLORS.text, borderWidth: 1, borderColor: '#E5E5EA', borderRadius: 8, padding: 8 },
-  menuItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
+  fieldInput: { fontSize: 15, color: COLORS.text, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8, padding: 8, backgroundColor: COLORS.inputBg },
+  menuItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.line },
   menuLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   menuLabel: { fontSize: 15, fontWeight: '600', color: COLORS.text },
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FFF0EE', borderRadius: 16, padding: 16, justifyContent: 'center', marginHorizontal: 16, marginBottom: 12, elevation: 1 },
+  themeRow: { flexDirection: 'row', gap: 8 },
+  themeChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.inputBg },
+  themeChipOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  themeChipTxt: { fontSize: 13, fontWeight: '700', color: COLORS.sub },
+  logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: COLORS.card, borderRadius: 16, padding: 16, justifyContent: 'center', marginHorizontal: 16, marginBottom: 12, elevation: 1 },
   logoutText: { color: '#FF3B30', fontWeight: '700', fontSize: 16 },
-  rateAppBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FFF', borderRadius: 16, padding: 16, justifyContent: 'center', marginHorizontal: 16, marginBottom: 12, elevation: 1 },
+  rateAppBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: COLORS.card, borderRadius: 16, padding: 16, justifyContent: 'center', marginHorizontal: 16, marginBottom: 12, elevation: 1 },
   rateAppText: { color: COLORS.text, fontWeight: '700', fontSize: 16 },
   deleteAccBtn: { alignItems: 'center', paddingVertical: 10, marginHorizontal: 16 },
-  deleteAccText: { color: '#8E8E93', fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
+  deleteAccText: { color: COLORS.faint, fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
 });
