@@ -72,17 +72,6 @@ async function testLogin(){
 </script></body></html>`);
 });
 
-// TEMP: تعبئة بيانات تجريبية (يُحذف بعد الاستخدام)
-app.get('/api/_seeddemo', async (req, res) => {
-  if (req.query.key !== 'WSL-SEED-9f3a2b') return res.status(403).json({ ok: false });
-  try {
-    const result = await require('./seed-demo')(require('./config/database'));
-    res.json({ ok: true, ...result });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
