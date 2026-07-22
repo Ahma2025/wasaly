@@ -101,7 +101,7 @@ const s = StyleSheet.create({
   wrap: { marginBottom: 6 },
   slide: {
     width: W,
-    height: 248,
+    height: 272,
     paddingHorizontal: 22,
     paddingTop: 22,
     paddingBottom: 16,
