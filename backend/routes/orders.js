@@ -340,6 +340,8 @@ router.patch('/:id/status', auth, async (req, res) => {
     const isRestaurant = role === 'restaurant' || role === 'restaurant_owner';
     const driverStatuses = ['on_the_way', 'delivered'];
     const restaurantStatuses = ['confirmed', 'preparing', 'ready', 'cancelled'];
+    // طلبات الاستلام من المحل: لا يوجد سائق، فالمطعم ينهي الطلب بنفسه
+    if (order.order_type === 'pickup') restaurantStatuses.push('delivered');
     if (role === 'driver' && !driverStatuses.includes(status)) {
       return res.status(403).json({ success: false, message: 'غير مصرح لك بتغيير الحالة إلى هذه القيمة' });
     }
