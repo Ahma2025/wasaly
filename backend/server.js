@@ -72,25 +72,6 @@ async function testLogin(){
 </script></body></html>`);
 });
 
-// TEMP: تبديل صور البيانات التجريبية لروابط موثوقة (يُحذف بعد الاستخدام)
-app.get('/api/_fiximages', async (req, res) => {
-  if (req.query.key !== 'WSL-FIX-img7') return res.status(403).json({ ok: false });
-  const pool = require('./config/database');
-  try {
-    const { rows: rests } = await pool.query("SELECT id FROM restaurants WHERE email LIKE 'demo-%@wasaly.ps'");
-    for (const r of rests) {
-      await pool.query('UPDATE restaurants SET logo=$1, cover_image=$2 WHERE id=$3',
-        [`https://picsum.photos/seed/wl${r.id}/240/240`, `https://picsum.photos/seed/wc${r.id}/640/400`, r.id]);
-    }
-    const { rows: items } = await pool.query(
-      "SELECT mi.id FROM menu_items mi JOIN restaurants r ON mi.restaurant_id=r.id WHERE r.email LIKE 'demo-%@wasaly.ps'");
-    for (const it of items) {
-      await pool.query('UPDATE menu_items SET image=$1 WHERE id=$2', [`https://picsum.photos/seed/wi${it.id}/400/300`, it.id]);
-    }
-    res.json({ ok: true, restaurants: rests.length, items: items.length });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
