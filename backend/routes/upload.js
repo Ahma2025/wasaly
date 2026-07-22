@@ -1,51 +1,47 @@
 const router = require('express').Router();
 const multer = require('multer');
-const path = require('path');
+const sharp = require('sharp');
 const { auth } = require('../middleware/auth');
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, './uploads'),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + Math.round(Math.random() * 1e9) + path.extname(file.originalname))
-});
-
+// نحفظ في الذاكرة (مش على القرص) — لأن قرص Railway مؤقّت ويُمسح عند إعادة النشر
 const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|gif|webp/;
-    if (allowed.test(path.extname(file.originalname).toLowerCase())) cb(null, true);
+    if (/^image\//.test(file.mimetype)) cb(null, true);
     else cb(new Error('Images only'));
   }
 });
 
-function getBaseUrl(req) {
-  // Use ngrok host if request comes through it, otherwise fallback to env or localhost
-  const host = req.headers['x-forwarded-host'] || req.headers['host'] || 'localhost:5000';
-  const proto = req.headers['x-forwarded-proto'] || (host.includes('ngrok') ? 'https' : 'http');
-  return process.env.API_URL || `${proto}://${host}`;
+// نضغط الصورة ونحوّلها base64 لتُخزَّن داخل قاعدة البيانات — تبقى دائماً بعد إعادة النشر
+async function toDataUri(buffer) {
+  const out = await sharp(buffer)
+    .rotate()
+    .resize({ width: 1000, height: 1000, fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 72 })
+    .toBuffer();
+  return `data:image/jpeg;base64,${out.toString('base64')}`;
 }
 
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-
-router.post('/', auth, upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ success: false, message: 'No file' });
-  if (!ALLOWED_TYPES.includes(req.file.mimetype)) {
-    return res.status(400).json({ success: false, message: 'نوع الملف غير مسموح' });
+router.post('/', auth, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'No file' });
+    const url = await toDataUri(req.file.buffer);
+    res.json({ success: true, url });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
   }
-  const url = `${getBaseUrl(req)}/uploads/${req.file.filename}`;
-  res.json({ success: true, url });
 });
 
-router.post('/multiple', auth, upload.array('files', 5), (req, res) => {
-  if (!req.files?.length) return res.status(400).json({ success: false, message: 'No files' });
-  for (const file of req.files) {
-    if (!ALLOWED_TYPES.includes(file.mimetype)) {
-      return res.status(400).json({ success: false, message: 'نوع الملف غير مسموح' });
-    }
+router.post('/multiple', auth, upload.array('files', 5), async (req, res) => {
+  try {
+    if (!req.files?.length) return res.status(400).json({ success: false, message: 'No files' });
+    const urls = [];
+    for (const f of req.files) urls.push(await toDataUri(f.buffer));
+    res.json({ success: true, urls });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
   }
-  const base = getBaseUrl(req);
-  const urls = req.files.map(f => `${base}/uploads/${f.filename}`);
-  res.json({ success: true, urls });
 });
 
 module.exports = router;
