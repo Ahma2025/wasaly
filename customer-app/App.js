@@ -90,8 +90,8 @@ function AppNavigator() {
           <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
           <Stack.Screen name="OrdersHistory" component={OrdersHistoryScreen} />
           <Stack.Screen name="Notifications" component={NotificationsScreen} />
-          <Stack.Screen name="AddAddress" component={AddAddressScreen} options={{ presentation: 'modal' }} />
-          <Stack.Screen name="Rating" component={RatingScreen} options={{ presentation: 'modal' }} />
+          <Stack.Screen name="AddAddress" component={AddAddressScreen} />
+          <Stack.Screen name="Rating" component={RatingScreen} />
           <Stack.Screen name="Favorites" component={FavoritesScreen} />
           <Stack.Screen name="PaymentWebView" component={PaymentWebViewScreen} />
           <Stack.Screen name="Category" component={CategoryScreen} />
