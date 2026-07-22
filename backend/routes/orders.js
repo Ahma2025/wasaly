@@ -337,15 +337,16 @@ router.patch('/:id/status', auth, async (req, res) => {
 
     // Role-based status permission check
     const role = req.user.role;
+    const isRestaurant = role === 'restaurant' || role === 'restaurant_owner';
     const driverStatuses = ['on_the_way', 'delivered'];
     const restaurantStatuses = ['confirmed', 'preparing', 'ready', 'cancelled'];
     if (role === 'driver' && !driverStatuses.includes(status)) {
       return res.status(403).json({ success: false, message: 'غير مصرح لك بتغيير الحالة إلى هذه القيمة' });
     }
-    if (role === 'restaurant' && !restaurantStatuses.includes(status)) {
+    if (isRestaurant && !restaurantStatuses.includes(status)) {
       return res.status(403).json({ success: false, message: 'غير مصرح لك بتغيير الحالة إلى هذه القيمة' });
     }
-    if (role !== 'admin' && role !== 'driver' && role !== 'restaurant') {
+    if (role !== 'admin' && role !== 'driver' && !isRestaurant) {
       return res.status(403).json({ success: false, message: 'غير مصرح' });
     }
 
