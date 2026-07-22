@@ -235,16 +235,24 @@ router.get('/:id/orders', auth, restaurantOnly, async (req, res) => {
 router.get('/:id/stats', auth, restaurantOnly, async (req, res) => {
   try {
     const id = req.params.id;
-    const [sales, topItems, orders] = await Promise.all([
-      pool.query(`SELECT DATE(created_at) as date, SUM(total) as revenue, COUNT(*) as count
+    const [sales, topItems, orders, today] = await Promise.all([
+      pool.query(`SELECT to_char(created_at, 'YYYY-MM-DD') as date, SUM(total) as revenue, COUNT(*) as count
                   FROM orders WHERE restaurant_id=$1 AND status='delivered' AND created_at > NOW()-INTERVAL '30 days'
-                  GROUP BY DATE(created_at) ORDER BY date`, [id]),
+                  GROUP BY to_char(created_at, 'YYYY-MM-DD') ORDER BY date`, [id]),
       pool.query(`SELECT oi.name_ar, SUM(oi.quantity) as sold FROM order_items oi
                   JOIN orders o ON oi.order_id=o.id WHERE o.restaurant_id=$1 AND o.status='delivered'
                   GROUP BY oi.name_ar ORDER BY sold DESC LIMIT 5`, [id]),
-      pool.query(`SELECT status, COUNT(*) FROM orders WHERE restaurant_id=$1 GROUP BY status`, [id])
+      pool.query(`SELECT status, COUNT(*) FROM orders WHERE restaurant_id=$1 GROUP BY status`, [id]),
+      // طلبات اليوم وإيراداته (كل الطلبات ما عدا الملغاة)
+      pool.query(`SELECT COUNT(*) FILTER (WHERE status <> 'cancelled') AS today_orders,
+                         COALESCE(SUM(total) FILTER (WHERE status <> 'cancelled'), 0) AS today_revenue
+                  FROM orders WHERE restaurant_id=$1 AND created_at >= date_trunc('day', NOW())`, [id])
     ]);
-    res.json({ success: true, data: { sales: sales.rows, topItems: topItems.rows, ordersByStatus: orders.rows } });
+    res.json({ success: true, data: {
+      sales: sales.rows, topItems: topItems.rows, ordersByStatus: orders.rows,
+      today_orders: parseInt(today.rows[0]?.today_orders || 0),
+      today_revenue: parseFloat(today.rows[0]?.today_revenue || 0),
+    } });
   } catch (e) {
     console.error(e.message);
     res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });

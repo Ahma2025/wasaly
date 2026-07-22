@@ -17,12 +17,10 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  const todayStr = new Date().toISOString().slice(0, 10);
   const sales = stats?.sales || [];
 
-  const todaySales = sales.find(d => d.date === todayStr);
-  const todayRevenue = parseFloat(todaySales?.revenue || 0);
-  const todayOrders = parseInt(todaySales?.count || 0);
+  const todayRevenue = parseFloat(stats?.today_revenue || 0);
+  const todayOrders = parseInt(stats?.today_orders || 0);
 
   // Last 7 days vs previous 7 days
   const last7 = sales.slice(-7);
