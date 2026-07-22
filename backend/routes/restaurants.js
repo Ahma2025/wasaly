@@ -87,6 +87,23 @@ router.get('/:id', async (req, res) => {
       cat.items = items;
     }
 
+    // 🔥 الأكثر طلباً — نعلّم أعلى 3 أصناف مبيعاً (غير قاتل لو فشل)
+    try {
+      const { rows: top } = await pool.query(
+        `SELECT oi.menu_item_id AS id, SUM(oi.quantity) AS q
+         FROM order_items oi JOIN orders o ON oi.order_id = o.id
+         WHERE o.restaurant_id = $1 AND oi.menu_item_id IS NOT NULL
+         GROUP BY oi.menu_item_id ORDER BY q DESC LIMIT 3`,
+        [req.params.id]
+      );
+      const topIds = new Set(top.map(t => String(t.id)));
+      for (const cat of menuCategories) {
+        for (const item of (cat.items || [])) {
+          if (topIds.has(String(item.id))) item.is_popular = true;
+        }
+      }
+    } catch (e) { /* non-fatal */ }
+
     res.json({ success: true, data: { ...rows[0], hours, menu: menuCategories } });
   } catch (e) {
     console.error(e.message);
