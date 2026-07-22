@@ -89,6 +89,12 @@ export default function ProfileScreen({ navigation }) {
         ))}
       </View>
 
+      <TouchableOpacity style={styles.reviewsBtn} onPress={() => navigation.navigate('Reviews')}>
+        <Ionicons name="star" size={20} color="#FFB800" />
+        <Text style={styles.reviewsText}>تقييماتي</Text>
+        <Ionicons name="chevron-back" size={18} color={COLORS.gray} style={{ marginLeft: 'auto' }} />
+      </TouchableOpacity>
+
       <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
         <Ionicons name="log-out-outline" size={20} color="#FF3B30" />
         <Text style={styles.logoutText}>تسجيل الخروج</Text>
@@ -117,6 +123,8 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: 12, color: COLORS.gray, marginBottom: 4 },
   fieldValue: { fontSize: 15, fontWeight: '600', color: COLORS.text },
   fieldInput: { fontSize: 15, color: COLORS.text, borderWidth: 1, borderColor: '#E5E5EA', borderRadius: 8, padding: 8 },
+  reviewsBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 12, elevation: 2 },
+  reviewsText: { color: COLORS.text, fontWeight: '700', fontSize: 16 },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FFF0EE', borderRadius: 16, padding: 16, justifyContent: 'center', elevation: 2 },
   logoutText: { color: '#FF3B30', fontWeight: '700', fontSize: 16 },
 });

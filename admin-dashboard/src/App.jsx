@@ -13,6 +13,7 @@ const Analytics = lazy(() => import('./pages/Analytics'));
 const Coupons = lazy(() => import('./pages/Coupons'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const Banners = lazy(() => import('./pages/Banners'));
+const Reviews = lazy(() => import('./pages/Reviews'));
 
 const NAV = [
   { to: '/', icon: '📊', label: 'الرئيسية' },
@@ -28,6 +29,7 @@ const NAV2 = [
   { to: '/coupons', icon: '🎟️', label: 'الكوبونات' },
   { to: '/notifications', icon: '🔔', label: 'الإشعارات' },
   { to: '/banners', icon: '🖼️', label: 'الإعلانات' },
+  { to: '/reviews', icon: '⭐', label: 'التقييمات' },
 ];
 
 function BottomNav() {
@@ -81,6 +83,7 @@ function AppLayout() {
             <Route path="/coupons" element={<Coupons />} />
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/banners" element={<Banners />} />
+            <Route path="/reviews" element={<Reviews />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

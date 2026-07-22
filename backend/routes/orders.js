@@ -513,6 +513,29 @@ router.post('/:id/rate', auth, async (req, res) => {
         [order.driver_id]
       );
     }
+
+    // 🔔 إشعارات التقييم للمطعم والسائق (غير قاتلة)
+    const stars = (n) => '⭐'.repeat(Math.max(0, Math.min(5, parseInt(n) || 0)));
+    try {
+      const { rows: rst } = await pool.query('SELECT owner_id FROM restaurants WHERE id=$1', [order.restaurant_id]);
+      const ownerId = rst[0]?.owner_id;
+      if (ownerId && restaurant_rating) {
+        const msg = `قيّمك زبون: ${stars(restaurant_rating)} (${restaurant_rating}/5)${comment ? ' — ' + comment : ''}`;
+        saveNotification(ownerId, msg, 'review', { order_id: order.id, rating: restaurant_rating });
+        notifyUser(req.io, ownerId, 'new_review', { order_id: order.id, rating: restaurant_rating, comment });
+        try { const t = await getUserTokens(ownerId); if (t.length) await sendFCM(t, '⭐ تقييم جديد', msg, { type: 'review' }, 'com.wasaly.restaurant'); } catch {}
+        sendWebPush(order.restaurant_id, '⭐ تقييم جديد', msg, { order_id: order.id }).catch(() => {});
+      }
+    } catch (e) { console.error('review notify (restaurant):', e.message); }
+    try {
+      if (order.driver_id && driver_rating) {
+        const msg = `قيّمك زبون: ${stars(driver_rating)} (${driver_rating}/5)${comment ? ' — ' + comment : ''}`;
+        saveNotification(order.driver_id, msg, 'review', { order_id: order.id, rating: driver_rating });
+        notifyUser(req.io, order.driver_id, 'new_review', { order_id: order.id, rating: driver_rating, comment });
+        try { const t = await getUserTokens(order.driver_id); if (t.length) await sendFCM(t, '⭐ تقييم جديد', msg, { type: 'review' }, 'com.wasaly.driver'); } catch {}
+      }
+    } catch (e) { console.error('review notify (driver):', e.message); }
+
     res.json({ success: true });
   } catch (e) {
     console.error(e.message);

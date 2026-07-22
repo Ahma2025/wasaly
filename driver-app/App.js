@@ -13,6 +13,7 @@ import EarningsScreen from './src/screens/EarningsScreen';
 import OrdersHistoryScreen from './src/screens/OrdersHistoryScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import DeliveryScreen from './src/screens/DeliveryScreen';
+import ReviewsScreen from './src/screens/ReviewsScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -44,6 +45,7 @@ function AppNavigator() {
         <>
           <Stack.Screen name="Main" component={MainTabs} />
           <Stack.Screen name="Delivery" component={DeliveryScreen} options={{ presentation: 'fullScreenModal' }} />
+          <Stack.Screen name="Reviews" component={ReviewsScreen} />
         </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} />
