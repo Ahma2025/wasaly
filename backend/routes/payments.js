@@ -117,8 +117,8 @@ router.post('/wallet/topup', auth, async (req, res) => {
     const { amount } = req.body;
     await pool.query('UPDATE users SET wallet_balance = wallet_balance + $1 WHERE id=$2', [amount, req.user.id]);
     await pool.query(
-      `INSERT INTO wallet_transactions (user_id, type, amount, description_ar, description_en)
-       VALUES ($1,'credit',$2,'شحن المحفظة','Wallet top-up')`,
+      `INSERT INTO wallet_transactions (user_id, type, amount, description)
+       VALUES ($1,'credit',$2,'شحن المحفظة')`,
       [req.user.id, amount]
     );
     res.json({ success: true });

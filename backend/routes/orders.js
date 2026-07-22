@@ -201,26 +201,31 @@ router.post('/', auth, async (req, res) => {
       );
     }
 
-    // 🏆 خصم النقاط المستبدلة
-    if (pointsRedeemed > 0) {
-      await pool.query('UPDATE users SET loyalty_points = GREATEST(0, loyalty_points - $1) WHERE id=$2', [pointsRedeemed, req.user.id]);
-    }
-    // 💳 خصم المبلغ المستخدم من المحفظة + تسجيل الحركة
-    if (walletUsed > 0) {
-      await pool.query('UPDATE users SET wallet_balance = GREATEST(0, wallet_balance - $1) WHERE id=$2', [walletUsed, req.user.id]);
-      await pool.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, description_ar, description_en) VALUES ($1,'debit',$2,$3,'Order payment')`,
-        [req.user.id, walletUsed, `دفع طلب #${orderNumber}`]
-      );
-    }
-    // 💰 كاش باك 2% للمحفظة على كل طلب
-    const cashback = Math.round(subtotal * 0.02 * 100) / 100;
-    if (cashback > 0) {
-      await pool.query('UPDATE users SET wallet_balance = wallet_balance + $1 WHERE id=$2', [cashback, req.user.id]);
-      await pool.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, description_ar, description_en) VALUES ($1,'credit',$2,$3,'Cashback')`,
-        [req.user.id, cashback, `كاش باك طلب #${orderNumber}`]
-      );
+    // آثار ثانوية (نقاط/محفظة/كاش باك) — ملفوفة بـ try/catch حتى لا تُفشِل الطلب أبداً
+    try {
+      // 🏆 خصم النقاط المستبدلة
+      if (pointsRedeemed > 0) {
+        await pool.query('UPDATE users SET loyalty_points = GREATEST(0, loyalty_points - $1) WHERE id=$2', [pointsRedeemed, req.user.id]);
+      }
+      // 💳 خصم المبلغ المستخدم من المحفظة + تسجيل الحركة
+      if (walletUsed > 0) {
+        await pool.query('UPDATE users SET wallet_balance = GREATEST(0, wallet_balance - $1) WHERE id=$2', [walletUsed, req.user.id]);
+        await pool.query(
+          `INSERT INTO wallet_transactions (user_id, type, amount, description) VALUES ($1,'debit',$2,$3)`,
+          [req.user.id, walletUsed, `دفع طلب #${orderNumber}`]
+        );
+      }
+      // 💰 كاش باك 2% للمحفظة على كل طلب
+      const cashback = Math.round(subtotal * 0.02 * 100) / 100;
+      if (cashback > 0) {
+        await pool.query('UPDATE users SET wallet_balance = wallet_balance + $1 WHERE id=$2', [cashback, req.user.id]);
+        await pool.query(
+          `INSERT INTO wallet_transactions (user_id, type, amount, description) VALUES ($1,'credit',$2,$3)`,
+          [req.user.id, cashback, `كاش باك طلب #${orderNumber}`]
+        );
+      }
+    } catch (fxErr) {
+      console.error('post-order effects (non-fatal):', fxErr.message);
     }
 
     // Notify restaurant owner (socket + push)
