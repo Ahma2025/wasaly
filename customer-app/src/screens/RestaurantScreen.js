@@ -57,7 +57,13 @@ export default function RestaurantScreen() {
     finally { setLoading(false); }
   };
 
-  const openItem = (item) => { setSelectedItem(item); setSelectedAddons({}); };
+  const openItem = (item) => {
+    if (restaurant && !restaurant.is_open) {
+      Alert.alert('المطعم مغلق', 'المطعم مغلق حالياً ولا يستقبل طلبات. جرّب لاحقاً 🕐');
+      return;
+    }
+    setSelectedItem(item); setSelectedAddons({});
+  };
 
   const toggleAddon = (groupName, addon, multiSelect) => {
     setSelectedAddons(prev => {
@@ -149,6 +155,13 @@ export default function RestaurantScreen() {
             <Text style={styles.minOrder}>الحد الأدنى: {restaurant.min_order}₪</Text>
           </View>
         </View>
+
+        {!restaurant.is_open && (
+          <View style={styles.closedBanner}>
+            <Ionicons name="lock-closed" size={16} color="#FF3B30" />
+            <Text style={styles.closedBannerTxt}>المطعم مغلق حالياً — لا يستقبل طلبات</Text>
+          </View>
+        )}
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryTabs}>
           {menu.map((cat, idx) => (
@@ -263,6 +276,8 @@ const styles = StyleSheet.create({
   stat: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   statText: { fontSize: 12, color: COLORS.gray },
   minOrder: { fontSize: 11, color: COLORS.primary, marginTop: 4, fontWeight: '600' },
+  closedBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FFF0EE', marginHorizontal: 16, marginTop: -8, marginBottom: 4, borderRadius: 14, paddingVertical: 12, borderWidth: 1, borderColor: '#FFD5CE' },
+  closedBannerTxt: { color: '#FF3B30', fontWeight: '800', fontSize: 14 },
   categoryTabs: { paddingHorizontal: 16, marginBottom: 8 },
   catTab: { paddingHorizontal: 16, paddingVertical: 9, marginRight: 8, borderRadius: 22, backgroundColor: '#FFF', borderWidth: 1.5, borderColor: '#EDEDF0' },
   catTabActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary, elevation: 3, shadowColor: COLORS.primary, shadowOpacity: 0.35, shadowRadius: 7, shadowOffset: { width: 0, height: 3 } },

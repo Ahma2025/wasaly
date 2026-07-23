@@ -96,6 +96,7 @@ router.post('/', auth, async (req, res) => {
     );
     if (!restaurants[0]) return res.status(400).json({ success: false, message: 'المطعم غير متاح' });
     const restaurant = restaurants[0];
+    if (!restaurant.is_open) return res.status(400).json({ success: false, message: 'المطعم مغلق حالياً، لا يمكن الطلب الآن' });
 
     let subtotal = 0;
     const orderItems = [];
