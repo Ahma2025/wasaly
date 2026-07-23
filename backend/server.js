@@ -12,6 +12,8 @@ async function runMigrations() {
     `ALTER TABLE vip_customers ALTER COLUMN restaurant_id TYPE TEXT USING restaurant_id::text`,
     `ALTER TABLE vip_customers ALTER COLUMN customer_id TYPE TEXT USING customer_id::text`,
     `CREATE UNIQUE INDEX IF NOT EXISTS vip_customers_uniq ON vip_customers(restaurant_id, customer_id)`,
+    `CREATE TABLE IF NOT EXISTS support_chat (id SERIAL PRIMARY KEY, user_id TEXT, sender TEXT, message TEXT, is_read BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE INDEX IF NOT EXISTS support_chat_user_idx ON support_chat(user_id)`,
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); } catch (e) { /* column already exists */ }

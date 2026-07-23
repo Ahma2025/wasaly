@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
+import SupportButton from '../components/SupportButton';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', green: '#34C759', red: '#FF3B30', bg: '#F8F9FA' };
 
@@ -230,6 +231,7 @@ export default function DriverHome() {
     : null;
 
   return (
+    <View style={{ flex: 1 }}>
     <ScrollView style={styles.container} contentContainerStyle={{ flexGrow: 1 }}>
       {/* Header */}
       <View style={styles.header}>
@@ -388,6 +390,8 @@ export default function DriverHome() {
         </TouchableOpacity>
       </View>
     </ScrollView>
+    <SupportButton />
+    </View>
   );
 }
 

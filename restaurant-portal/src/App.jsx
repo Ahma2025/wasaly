@@ -7,6 +7,7 @@ import Orders from './pages/Orders';
 import Menu from './pages/Menu';
 import Settings from './pages/Settings';
 import Reviews from './pages/Reviews';
+import SupportWidget from './components/SupportWidget';
 import Login from './pages/Login';
 
 const NAV = [
@@ -78,6 +79,7 @@ function Layout() {
       </main>
 
       <BottomNav />
+      <SupportWidget />
     </div>
   );
 }

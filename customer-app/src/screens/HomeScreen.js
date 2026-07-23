@@ -8,6 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
 import BannerSlider from '../components/BannerSlider';
 import SkeletonCard from '../components/SkeletonCard';
+import SupportButton from '../components/SupportButton';
 
 // تفعيل LayoutAnimation على Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -349,6 +350,8 @@ export default function HomeScreen() {
         )}
         <View style={{ height: 30 }} />
       </ScrollView>
+
+      <SupportButton />
     </View>
   );
 }

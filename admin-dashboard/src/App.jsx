@@ -14,6 +14,7 @@ const Coupons = lazy(() => import('./pages/Coupons'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const Banners = lazy(() => import('./pages/Banners'));
 const Reviews = lazy(() => import('./pages/Reviews'));
+const Chats = lazy(() => import('./pages/Chats'));
 
 const NAV = [
   { to: '/', icon: '📊', label: 'الرئيسية' },
@@ -30,6 +31,7 @@ const NAV2 = [
   { to: '/notifications', icon: '🔔', label: 'الإشعارات' },
   { to: '/banners', icon: '🖼️', label: 'الإعلانات' },
   { to: '/reviews', icon: '⭐', label: 'التقييمات' },
+  { to: '/chats', icon: '💬', label: 'المحادثات' },
 ];
 
 function BottomNav() {
@@ -84,6 +86,7 @@ function AppLayout() {
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/banners" element={<Banners />} />
             <Route path="/reviews" element={<Reviews />} />
+            <Route path="/chats" element={<Chats />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
