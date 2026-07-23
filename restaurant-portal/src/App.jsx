@@ -7,12 +7,14 @@ import Orders from './pages/Orders';
 import Menu from './pages/Menu';
 import Settings from './pages/Settings';
 import Reviews from './pages/Reviews';
+import Customers from './pages/Customers';
 import Login from './pages/Login';
 
 const NAV = [
   { to: '/', icon: '📊', label: 'الرئيسية' },
   { to: '/orders', icon: '📦', label: 'الطلبات' },
   { to: '/menu', icon: '🍽️', label: 'المنيو' },
+  { to: '/customers', icon: '👥', label: 'الزبائن' },
   { to: '/reviews', icon: '⭐', label: 'التقييمات' },
   { to: '/settings', icon: '⚙️', label: 'الإعدادات' },
 ];
@@ -73,6 +75,7 @@ function Layout() {
           <Route path="/orders" element={<Orders />} />
           <Route path="/menu" element={<Menu />} />
           <Route path="/reviews" element={<Reviews />} />
+          <Route path="/customers" element={<Customers />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

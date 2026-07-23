@@ -1,6 +1,7 @@
 ﻿const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, adminOnly, restaurantOnly } = require('../middleware/auth');
+const { saveNotification, sendFCM, getUserTokens, notifyUser } = require('../utils/notifications');
 
 // Get all restaurants (with filters)
 router.get('/', async (req, res) => {
@@ -257,6 +258,65 @@ router.get('/:id/stats', auth, restaurantOnly, async (req, res) => {
     console.error(e.message);
     res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
   }
+});
+
+// ===== الزبائن المميزون (VIP) =====
+
+// تأكيد ملكية المطعم
+async function ownsRestaurant(req) {
+  if (req.user.role === 'admin') return true;
+  const { rows } = await pool.query('SELECT id FROM restaurants WHERE id=$1 AND owner_id=$2', [req.params.id, req.user.id]);
+  return !!rows[0];
+}
+
+// قائمة زبائن المطعم (مع عدد طلباتهم وهل هو مميز)
+router.get('/:id/customers', auth, restaurantOnly, async (req, res) => {
+  try {
+    if (!(await ownsRestaurant(req))) return res.status(403).json({ success: false, message: 'غير مصرح' });
+    const { rows } = await pool.query(
+      `SELECT u.id, u.name, u.phone,
+              COUNT(o.id) AS orders,
+              EXISTS(SELECT 1 FROM vip_customers v WHERE v.restaurant_id=$1 AND v.customer_id=u.id) AS is_vip
+       FROM orders o JOIN users u ON o.customer_id = u.id
+       WHERE o.restaurant_id=$1
+       GROUP BY u.id, u.name, u.phone
+       ORDER BY orders DESC LIMIT 200`,
+      [req.params.id]
+    );
+    res.json({ success: true, data: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// إضافة زبون كمميز + إشعار الزبون
+router.post('/:id/vip', auth, restaurantOnly, async (req, res) => {
+  try {
+    if (!(await ownsRestaurant(req))) return res.status(403).json({ success: false, message: 'غير مصرح' });
+    const { customer_id } = req.body;
+    if (!customer_id) return res.status(400).json({ success: false, message: 'الزبون مطلوب' });
+    await pool.query(
+      'INSERT INTO vip_customers (restaurant_id, customer_id) VALUES ($1,$2) ON CONFLICT (restaurant_id, customer_id) DO NOTHING',
+      [req.params.id, customer_id]
+    );
+    // إشعار الزبون
+    try {
+      const { rows: rst } = await pool.query('SELECT name_ar FROM restaurants WHERE id=$1', [req.params.id]);
+      const rName = rst[0]?.name_ar || 'المطعم';
+      const msg = `🌟 تمت إضافتك كزبون مميز في ${rName}! استمتع بمعاملة خاصة.`;
+      saveNotification(customer_id, msg, 'vip', { restaurant_id: req.params.id });
+      notifyUser(req.io, customer_id, 'vip', { restaurant_id: req.params.id });
+      try { const t = await getUserTokens(customer_id); if (t.length) await sendFCM(t, '🌟 زبون مميز!', msg, { type: 'vip' }, 'com.wasaly.customer'); } catch {}
+    } catch (e) { console.error('vip notify:', e.message); }
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// إزالة زبون من المميزين
+router.delete('/:id/vip/:customerId', auth, restaurantOnly, async (req, res) => {
+  try {
+    if (!(await ownsRestaurant(req))) return res.status(403).json({ success: false, message: 'غير مصرح' });
+    await pool.query('DELETE FROM vip_customers WHERE restaurant_id=$1 AND customer_id=$2', [req.params.id, req.params.customerId]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
 module.exports = router;

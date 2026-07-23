@@ -241,6 +241,20 @@ router.post('/', auth, async (req, res) => {
       sendWebPush(restaurant.id, '🛎️ طلب جديد!', `طلب #${orderNumber} ينتظر موافقتك`, { order_id: order.id }).catch(() => {});
     }
 
+    // ⭐ إشعار إضافي لو الزبون مميز عند هذا المطعم (غير قاتل)
+    try {
+      const { rows: vip } = await pool.query('SELECT 1 FROM vip_customers WHERE restaurant_id=$1 AND customer_id=$2', [restaurant_id, req.user.id]);
+      if (vip[0] && restaurant.owner_id) {
+        const { rows: cu } = await pool.query('SELECT name FROM users WHERE id=$1', [req.user.id]);
+        const cName = cu[0]?.name || 'زبونك';
+        const msg = `⭐ زبونك المميز ${cName} طلب! جهّزله طلب مميز 🎁`;
+        saveNotification(restaurant.owner_id, msg, 'vip_order', { order_id: order.id });
+        notifyUser(req.io, restaurant.owner_id, 'vip_order', { order_id: order.id });
+        try { const t = await getUserTokens(restaurant.owner_id); if (t.length) await sendFCM(t, '⭐ زبون مميز طلب!', msg, { type: 'vip_order', order_id: String(order.id) }, 'com.wasaly.restaurant'); } catch {}
+        sendWebPush(restaurant.id, '⭐ زبون مميز طلب!', msg, { order_id: order.id }).catch(() => {});
+      }
+    } catch (e) { console.error('vip order notify:', e.message); }
+
     res.status(201).json({ success: true, data: order });
   } catch (e) {
     console.error('POST /orders error:', e.message);
