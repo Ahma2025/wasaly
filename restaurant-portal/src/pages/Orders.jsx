@@ -174,6 +174,19 @@ export default function Orders() {
 function OrderCard({ order, token, isExpanded, onToggle, onAccept, onUpdateStatus, onCancel }) {
   const restaurant = JSON.parse(localStorage.getItem('restaurant') || '{}');
   const isDelivery = order.order_type === 'delivery';
+  const [vip, setVip] = useState(!!order.customer_is_vip);
+  const [vipBusy, setVipBusy] = useState(false);
+
+  const makeVip = async () => {
+    if (vip || !order.customer_id) return;
+    setVipBusy(true);
+    try {
+      await api.post(`/restaurants/${restaurant.id}/vip`, { customer_id: order.customer_id });
+      setVip(true);
+      toast.success('⭐ صار زبوناً مميزاً — وصله إشعار');
+    } catch (e) { toast.error(e.message || 'فشل'); }
+    finally { setVipBusy(false); }
+  };
 
   // Determine next action based on status + type
   const getActions = () => {
@@ -228,10 +241,16 @@ function OrderCard({ order, token, isExpanded, onToggle, onAccept, onUpdateStatu
             </div>
             <p className="text-sm font-semibold text-gray-700 mt-1">{order.customer_name || 'زبون'}</p>
             {order.customer_phone && (
-              <a href={`tel:${order.customer_phone}`} className="text-xs text-blue-500 font-semibold" onClick={e => e.stopPropagation()}>
+              <a href={`tel:${order.customer_phone}`} className="text-xs text-blue-500 font-semibold block" onClick={e => e.stopPropagation()}>
                 📞 {order.customer_phone}
               </a>
             )}
+            <button
+              onClick={e => { e.stopPropagation(); makeVip(); }}
+              disabled={vip || vipBusy}
+              className={`mt-1.5 text-xs px-2.5 py-1 rounded-lg font-bold disabled:opacity-90 ${vip ? 'bg-orange-100 text-orange-600' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
+              {vipBusy ? '...' : vip ? '⭐ زبون مميز' : '☆ اجعله زبوناً مميزاً'}
+            </button>
           </div>
           <div className="text-left flex-shrink-0">
             <p className="font-black text-orange-500 text-lg">{parseFloat(order.total || 0).toFixed(0)}₪</p>

@@ -243,7 +243,7 @@ router.post('/', auth, async (req, res) => {
 
     // ⭐ إشعار إضافي لو الزبون مميز عند هذا المطعم (غير قاتل)
     try {
-      const { rows: vip } = await pool.query('SELECT 1 FROM vip_customers WHERE restaurant_id=$1 AND customer_id=$2', [restaurant_id, req.user.id]);
+      const { rows: vip } = await pool.query('SELECT 1 FROM vip_customers WHERE restaurant_id=$1 AND customer_id=$2', [String(restaurant_id), String(req.user.id)]);
       if (vip[0] && restaurant.owner_id) {
         const { rows: cu } = await pool.query('SELECT name FROM users WHERE id=$1', [req.user.id]);
         const cName = cu[0]?.name || 'زبونك';

@@ -276,7 +276,7 @@ router.get('/:id/customers', auth, restaurantOnly, async (req, res) => {
     const { rows } = await pool.query(
       `SELECT u.id, u.name, u.phone,
               COUNT(o.id) AS orders,
-              EXISTS(SELECT 1 FROM vip_customers v WHERE v.restaurant_id=$1 AND v.customer_id=u.id) AS is_vip
+              EXISTS(SELECT 1 FROM vip_customers v WHERE v.restaurant_id=$1 AND v.customer_id=u.id::text) AS is_vip
        FROM orders o JOIN users u ON o.customer_id = u.id
        WHERE o.restaurant_id=$1
        GROUP BY u.id, u.name, u.phone
@@ -295,7 +295,7 @@ router.post('/:id/vip', auth, restaurantOnly, async (req, res) => {
     if (!customer_id) return res.status(400).json({ success: false, message: 'الزبون مطلوب' });
     await pool.query(
       'INSERT INTO vip_customers (restaurant_id, customer_id) VALUES ($1,$2) ON CONFLICT (restaurant_id, customer_id) DO NOTHING',
-      [req.params.id, customer_id]
+      [String(req.params.id), String(customer_id)]
     );
     // إشعار الزبون
     try {
