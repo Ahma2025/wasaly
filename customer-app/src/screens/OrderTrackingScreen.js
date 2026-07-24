@@ -7,7 +7,7 @@ import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import api from '../utils/api';
 
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', green: '#34C759', bg: '#F8F9FA', red: '#FF3B30' };
+import { useTheme } from '../context/ThemeContext';
 
 const STATUS_STEPS = [
   { key: 'pending',    label: 'في الانتظار',  icon: 'time-outline',             desc: 'طلبك وصل للمطعم' },
@@ -129,6 +129,8 @@ export default function OrderTrackingScreen() {
   const route = useRoute();
   const id = route.params?.orderId;
   const navigation = useNavigation();
+  const { colors: COLORS } = useTheme();
+  const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
 
   const [order, setOrder] = useState(null);
   const [driverLoc, setDriverLoc] = useState(null);
@@ -381,43 +383,43 @@ export default function OrderTrackingScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, backgroundColor: COLORS.bg },
   loadingText: { fontSize: 15, color: COLORS.gray, fontWeight: '600' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: '#F5F5F5' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: COLORS.card, borderBottomWidth: 1, borderBottomColor: COLORS.line },
+  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: COLORS.inputBg },
   headerTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text },
   mapWrap: { height: 280, position: 'relative' },
   map: { flex: 1 },
   liveBadge: { position: 'absolute', top: 10, left: 10, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: COLORS.red, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, zIndex: 10 },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#FFF' },
   liveText: { color: '#FFF', fontWeight: '900', fontSize: 11, letterSpacing: 1 },
-  recenterBtn: { position: 'absolute', bottom: 10, right: 10, backgroundColor: '#FFF', borderRadius: 10, padding: 8, elevation: 4, zIndex: 10 },
-  noMapStatus: { height: 130, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF5EE' },
+  recenterBtn: { position: 'absolute', bottom: 10, right: 10, backgroundColor: COLORS.card, borderRadius: 10, padding: 8, elevation: 4, zIndex: 10 },
+  noMapStatus: { height: 130, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.tint },
   bigEmoji: { fontSize: 64 },
-  statusCard: { backgroundColor: '#FFF', borderRadius: 18, padding: 18, alignItems: 'center', borderWidth: 2, borderColor: '#FFE0CC', elevation: 2 },
+  statusCard: { backgroundColor: COLORS.card, borderRadius: 18, padding: 18, alignItems: 'center', borderWidth: 2, borderColor: '#FFE0CC', elevation: 2 },
   statusTitle: { fontSize: 20, fontWeight: '900', color: COLORS.primary, marginBottom: 6 },
   statusDesc: { fontSize: 13, color: COLORS.gray },
-  etaBox: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, backgroundColor: '#FFF5EE', borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12, alignSelf: 'flex-start' },
+  etaBox: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, backgroundColor: COLORS.tint, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12, alignSelf: 'flex-start' },
   etaText: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
-  card: { backgroundColor: '#FFF', borderRadius: 18, padding: 16, elevation: 1 },
+  card: { backgroundColor: COLORS.card, borderRadius: 18, padding: 16, elevation: 1 },
   cardTitle: { fontSize: 14, fontWeight: '800', color: COLORS.text, marginBottom: 10 },
   stepRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 10 },
-  stepCircle: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#E5E5EA', justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
-  stepLine: { position: 'absolute', left: 13, top: 28, width: 2, height: 10, backgroundColor: '#E5E5EA' },
+  stepCircle: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.border, justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
+  stepLine: { position: 'absolute', left: 13, top: 28, width: 2, height: 10, backgroundColor: COLORS.border },
   stepLabel: { flex: 1, fontSize: 13, color: COLORS.gray, fontWeight: '600' },
   activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.primary },
-  driverCard: { backgroundColor: '#FFF', borderRadius: 18, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, elevation: 1 },
-  driverAvatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#FFF5EE', alignItems: 'center', justifyContent: 'center' },
+  driverCard: { backgroundColor: COLORS.card, borderRadius: 18, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, elevation: 1 },
+  driverAvatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: COLORS.tint, alignItems: 'center', justifyContent: 'center' },
   driverName: { fontSize: 15, fontWeight: '800', color: COLORS.text },
   driverSub: { fontSize: 12, color: COLORS.gray, marginTop: 2 },
   driverLive: { fontSize: 11, color: COLORS.green, fontWeight: '700', marginTop: 3 },
   callBtn: { backgroundColor: COLORS.primary, borderRadius: 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', elevation: 3 },
-  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: COLORS.line },
   infoLabel: { fontSize: 12, color: COLORS.gray, width: 85 },
   infoVal: { flex: 1, fontSize: 13, fontWeight: '600', color: COLORS.text },
-  orderItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F8F8F8' },
+  orderItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: COLORS.line },
   orderItemName: { fontSize: 13, color: COLORS.text, flex: 1 },
   orderItemPrice: { fontSize: 13, fontWeight: '700', color: COLORS.primary },
   rateBtn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, alignItems: 'center', elevation: 3 },

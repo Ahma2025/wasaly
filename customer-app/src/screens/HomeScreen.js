@@ -9,6 +9,7 @@ import api from '../utils/api';
 import BannerSlider from '../components/BannerSlider';
 import SkeletonCard from '../components/SkeletonCard';
 import SupportButton from '../components/SupportButton';
+import { useTheme } from '../context/ThemeContext';
 
 // تفعيل LayoutAnimation على Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -17,7 +18,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const { width } = Dimensions.get('window');
 const CARD_W = (width - 48) / 2;
-const C = { primary: '#FF6B00', bg: '#F2F2F7', white: '#FFF', text: '#1A1A2E', gray: '#6B6B6B', sec: '#FFF8F4' };
+// ألوان الثيم تأتي من useTheme
 
 /* ── كرت مع موشن ضغط ── */
 function AnimCard({ children, style, onPress }) {
@@ -33,6 +34,8 @@ function AnimCard({ children, style, onPress }) {
 
 /* ── قسم قابل للطي مع موشن ── */
 function CollapsibleSection({ title, icon, bg, children, defaultOpen = true }) {
+  const { colors: C } = useTheme();
+  const cs = React.useMemo(() => makeCs(C), [C]);
   const [open, setOpen] = useState(defaultOpen);
   const rotation = useRef(new Animated.Value(defaultOpen ? 1 : 0)).current;
 
@@ -74,6 +77,8 @@ function CollapsibleSection({ title, icon, bg, children, defaultOpen = true }) {
 
 /* ── كرت الشبكة ── */
 function RCard({ r, onPress }) {
+  const { colors: C } = useTheme();
+  const rc = React.useMemo(() => makeRc(C), [C]);
   return (
     <AnimCard style={rc.wrap} onPress={onPress}>
       <View style={rc.imgBox}>
@@ -103,6 +108,8 @@ function RCard({ r, onPress }) {
 
 /* ── كرت أفقي ── */
 function HCard({ r, onPress }) {
+  const { colors: C } = useTheme();
+  const hc = React.useMemo(() => makeHc(C), [C]);
   return (
     <AnimCard style={hc.wrap} onPress={onPress}>
       <Image source={{ uri: r.logo || r.cover_image }} style={hc.img} resizeMode="cover" />
@@ -118,6 +125,8 @@ function HCard({ r, onPress }) {
 
 /* ── grid داخل قسم ── */
 function SectionGrid({ list, onPress, limit = 4 }) {
+  const { colors: C } = useTheme();
+  const s = React.useMemo(() => makeS(C), [C]);
   const [expanded, setExpanded] = useState(false);
   const shown = list.slice(0, expanded ? list.length : limit);
   return (
@@ -139,6 +148,8 @@ function SectionGrid({ list, onPress, limit = 4 }) {
 
 export default function HomeScreen() {
   const navigation = useNavigation();
+  const { colors: C } = useTheme();
+  const s = React.useMemo(() => makeS(C), [C]);
   const [banners, setBanners]       = useState([]);
   const [categories, setCategories] = useState([]);
   const [restaurants, setRestaurants] = useState([]);
@@ -220,14 +231,14 @@ export default function HomeScreen() {
 
   if (loading) return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: 60, paddingHorizontal: 16 }}>
-      <View style={{ height: 200, backgroundColor: '#E5E5EA', borderRadius: 18, marginBottom: 16 }} />
+      <View style={{ height: 200, backgroundColor: C.border, borderRadius: 18, marginBottom: 16 }} />
       {[1, 2, 3].map(i => <SkeletonCard key={i} />)}
     </View>
   );
 
   return (
     <View style={s.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={C.white} />
+      <StatusBar barStyle={C.mode === 'dark' ? 'light-content' : 'dark-content'} backgroundColor={C.white} />
 
       {/* Header */}
       <View style={s.header}>
@@ -357,7 +368,7 @@ export default function HomeScreen() {
 }
 
 /* ── Styles ── */
-const cs = StyleSheet.create({
+const makeCs = (C) => StyleSheet.create({
   wrap: { width: '100%' },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 16 },
   titleRow: { flexDirection: 'row', alignItems: 'center' },
@@ -365,15 +376,15 @@ const cs = StyleSheet.create({
   body: { paddingBottom: 16 },
 });
 
-const rc = StyleSheet.create({
-  wrap: { width: CARD_W, backgroundColor: C.white, borderRadius: 20, overflow: 'hidden', elevation: 5, shadowColor: '#1A1A2E', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 } },
+const makeRc = (C) => StyleSheet.create({
+  wrap: { width: CARD_W, backgroundColor: C.white, borderRadius: 20, overflow: 'hidden', elevation: 5, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 } },
   imgBox: { width: '100%', height: 118, position: 'relative' },
   img: { width: '100%', height: '100%' },
   badge: { position: 'absolute', top: 8, right: 8, backgroundColor: C.primary, borderRadius: 9, paddingHorizontal: 8, paddingVertical: 3, elevation: 3, shadowColor: C.primary, shadowOpacity: 0.4, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
   badgeTxt: { color: '#FFF', fontSize: 11, fontWeight: '800' },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(20,20,35,0.5)', justifyContent: 'center', alignItems: 'center' },
   overlayTxt: { color: '#FFF', fontWeight: '800', fontSize: 14 },
-  logoCircle: { position: 'absolute', bottom: -14, left: 10, width: 34, height: 34, borderRadius: 17, borderWidth: 2.5, borderColor: '#FFF', overflow: 'hidden', backgroundColor: '#FFF', elevation: 5, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  logoCircle: { position: 'absolute', bottom: -14, left: 10, width: 34, height: 34, borderRadius: 17, borderWidth: 2.5, borderColor: C.card, overflow: 'hidden', backgroundColor: C.card, elevation: 5, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
   logoImg: { width: '100%', height: '100%' },
   body: { paddingHorizontal: 10, paddingTop: 18, paddingBottom: 10 },
   name: { fontSize: 14, fontWeight: '800', color: C.text, textAlign: 'right' },
@@ -383,9 +394,9 @@ const rc = StyleSheet.create({
   sep: { color: C.gray },
 });
 
-const hc = StyleSheet.create({
+const makeHc = (C) => StyleSheet.create({
   wrap: { width: 105, alignItems: 'center' },
-  img: { width: 82, height: 82, borderRadius: 41, backgroundColor: '#EEE' },
+  img: { width: 82, height: 82, borderRadius: 41, backgroundColor: C.inputBg },
   closed: { position: 'absolute', top: 0, left: 11, right: 11, height: 82, borderRadius: 41, backgroundColor: 'rgba(0,0,0,0.42)', justifyContent: 'center', alignItems: 'center' },
   closedTxt: { color: '#FFF', fontSize: 11, fontWeight: '800' },
   name: { fontSize: 13, fontWeight: '700', color: C.text, textAlign: 'center', marginTop: 7 },
@@ -393,20 +404,20 @@ const hc = StyleSheet.create({
   rating: { fontSize: 12, color: C.text, fontWeight: '600' },
 });
 
-const s = StyleSheet.create({
+const makeS = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 52, paddingBottom: 14, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: '#F0F0F3' },
-  iconBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#F7F7FA', alignItems: 'center', justifyContent: 'center' },
-  locBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, marginHorizontal: 8, backgroundColor: '#FFF8F4', borderRadius: 22, paddingVertical: 9, paddingHorizontal: 12, borderWidth: 1, borderColor: '#FFE4D3' },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 52, paddingBottom: 14, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.line },
+  iconBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.inputBg, alignItems: 'center', justifyContent: 'center' },
+  locBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, marginHorizontal: 8, backgroundColor: C.sec, borderRadius: 22, paddingVertical: 9, paddingHorizontal: 12, borderWidth: 1, borderColor: '#FFE4D3' },
   locTxt: { fontSize: 15, fontWeight: '800', color: C.text },
-  divider: { height: 8, backgroundColor: '#EEEEF2' },
+  divider: { height: 8, backgroundColor: C.divider },
   quickCat: { alignItems: 'center', gap: 7 },
-  quickCircle: { width: 68, height: 68, borderRadius: 24, backgroundColor: '#FFF8F4', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#FFEBDD', elevation: 2, shadowColor: '#FF6B00', shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } },
+  quickCircle: { width: 68, height: 68, borderRadius: 24, backgroundColor: C.sec, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#FFEBDD', elevation: 2, shadowColor: '#FF6B00', shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } },
   quickLbl: { fontSize: 13, fontWeight: '700', color: C.text },
   grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16 },
-  moreBtn: { marginTop: 14, marginHorizontal: 16, borderWidth: 1.5, borderColor: C.primary, borderRadius: 14, paddingVertical: 11, alignItems: 'center', backgroundColor: '#FFF8F4' },
+  moreBtn: { marginTop: 14, marginHorizontal: 16, borderWidth: 1.5, borderColor: C.primary, borderRadius: 14, paddingVertical: 11, alignItems: 'center', backgroundColor: C.sec },
   moreTxt: { color: C.primary, fontWeight: '800', fontSize: 15 },
-  sortChip: { paddingHorizontal: 15, paddingVertical: 9, borderRadius: 22, backgroundColor: C.white, borderWidth: 1.5, borderColor: '#EDEDF0' },
+  sortChip: { paddingHorizontal: 15, paddingVertical: 9, borderRadius: 22, backgroundColor: C.white, borderWidth: 1.5, borderColor: C.border },
   sortChipOn: { backgroundColor: C.primary, borderColor: C.primary, elevation: 3, shadowColor: C.primary, shadowOpacity: 0.35, shadowRadius: 7, shadowOffset: { width: 0, height: 3 } },
   sortChipTxt: { fontSize: 13, fontWeight: '700', color: C.text },
   sortChipTxtOn: { color: '#FFF' },
