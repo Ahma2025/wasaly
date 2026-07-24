@@ -7,13 +7,14 @@ import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import ItemCard from '../components/ItemCard';
 import CartBar from '../components/CartBar';
-
-const COLORS = { primary: '#FF6B00', bg: '#F8F9FA', card: '#FFF', text: '#1A1A2E', gray: '#8E8E93' };
+import { useTheme } from '../context/ThemeContext';
 
 export default function RestaurantScreen() {
   const route = useRoute();
   const id = route.params?.restaurantId;
   const navigation = useNavigation();
+  const { colors: COLORS } = useTheme();
+  const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   const { user } = useAuth();
   const { addItem, count, total, clearAndAdd } = useCart();
   const [restaurant, setRestaurant] = useState(null);
@@ -257,9 +258,9 @@ export default function RestaurantScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.bg },
   cover: { overflow: 'hidden' },
   coverImg: { width: '100%', height: '100%', resizeMode: 'cover' },
   logoBg: { width: '100%', height: '100%', backgroundColor: '#1a1a1a', alignItems: 'center', justifyContent: 'center' },
@@ -268,8 +269,8 @@ const styles = StyleSheet.create({
   backBtn: { position: 'absolute', top: 50, left: 16, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 20, padding: 8 },
   favBtn: { position: 'absolute', top: 50, right: 16, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 20, padding: 8 },
   shareBtn: { position: 'absolute', top: 50, right: 62, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 20, padding: 8 },
-  infoCard: { backgroundColor: '#FFF', margin: 16, marginTop: 12, borderRadius: 20, padding: 16, flexDirection: 'row', elevation: 6, shadowColor: '#1A1A2E', shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
-  logo: { width: 72, height: 72, borderRadius: 16, borderWidth: 2, borderColor: '#FFF', elevation: 3, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  infoCard: { backgroundColor: COLORS.card, margin: 16, marginTop: 12, borderRadius: 20, padding: 16, flexDirection: 'row', elevation: 6, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
+  logo: { width: 72, height: 72, borderRadius: 16, borderWidth: 2, borderColor: COLORS.card, elevation: 3, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
   name: { fontSize: 18, fontWeight: '800', color: COLORS.text },
   desc: { fontSize: 13, color: COLORS.gray, marginTop: 2 },
   statsRow: { flexDirection: 'row', gap: 12, marginTop: 8 },
@@ -279,19 +280,19 @@ const styles = StyleSheet.create({
   closedBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FFF0EE', marginHorizontal: 16, marginTop: -8, marginBottom: 4, borderRadius: 14, paddingVertical: 12, borderWidth: 1, borderColor: '#FFD5CE' },
   closedBannerTxt: { color: '#FF3B30', fontWeight: '800', fontSize: 14 },
   categoryTabs: { paddingHorizontal: 16, marginBottom: 8 },
-  catTab: { paddingHorizontal: 16, paddingVertical: 9, marginRight: 8, borderRadius: 22, backgroundColor: '#FFF', borderWidth: 1.5, borderColor: '#EDEDF0' },
+  catTab: { paddingHorizontal: 16, paddingVertical: 9, marginRight: 8, borderRadius: 22, backgroundColor: COLORS.card, borderWidth: 1.5, borderColor: COLORS.border },
   catTabActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary, elevation: 3, shadowColor: COLORS.primary, shadowOpacity: 0.35, shadowRadius: 7, shadowOffset: { width: 0, height: 3 } },
   catTabText: { fontSize: 13, color: COLORS.text },
   catTabTextActive: { color: '#FFF', fontWeight: '700' },
   menuSection: { paddingHorizontal: 16 },
   catTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text, marginBottom: 12 },
-  dietChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, marginRight: 8, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E5E5EA' },
+  dietChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, marginRight: 8, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border },
   dietChipOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   dietChipTxt: { fontSize: 13, fontWeight: '700', color: COLORS.text },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
-  sheet: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%', paddingBottom: 34 },
-  sheetHandle: { width: 40, height: 4, backgroundColor: '#E5E5EA', borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
-  sheetItemHeader: { flexDirection: 'row', padding: 16, borderBottomWidth: 1, borderBottomColor: '#F0F0F0', alignItems: 'center' },
+  sheet: { backgroundColor: COLORS.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%', paddingBottom: 34 },
+  sheetHandle: { width: 40, height: 4, backgroundColor: COLORS.border, borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+  sheetItemHeader: { flexDirection: 'row', padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.line, alignItems: 'center' },
   sheetItemImg: { width: 90, height: 90, borderRadius: 12 },
   sheetItemName: { fontSize: 17, fontWeight: '800', color: COLORS.text },
   sheetItemDesc: { fontSize: 13, color: COLORS.gray, marginTop: 4 },
@@ -299,14 +300,14 @@ const styles = StyleSheet.create({
   addonGroup: { paddingHorizontal: 16, paddingTop: 16 },
   addonGroupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   addonGroupTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text },
-  addonGroupSub: { fontSize: 11, color: COLORS.gray, backgroundColor: '#F5F5F5', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  addonRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12, marginBottom: 6, backgroundColor: '#F9F9F9', borderWidth: 1.5, borderColor: '#F0F0F0' },
-  addonRowSelected: { backgroundColor: '#FFF5EE', borderColor: COLORS.primary },
-  addonCheck: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: '#D1D1D6', marginRight: 12, alignItems: 'center', justifyContent: 'center' },
+  addonGroupSub: { fontSize: 11, color: COLORS.gray, backgroundColor: COLORS.inputBg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  addonRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12, marginBottom: 6, backgroundColor: COLORS.inputBg, borderWidth: 1.5, borderColor: COLORS.line },
+  addonRowSelected: { backgroundColor: COLORS.tint, borderColor: COLORS.primary },
+  addonCheck: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: COLORS.border, marginRight: 12, alignItems: 'center', justifyContent: 'center' },
   addonCheckSelected: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   addonName: { flex: 1, fontSize: 14, color: COLORS.text, fontWeight: '500' },
   addonPrice: { fontSize: 13, color: COLORS.primary, fontWeight: '700' },
-  sheetFooter: { padding: 16, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
+  sheetFooter: { padding: 16, borderTopWidth: 1, borderTopColor: COLORS.line },
   addBtn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', elevation: 6, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   addBtnText: { color: '#FFF', fontSize: 16, fontWeight: '800' },
   addBtnPrice: { color: '#FFF', fontSize: 16, fontWeight: '700' },

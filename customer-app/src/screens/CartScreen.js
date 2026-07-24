@@ -7,11 +7,12 @@ import * as Location from 'expo-location';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
-
-const COLORS = { primary: '#FF6B00', bg: '#F8F9FA', card: '#FFF', text: '#1A1A2E', gray: '#8E8E93', red: '#FF3B30', green: '#34C759' };
+import { useTheme } from '../context/ThemeContext';
 
 export default function CartScreen() {
   const navigation = useNavigation();
+  const { colors: COLORS } = useTheme();
+  const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   const { items, total, count, removeItem, addItem, clearCart, restaurantId, restaurantName, updateItemNote } = useCart();
   const { user } = useAuth();
 
@@ -509,58 +510,58 @@ export default function CartScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 12, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 12, backgroundColor: COLORS.card, borderBottomWidth: 1, borderBottomColor: COLORS.line },
   title: { fontSize: 17, fontWeight: '800', color: COLORS.text },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16, backgroundColor: COLORS.bg },
   emptyTitle: { fontSize: 20, fontWeight: '700', color: COLORS.text },
   shopBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 5 } },
   shopBtnText: { color: '#FFF', fontWeight: '800', fontSize: 15 },
-  card: { backgroundColor: '#FFF', margin: 12, marginBottom: 0, borderRadius: 18, padding: 16, elevation: 2, shadowColor: '#1A1A2E', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+  card: { backgroundColor: COLORS.card, margin: 12, marginBottom: 0, borderRadius: 18, padding: 16, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   cardTitle: { fontSize: 14, fontWeight: '800', color: COLORS.text, marginBottom: 12 },
-  itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F8F8F8', gap: 12 },
+  itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.line, gap: 12 },
   qtyControl: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  qtyBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#FFF0E8', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFE0CC' },
+  qtyBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: COLORS.tint, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFE0CC' },
   qtyBtnText: { color: '#FFF', fontWeight: '900', fontSize: 17, lineHeight: 21 },
   qty: { fontSize: 15, fontWeight: '700', color: COLORS.text, minWidth: 20, textAlign: 'center' },
   itemName: { fontSize: 14, fontWeight: '600', color: COLORS.text },
   itemOptions: { fontSize: 11, color: COLORS.gray, marginTop: 2 },
-  itemNoteInput: { marginTop: 6, borderWidth: 1, borderColor: '#EEE', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, fontSize: 12, color: COLORS.text, backgroundColor: '#FAFAFA' },
-  freeDelivCard: { backgroundColor: '#FFF7F2', margin: 12, marginBottom: 0, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#FFE0CC' },
+  itemNoteInput: { marginTop: 6, borderWidth: 1, borderColor: COLORS.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, fontSize: 12, color: COLORS.text, backgroundColor: COLORS.inputBg },
+  freeDelivCard: { backgroundColor: COLORS.tint, margin: 12, marginBottom: 0, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#FFE0CC' },
   freeDelivText: { fontSize: 13, color: COLORS.text, textAlign: 'center', marginBottom: 8 },
   freeDelivDone: { fontSize: 13, color: COLORS.green, fontWeight: '800', textAlign: 'center' },
   freeDelivBar: { height: 8, backgroundColor: '#FFE0CC', borderRadius: 4, overflow: 'hidden' },
   freeDelivFill: { height: '100%', backgroundColor: COLORS.primary, borderRadius: 4 },
   tipLabel: { fontSize: 13, color: COLORS.gray, marginBottom: 8 },
   tipRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  tipChip: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E5EA', backgroundColor: '#FAFAFA' },
+  tipChip: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.inputBg },
   tipChipOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   tipChipTxt: { fontSize: 14, fontWeight: '800', color: COLORS.text },
   doorRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 4 },
   doorText: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
   itemPrice: { fontSize: 13, color: COLORS.primary, fontWeight: '700', marginTop: 2 },
   toggleRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  toggleBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E5EA', backgroundColor: '#F8F8F8' },
+  toggleBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.inputBg },
   toggleBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   toggleText: { fontSize: 13, fontWeight: '700', color: COLORS.gray },
-  feeBox: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFF5EE', borderRadius: 10, padding: 10 },
+  feeBox: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.tint, borderRadius: 10, padding: 10 },
   feeLabel: { flex: 1, fontSize: 13, color: COLORS.text },
   feeValue: { fontSize: 16, fontWeight: '900', color: COLORS.primary },
-  pickupBox: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F0FFF4', borderRadius: 10, padding: 10 },
+  pickupBox: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.sec, borderRadius: 10, padding: 10 },
   pickupText: { fontSize: 13, color: COLORS.green, fontWeight: '600', flex: 1 },
-  addrOption: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E5EA', marginBottom: 8 },
-  addrOptionActive: { borderColor: COLORS.primary, backgroundColor: '#FFF5EE' },
+  addrOption: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border, marginBottom: 8 },
+  addrOptionActive: { borderColor: COLORS.primary, backgroundColor: COLORS.tint },
   addrTitle: { fontSize: 13, fontWeight: '700', color: COLORS.text },
   addrText: { fontSize: 12, color: COLORS.gray, marginTop: 1 },
   addAddrBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 8 },
   addAddrText: { color: COLORS.primary, fontWeight: '700', fontSize: 13 },
-  payOption: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 13, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E5EA', marginBottom: 8 },
-  payOptionActive: { borderColor: COLORS.primary, backgroundColor: '#FFF5EE' },
+  payOption: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 13, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border, marginBottom: 8 },
+  payOptionActive: { borderColor: COLORS.primary, backgroundColor: COLORS.tint },
   payLabel: { flex: 1, fontSize: 14, color: COLORS.text },
-  notesInput: { borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 12, padding: 12, minHeight: 75, textAlignVertical: 'top', fontSize: 14, color: COLORS.text },
+  notesInput: { borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 12, padding: 12, minHeight: 75, textAlignVertical: 'top', fontSize: 14, color: COLORS.text, backgroundColor: COLORS.inputBg },
   couponRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  couponInput: { flex: 1, borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, color: COLORS.text, backgroundColor: '#FAFAFB', letterSpacing: 1 },
+  couponInput: { flex: 1, borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, color: COLORS.text, backgroundColor: COLORS.inputBg, letterSpacing: 1 },
   couponBtn: { backgroundColor: COLORS.primary, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', minWidth: 78 },
   couponBtnTxt: { color: '#FFF', fontWeight: '800', fontSize: 14 },
   couponApplied: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#EDFFF3', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#C3F5D8' },

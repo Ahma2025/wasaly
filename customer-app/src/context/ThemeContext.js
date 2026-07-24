@@ -11,7 +11,7 @@ const LIGHT = {
   text: '#1A1A2E', sub: '#6B7280', faint: '#8E8E93', gray: '#8E8E93',
   border: '#ECECEF', line: '#F0F0F3',
   sec: '#FFF8F4', tint: '#FFF0E8', inputBg: '#FAFAFB',
-  white: '#FFFFFF', danger: '#FF3B30', green: '#34C759', star: '#FFB800',
+  white: '#FFFFFF', danger: '#FF3B30', red: '#FF3B30', green: '#34C759', star: '#FFB800',
   divider: '#EEEEF2',
 };
 
@@ -21,7 +21,7 @@ const DARK = {
   text: '#F2F2F5', sub: '#A0A0AB', faint: '#8A8A95', gray: '#9A9AA5',
   border: '#2C2C34', line: '#26262E',
   sec: '#241B12', tint: '#2A1D12', inputBg: '#23232B',
-  white: '#1A1A20', danger: '#FF5A4E', green: '#34C759', star: '#FFB800',
+  white: '#1A1A20', danger: '#FF5A4E', red: '#FF5A4E', green: '#34C759', star: '#FFB800',
   divider: '#1E1E26',
 };
 
