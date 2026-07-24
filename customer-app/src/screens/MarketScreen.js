@@ -3,10 +3,10 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, RefreshCon
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
+import { useTheme } from '../context/ThemeContext';
 
 const { width } = Dimensions.get('window');
 const CARD_W = (width - 48) / 2;
-const C = { primary: '#FF6B00', bg: '#F2F2F7', white: '#FFF', text: '#1A1A2E', gray: '#6B6B6B', sec: '#F0F7FF' };
 
 const TYPES = [
   { id: 'supermarket', label: 'سوبرماركت', icon: 'cart', color: '#2E7D32', bg: '#E8F5E9' },
@@ -16,6 +16,8 @@ const TYPES = [
 ];
 
 function StoreCard({ r, onPress }) {
+  const { colors: C } = useTheme();
+  const sc = React.useMemo(() => makeSc(C), [C]);
   return (
     <TouchableOpacity style={sc.wrap} onPress={onPress} activeOpacity={0.88}>
       <View style={sc.imgBox}>
@@ -42,6 +44,8 @@ function StoreCard({ r, onPress }) {
 
 export default function MarketScreen() {
   const navigation = useNavigation();
+  const { colors: C } = useTheme();
+  const s = React.useMemo(() => makeS(C), [C]);
   const [stores, setStores] = useState([]);
   const [selected, setSelected] = useState('supermarket');
   const [refreshing, setRefreshing] = useState(false);
@@ -121,13 +125,13 @@ export default function MarketScreen() {
   );
 }
 
-const sc = StyleSheet.create({
+const makeSc = (C) => StyleSheet.create({
   wrap: { width: CARD_W, backgroundColor: C.white, borderRadius: 18, overflow: 'hidden', elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8 },
   imgBox: { width: '100%', height: 110, position: 'relative' },
   img: { width: '100%', height: '100%' },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.48)', justifyContent: 'center', alignItems: 'center' },
   overlayTxt: { color: '#FFF', fontWeight: '800', fontSize: 14 },
-  logoCircle: { position: 'absolute', bottom: -13, left: 10, width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: '#FFF', overflow: 'hidden', backgroundColor: '#FFF' },
+  logoCircle: { position: 'absolute', bottom: -13, left: 10, width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: C.card, overflow: 'hidden', backgroundColor: C.card },
   body: { paddingHorizontal: 10, paddingTop: 16, paddingBottom: 10 },
   name: { fontSize: 13, fontWeight: '800', color: C.text, textAlign: 'right' },
   addr: { fontSize: 11, color: C.gray, marginTop: 2, textAlign: 'right' },
@@ -136,13 +140,13 @@ const sc = StyleSheet.create({
   sep: { color: C.gray },
 });
 
-const s = StyleSheet.create({
+const makeS = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  header: { backgroundColor: C.white, paddingTop: 54, paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#EBEBF0' },
+  header: { backgroundColor: C.white, paddingTop: 54, paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: C.line },
   headerInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
   headerTitle: { fontSize: 22, fontWeight: '900', color: C.text },
   headerSub: { fontSize: 12, color: C.gray, textAlign: 'right', marginTop: 3 },
-  typesRow: { flexDirection: 'row-reverse', paddingHorizontal: 12, paddingVertical: 12, gap: 8, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: '#EBEBF0' },
+  typesRow: { flexDirection: 'row-reverse', paddingHorizontal: 12, paddingVertical: 12, gap: 8, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.line },
   typeBtn: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 10, borderRadius: 14, backgroundColor: C.bg, borderWidth: 1.5, borderColor: 'transparent' },
   typeLabel: { fontSize: 11, fontWeight: '600', color: C.gray },
   banner: { margin: 16, borderRadius: 20, backgroundColor: '#1565C0', padding: 20, overflow: 'hidden', justifyContent: 'flex-end' },

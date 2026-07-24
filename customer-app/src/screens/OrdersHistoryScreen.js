@@ -4,8 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import api from '../utils/api';
 import { useCart } from '../context/CartContext';
-
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', green: '#34C759', red: '#FF3B30', bg: '#F8F9FA' };
+import { useTheme } from '../context/ThemeContext';
 
 const STATUS_MAP = {
   pending:    { label: 'في الانتظار', color: '#FF9500', bg: '#FFF5E6', icon: 'time-outline' },
@@ -22,6 +21,8 @@ const ACTIVE = ['pending', 'confirmed', 'preparing', 'ready', 'on_the_way'];
 export default function OrdersHistoryScreen() {
   const navigation = useNavigation();
   const { reorder } = useCart();
+  const { colors: COLORS } = useTheme();
+  const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -110,7 +111,9 @@ export default function OrdersHistoryScreen() {
 }
 
 function OrderCard({ order, navigation, isActive, onReorder, reordering }) {
-  const s = STATUS_MAP[order.status] || { label: order.status, color: COLORS.gray, bg: '#F5F5F5', icon: 'help-circle-outline' };
+  const { colors: COLORS } = useTheme();
+  const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
+  const s = STATUS_MAP[order.status] || { label: order.status, color: COLORS.gray, bg: COLORS.inputBg, icon: 'help-circle-outline' };
   return (
     <TouchableOpacity
       style={[styles.card, isActive && styles.activeCard]}
@@ -164,19 +167,19 @@ function OrderCard({ order, navigation, isActive, onReorder, reordering }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { paddingTop: 50, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.bg },
+  header: { paddingTop: 50, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: COLORS.card, borderBottomWidth: 1, borderBottomColor: COLORS.line },
   headerTitle: { fontSize: 20, fontWeight: '900', color: COLORS.text },
   section: { padding: 16, paddingBottom: 4 },
   sectionTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text, marginBottom: 10 },
-  emptyBox: { backgroundColor: '#FFF', borderRadius: 18, padding: 30, alignItems: 'center', marginBottom: 12, elevation: 1 },
+  emptyBox: { backgroundColor: COLORS.card, borderRadius: 18, padding: 30, alignItems: 'center', marginBottom: 12, elevation: 1 },
   emptyEmoji: { fontSize: 44, marginBottom: 8 },
   emptyText: { fontSize: 15, color: COLORS.gray, fontWeight: '600', marginBottom: 14 },
   orderNowBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 24, paddingVertical: 11, borderRadius: 14 },
   orderNowText: { color: '#FFF', fontWeight: '800', fontSize: 14 },
-  card: { backgroundColor: '#FFF', borderRadius: 16, padding: 14, marginBottom: 10, elevation: 2, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6 },
+  card: { backgroundColor: COLORS.card, borderRadius: 16, padding: 14, marginBottom: 10, elevation: 2, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6 },
   activeCard: { borderLeftWidth: 4, borderLeftColor: COLORS.primary },
   cardTop: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 },
   restaurantName: { fontSize: 15, fontWeight: '800', color: COLORS.text },
@@ -186,8 +189,8 @@ const styles = StyleSheet.create({
   cardBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   itemsCount: { fontSize: 12, color: COLORS.gray },
   totalAmount: { fontSize: 16, fontWeight: '900', color: COLORS.primary },
-  trackRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F5F5F5' },
+  trackRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.line },
   trackText: { flex: 1, fontSize: 12, color: COLORS.primary, fontWeight: '700' },
-  reorderBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.primary, backgroundColor: '#FFF7F2' },
+  reorderBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.primary, backgroundColor: COLORS.tint },
   reorderText: { fontSize: 14, color: COLORS.primary, fontWeight: '800' },
 });
