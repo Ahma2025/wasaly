@@ -23,7 +23,8 @@ router.get('/', async (req, res) => {
               POWER(SIN((RADIANS(r.lng) - RADIANS($2::float)) / 2), 2)
             ))
           AS numeric), 2)
-          ELSE NULL END as distance_km
+          ELSE NULL END as distance_km,
+        (SELECT array_agg(mc.name_ar) FROM menu_categories mc WHERE mc.restaurant_id = r.id) as menu_cats
       FROM restaurants r
       LEFT JOIN categories c ON r.category_id = c.id
       WHERE r.is_active=true

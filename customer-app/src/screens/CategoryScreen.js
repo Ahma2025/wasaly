@@ -13,14 +13,15 @@ export default function CategoryScreen({ route, navigation }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const cn = categoryName || '';
     api.get('/restaurants?limit=100')
       .then(d => {
         const all = d.data || [];
-        setList(all.filter(r => String(r.category_id) === String(categoryId)));
+        setList(all.filter(r => (r.menu_cats || []).some(mc => mc && (mc.includes(cn) || cn.includes(mc)))));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [categoryId]);
+  }, [categoryId, categoryName]);
 
   return (
     <View style={styles.container}>

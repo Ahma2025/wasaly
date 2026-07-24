@@ -244,7 +244,12 @@ export default function HomeScreen() {
     const pick = list[Math.floor(Math.random() * list.length)];
     go(pick.id);
   };
-  const byCat = (id) => sorted.filter(r => r.category_id === id);
+  // مطابقة المطعم مع فئة حسب فئات المنيو الموجودة داخله
+  const matchesCat = (r, catName) => {
+    if (!catName) return false;
+    return (r.menu_cats || []).some(mc => mc && (mc.includes(catName) || catName.includes(mc)));
+  };
+  const byCat = (cat) => sorted.filter(r => matchesCat(r, cat.name_ar));
   const topRated = [...restaurants].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 10);
   const suggested = sorted.slice(0, 8);
 
@@ -368,7 +373,7 @@ export default function HomeScreen() {
 
         {/* أقسام التصنيفات */}
         {categories.map((cat, ci) => {
-          const list = byCat(cat.id);
+          const list = byCat(cat);
           if (list.length === 0) return null;
           return (
             <React.Fragment key={cat.id}>
