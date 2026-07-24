@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
+import * as Location from 'expo-location';
 import BannerSlider from '../components/BannerSlider';
 import SkeletonCard from '../components/SkeletonCard';
 import SupportButton from '../components/SupportButton';
@@ -18,6 +19,15 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const { width } = Dimensions.get('window');
 const CARD_W = (width - 48) / 2;
+
+// مسافة بالكيلومتر بين نقطتين (Haversine)
+const distKm = (aLat, aLng, bLat, bLng) => {
+  if (aLat == null || bLat == null || bLat === undefined) return Infinity;
+  const R = 6371, toR = Math.PI / 180;
+  const dLat = (bLat - aLat) * toR, dLng = (bLng - aLng) * toR;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * toR) * Math.cos(bLat * toR) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+};
 // ألوان الثيم تأتي من useTheme
 
 /* ── كرت مع موشن ضغط ── */
@@ -158,10 +168,24 @@ export default function HomeScreen() {
   const [sortBy, setSortBy] = useState('recommended');
   const [openOnly, setOpenOnly] = useState(false);
   const [freeDelivOnly, setFreeDelivOnly] = useState(false);
+  const [userLoc, setUserLoc] = useState(null);
   const [recentRests, setRecentRests] = useState([]);
   const suggestedRef = useRef(null);
 
   useEffect(() => { load(); }, []);
+
+  // موقع المستخدم لترتيب "الأقرب إليك"
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          setUserLoc({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+        }
+      } catch {}
+    })();
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -208,8 +232,10 @@ export default function HomeScreen() {
     if (freeDelivOnly) arr = arr.filter(r => Number(r.delivery_fee) === 0);
     if (sortBy === 'rating') arr.sort((a, b) => (b.rating || 0) - (a.rating || 0));
     else if (sortBy === 'fastest') arr.sort((a, b) => (a.delivery_time_min || 99) - (b.delivery_time_min || 99));
+    else if (sortBy === 'nearest' && userLoc) arr.sort((a, b) =>
+      distKm(userLoc.lat, userLoc.lng, a.lat, a.lng) - distKm(userLoc.lat, userLoc.lng, b.lat, b.lng));
     return arr;
-  }, [restaurants, sortBy, openOnly, freeDelivOnly]);
+  }, [restaurants, sortBy, openOnly, freeDelivOnly, userLoc]);
 
   const surpriseMe = () => {
     const pool = restaurants.filter(r => r.is_open);
@@ -293,6 +319,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
             {[
               { k: 'recommended', l: 'مقترح ✨' },
+              { k: 'nearest', l: 'الأقرب إليك 📍' },
               { k: 'rating', l: 'الأعلى تقييماً ⭐' },
               { k: 'fastest', l: 'الأسرع توصيلاً 🛵' },
             ].map(opt => (
