@@ -78,53 +78,6 @@ async function testLogin(){
 </script></body></html>`);
 });
 
-// TEMP: تعبئة مطعم العميد بـ 10 فئات × 10 أصناف (يُحذف بعد الاستخدام)
-app.get('/api/_seedameed', async (req, res) => {
-  if (req.query.key !== 'WSL-AMEED-7') return res.status(403).json({ ok: false });
-  const pool = require('./config/database');
-  try {
-    const { rows: rr } = await pool.query("SELECT id FROM restaurants WHERE name_ar LIKE '%العميد%' ORDER BY id LIMIT 1");
-    if (!rr[0]) return res.status(404).json({ ok: false, error: 'مطعم العميد غير موجود' });
-    const rid = rr[0].id;
-
-    // تنظيف المنيو الحالي
-    await pool.query('DELETE FROM item_option_values WHERE option_id IN (SELECT id FROM item_options WHERE item_id IN (SELECT id FROM menu_items WHERE restaurant_id=$1))', [rid]);
-    await pool.query('DELETE FROM item_options WHERE item_id IN (SELECT id FROM menu_items WHERE restaurant_id=$1)', [rid]);
-    await pool.query('DELETE FROM menu_items WHERE restaurant_id=$1', [rid]);
-    await pool.query('DELETE FROM menu_categories WHERE restaurant_id=$1', [rid]);
-
-    const CATS = ['برجر', 'بيتزا', 'شاورما', 'دجاج', 'مشاوي', 'معجنات', 'سلطات', 'مشروبات', 'حلويات', 'عروض'];
-    const VARS = ['كلاسيك', 'خاص', 'مميز', 'دجاج', 'لحم', 'مشوي', 'حار', 'دبل', 'بالجبنة', 'عائلي'];
-    let nItems = 0, seed = 0;
-    for (let ci = 0; ci < CATS.length; ci++) {
-      const { rows: crow } = await pool.query(
-        'INSERT INTO menu_categories (restaurant_id, name_ar, name_en, sort_order) VALUES ($1,$2,$3,$4) RETURNING id',
-        [rid, CATS[ci], CATS[ci], ci]
-      );
-      const catId = crow[0].id;
-      for (let ii = 0; ii < 10; ii++) {
-        seed++;
-        const price = 8 + Math.floor(Math.random() * 40);
-        const hasDisc = ii % 3 === 0;
-        await pool.query(
-          `INSERT INTO menu_items (restaurant_id, category_id, name_ar, name_en, description_ar, image, price, discount_price, calories, is_spicy, is_vegetarian, is_vegan, preparation_time)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-          [
-            rid, catId, `${CATS[ci]} ${VARS[ii]}`, `${CATS[ci]} ${VARS[ii]}`,
-            `${CATS[ci]} ${VARS[ii]} طازج ولذيذ من مطعم العميد`,
-            `https://picsum.photos/seed/ameed${seed}/400/300`,
-            price, hasDisc ? Math.max(5, price - 3) : null,
-            200 + Math.floor(Math.random() * 700),
-            VARS[ii] === 'حار', CATS[ci] === 'سلطات', false, 15,
-          ]
-        );
-        nItems++;
-      }
-    }
-    res.json({ ok: true, restaurant_id: rid, categories: CATS.length, items: nItems });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
