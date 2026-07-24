@@ -3,12 +3,13 @@ import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, Activity
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
-
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
+import { useTheme } from '../context/ThemeContext';
 
 const POPULAR = ['برجر', 'بيتزا', 'شاورما', 'سوشي', 'دجاج', 'فلافل', 'مشاوي', 'حلويات'];
 
 export default function SearchScreen() {
+  const { colors: COLORS } = useTheme();
+  const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -62,7 +63,7 @@ export default function SearchScreen() {
       <View style={styles.header}>
         <View style={styles.searchBox}>
           <Ionicons name="search" size={18} color={COLORS.gray} />
-          <TextInput style={styles.input} placeholder="ابحث عن مطعم أو طعام..." value={query} onChangeText={onChangeText} autoFocus returnKeyType="search" />
+          <TextInput style={styles.input} placeholder="ابحث عن مطعم أو طعام..." placeholderTextColor={COLORS.gray} value={query} onChangeText={onChangeText} autoFocus returnKeyType="search" />
           {query ? <TouchableOpacity onPress={() => { setQuery(''); setResults(null); }}><Ionicons name="close-circle" size={18} color={COLORS.gray} /></TouchableOpacity> : null}
         </View>
       </View>
@@ -105,26 +106,26 @@ export default function SearchScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { backgroundColor: '#FFF', paddingTop: 50, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#E5E5EA' },
-  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#F2F2F7', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
+  header: { backgroundColor: COLORS.card, paddingTop: 50, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: COLORS.line },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.inputBg, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
   input: { flex: 1, fontSize: 15, color: COLORS.text },
   popularSection: { padding: 16 },
   sectionTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text, marginVertical: 12 },
   tagsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  tag: { backgroundColor: '#FFF', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#E5E5EA' },
+  tag: { backgroundColor: COLORS.card, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: COLORS.border },
   tagText: { fontSize: 13, color: COLORS.text, fontWeight: '600' },
-  card: { flexDirection: 'row', gap: 12, backgroundColor: '#FFF', borderRadius: 16, padding: 12, marginBottom: 10, elevation: 2 },
-  logo: { width: 56, height: 56, borderRadius: 12, backgroundColor: '#FFF5EE', alignItems: 'center', justifyContent: 'center' },
+  card: { flexDirection: 'row', gap: 12, backgroundColor: COLORS.card, borderRadius: 16, padding: 12, marginBottom: 10, elevation: 2 },
+  logo: { width: 56, height: 56, borderRadius: 12, backgroundColor: COLORS.tint, alignItems: 'center', justifyContent: 'center' },
   cardInfo: { flex: 1 },
   cardName: { fontSize: 15, fontWeight: '800', color: COLORS.text },
   cardSub: { fontSize: 12, color: COLORS.gray, marginTop: 2 },
   cardMeta: { flexDirection: 'row', gap: 10, marginTop: 6 },
   rating: { fontSize: 12, fontWeight: '700', color: '#FF9500' },
   fee: { fontSize: 12, color: COLORS.gray },
-  itemCard: { flexDirection: 'row', gap: 12, backgroundColor: '#FFF', borderRadius: 16, padding: 12, marginBottom: 8, elevation: 1 },
-  itemEmoji: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F2F2F7', alignItems: 'center', justifyContent: 'center' },
+  itemCard: { flexDirection: 'row', gap: 12, backgroundColor: COLORS.card, borderRadius: 16, padding: 12, marginBottom: 8, elevation: 1 },
+  itemEmoji: { width: 48, height: 48, borderRadius: 12, backgroundColor: COLORS.inputBg, alignItems: 'center', justifyContent: 'center' },
   itemPrice: { fontSize: 14, fontWeight: '800', color: COLORS.primary, marginTop: 4 },
   empty: { alignItems: 'center', paddingTop: 60 },
   emptyIcon: { fontSize: 48, marginBottom: 8 },

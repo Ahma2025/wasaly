@@ -3,11 +3,12 @@ import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Image, Scro
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import api from '../utils/api';
-
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
+import { useTheme } from '../context/ThemeContext';
 
 export default function RatingScreen({ route, navigation }) {
   const { orderId, restaurantName, driverName } = route.params || {};
+  const { colors: COLORS } = useTheme();
+  const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   const [foodRating, setFoodRating] = useState(0);
   const [driverRating, setDriverRating] = useState(0);
   const [comment, setComment] = useState('');
@@ -114,29 +115,29 @@ export default function RatingScreen({ route, navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E5E5EA' },
+  header: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 16, backgroundColor: COLORS.card, borderBottomWidth: 1, borderBottomColor: COLORS.line },
   headerTitle: { fontSize: 20, fontWeight: '900', color: COLORS.text },
   content: { flex: 1, padding: 24, alignItems: 'center' },
   emoji: { fontSize: 56, marginTop: 20, marginBottom: 10 },
   title: { fontSize: 22, fontWeight: '900', color: COLORS.text },
   subtitle: { fontSize: 15, color: COLORS.gray, marginTop: 4, marginBottom: 24 },
-  section: { width: '100%', backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 12, elevation: 2 },
+  section: { width: '100%', backgroundColor: COLORS.card, borderRadius: 16, padding: 16, marginBottom: 12, elevation: 2 },
   label: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 10 },
   starsRow: { flexDirection: 'row', gap: 6 },
-  star: { fontSize: 32, color: '#E5E5EA' },
+  star: { fontSize: 32, color: COLORS.border },
   starActive: { color: '#FFD700' },
   quickWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 16 },
-  quickTag: { backgroundColor: '#FFF', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: '#E5E5EA' },
+  quickTag: { backgroundColor: COLORS.card, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: COLORS.border },
   quickTagActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   quickText: { fontSize: 13, fontWeight: '600', color: COLORS.text },
-  commentInput: { width: '100%', borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 14, padding: 12, fontSize: 14, color: COLORS.text, backgroundColor: '#FFF', marginBottom: 12 },
+  commentInput: { width: '100%', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 14, padding: 12, fontSize: 14, color: COLORS.text, backgroundColor: COLORS.inputBg, marginBottom: 12 },
   photoRow: { gap: 10, paddingVertical: 4, marginBottom: 12 },
   photoWrap: { position: 'relative' },
   photo: { width: 64, height: 64, borderRadius: 12 },
-  photoDel: { position: 'absolute', top: -6, right: -6, backgroundColor: '#FF3B30', width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFF' },
-  photoAdd: { width: 64, height: 64, borderRadius: 12, borderWidth: 1.5, borderColor: '#FFE0CC', borderStyle: 'dashed', backgroundColor: '#FFF8F4', alignItems: 'center', justifyContent: 'center' },
+  photoDel: { position: 'absolute', top: -6, right: -6, backgroundColor: '#FF3B30', width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: COLORS.card },
+  photoAdd: { width: 64, height: 64, borderRadius: 12, borderWidth: 1.5, borderColor: '#FFE0CC', borderStyle: 'dashed', backgroundColor: COLORS.tint, alignItems: 'center', justifyContent: 'center' },
   photoAddTxt: { fontSize: 11, color: COLORS.primary, fontWeight: '700', marginTop: 2 },
   submitBtn: { width: '100%', backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, alignItems: 'center' },
   submitText: { color: '#FFF', fontWeight: '900', fontSize: 16 },

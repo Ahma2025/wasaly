@@ -4,12 +4,13 @@ import DismissKeyboard from '../components/DismissKeyboard';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
-
-const COLORS = { primary: '#FF6B00', bg: '#FFF', text: '#1A1A2E', gray: '#8E8E93', border: '#E5E5EA' };
+import { useTheme } from '../context/ThemeContext';
 
 export default function LoginScreen() {
   const navigation = useNavigation();
   const { login } = useAuth();
+  const { colors: COLORS } = useTheme();
+  const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   const [tab, setTab] = useState('login'); // login | register
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -86,20 +87,20 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   content: { flexGrow: 1, paddingHorizontal: 24, justifyContent: 'center', paddingVertical: 40 },
   logoArea: { alignItems: 'center', marginBottom: 36 },
-  logo: { fontSize: 54, width: 96, height: 96, borderRadius: 30, backgroundColor: '#FFF3EC', textAlign: 'center', textAlignVertical: 'center', lineHeight: 96, overflow: 'hidden' },
+  logo: { fontSize: 54, width: 96, height: 96, borderRadius: 30, backgroundColor: COLORS.tint, textAlign: 'center', textAlignVertical: 'center', lineHeight: 96, overflow: 'hidden' },
   appName: { fontSize: 38, fontWeight: '900', color: COLORS.primary, marginTop: 14, letterSpacing: 0.5 },
   tagline: { fontSize: 14, color: COLORS.gray, marginTop: 4 },
-  tabs: { flexDirection: 'row', backgroundColor: '#F5F5F7', borderRadius: 14, padding: 5, marginBottom: 24 },
+  tabs: { flexDirection: 'row', backgroundColor: COLORS.inputBg, borderRadius: 14, padding: 5, marginBottom: 24 },
   tab: { flex: 1, paddingVertical: 11, alignItems: 'center', borderRadius: 11 },
   tabActive: { backgroundColor: COLORS.primary, elevation: 3, shadowColor: COLORS.primary, shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } },
   tabText: { fontWeight: '700', color: COLORS.gray },
   tabTextActive: { color: '#FFF' },
   form: { gap: 14 },
-  input: { borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 14, padding: 15, fontSize: 16, color: COLORS.text, backgroundColor: '#FAFAFB' },
+  input: { borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 14, padding: 15, fontSize: 16, color: COLORS.text, backgroundColor: COLORS.inputBg },
   btn: { backgroundColor: COLORS.primary, borderRadius: 14, paddingVertical: 17, alignItems: 'center', marginTop: 6, elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
   btnText: { color: '#FFF', fontWeight: '800', fontSize: 16, letterSpacing: 0.3 },
 });

@@ -6,11 +6,13 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import api from '../utils/api';
+import { useTheme } from '../context/ThemeContext';
 
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
 const LABELS = [{ k: 'المنزل', e: '🏠' }, { k: 'العمل', e: '💼' }, { k: 'أخرى', e: '📍' }];
 
 export default function AddAddressScreen({ navigation }) {
+  const { colors: COLORS } = useTheme();
+  const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   const [label, setLabel] = useState('المنزل');
   const [details, setDetails] = useState('');
   const [floor, setFloor] = useState('');
@@ -110,21 +112,21 @@ export default function AddAddressScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: '#F5F5F5' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: COLORS.card, borderBottomWidth: 1, borderBottomColor: COLORS.line },
+  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: COLORS.inputBg },
   headerTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text },
-  locBtn: { backgroundColor: '#FFF', borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1.5, borderColor: '#FFE0CC', elevation: 1 },
+  locBtn: { backgroundColor: COLORS.card, borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1.5, borderColor: '#FFE0CC', elevation: 1 },
   locBtnTitle: { fontSize: 14, fontWeight: '700', color: COLORS.text },
   locBtnSub: { fontSize: 12, color: COLORS.primary, marginTop: 2 },
   sectionTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text, marginBottom: 10 },
   labelRow: { flexDirection: 'row', gap: 8 },
-  labelBtn: { flex: 1, padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E5EA', alignItems: 'center', backgroundColor: '#FFF' },
+  labelBtn: { flex: 1, padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border, alignItems: 'center', backgroundColor: COLORS.card },
   labelBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   labelText: { fontWeight: '700', color: COLORS.text, fontSize: 13 },
   fieldLabel: { fontSize: 13, color: COLORS.gray, marginBottom: 6 },
-  input: { borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 12, padding: 12, fontSize: 14, backgroundColor: '#FFF', color: COLORS.text },
+  input: { borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 12, padding: 12, fontSize: 14, backgroundColor: COLORS.inputBg, color: COLORS.text },
   saveBtn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, alignItems: 'center', marginTop: 8 },
   saveBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
 });

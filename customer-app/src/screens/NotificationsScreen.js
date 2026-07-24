@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
 import api from '../utils/api';
-
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
+import { useTheme } from '../context/ThemeContext';
 
 const TYPE_ICONS = { order: '📦', promo: '🎁', system: '🔔', driver: '🏍️', payment: '💳' };
 
 export default function NotificationsScreen() {
+  const { colors: COLORS } = useTheme();
+  const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -72,14 +73,14 @@ export default function NotificationsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 16, backgroundColor: '#FFF', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#E5E5EA' },
+  header: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 16, backgroundColor: COLORS.card, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: COLORS.line },
   headerTitle: { fontSize: 20, fontWeight: '900', color: COLORS.text },
   markAll: { fontSize: 14, color: COLORS.primary, fontWeight: '700' },
-  card: { flexDirection: 'row', gap: 12, backgroundColor: '#FFF', borderRadius: 16, padding: 14, elevation: 1 },
-  cardUnread: { backgroundColor: '#FFF9F5', borderWidth: 1, borderColor: '#FFE0CC' },
-  iconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#F2F2F7', alignItems: 'center', justifyContent: 'center', shrink: 0 },
+  card: { flexDirection: 'row', gap: 12, backgroundColor: COLORS.card, borderRadius: 16, padding: 14, elevation: 1 },
+  cardUnread: { backgroundColor: COLORS.tint, borderWidth: 1, borderColor: '#FFE0CC' },
+  iconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: COLORS.inputBg, alignItems: 'center', justifyContent: 'center', shrink: 0 },
   content: { flex: 1 },
   title: { fontSize: 14, fontWeight: '800', color: COLORS.text },
   body: { fontSize: 13, color: COLORS.gray, marginTop: 3, lineHeight: 18 },
