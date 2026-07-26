@@ -368,4 +368,54 @@ router.get('/live-ops', auth, adminOnly, async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+// المحاسبة والعمولات
+router.get('/accounting', auth, adminOnly, async (req, res) => {
+  try {
+    // لكل مطعم: المبيعات المسلّمة + نسبة العمولة
+    const { rows: rests } = await pool.query(
+      `SELECT r.id, r.name_ar AS name, COALESCE(r.commission_rate, 15) AS commission_rate,
+              COUNT(o.id)::int AS orders,
+              COALESCE(SUM(o.subtotal), 0) AS sales
+       FROM restaurants r
+       JOIN orders o ON o.restaurant_id = r.id AND o.status = 'delivered'
+       GROUP BY r.id, r.name_ar, r.commission_rate
+       ORDER BY sales DESC`
+    );
+    const restaurants = rests.map(r => {
+      const sales = parseFloat(r.sales) || 0;
+      const rate = parseFloat(r.commission_rate) || 0;
+      const commission = Math.round(sales * rate / 100 * 100) / 100;
+      return { id: r.id, name: r.name, orders: r.orders, sales, commission_rate: rate, commission, net: Math.round((sales - commission) * 100) / 100 };
+    });
+
+    // لكل سائق: التوصيلات + الأرباح (رسوم التوصيل)
+    const { rows: drivers } = await pool.query(
+      `SELECT u.name, COUNT(o.id)::int AS deliveries, COALESCE(SUM(o.delivery_fee), 0) AS earnings
+       FROM orders o JOIN users u ON o.driver_id = u.id
+       WHERE o.status = 'delivered' AND o.driver_id IS NOT NULL
+       GROUP BY u.name ORDER BY earnings DESC`
+    );
+    const driversOut = drivers.map(d => ({ name: d.name, deliveries: d.deliveries, earnings: parseFloat(d.earnings) || 0 }));
+
+    const totals = {
+      sales: restaurants.reduce((s, r) => s + r.sales, 0),
+      commission: restaurants.reduce((s, r) => s + r.commission, 0),
+      restaurant_net: restaurants.reduce((s, r) => s + r.net, 0),
+      driver_earnings: driversOut.reduce((s, d) => s + d.earnings, 0),
+      orders: restaurants.reduce((s, r) => s + r.orders, 0),
+    };
+    res.json({ success: true, totals, restaurants, drivers: driversOut });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// تعديل نسبة عمولة مطعم
+router.patch('/restaurants/:id/commission', auth, adminOnly, async (req, res) => {
+  try {
+    const rate = parseFloat(req.body.rate);
+    if (isNaN(rate) || rate < 0 || rate > 100) return res.status(400).json({ success: false, message: 'نسبة غير صحيحة (0-100)' });
+    await pool.query('UPDATE restaurants SET commission_rate=$1 WHERE id=$2', [rate, req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 module.exports = router;

@@ -14,6 +14,7 @@ async function runMigrations() {
     `CREATE UNIQUE INDEX IF NOT EXISTS vip_customers_uniq ON vip_customers(restaurant_id, customer_id)`,
     `CREATE TABLE IF NOT EXISTS support_chat (id SERIAL PRIMARY KEY, user_id TEXT, sender TEXT, message TEXT, is_read BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE INDEX IF NOT EXISTS support_chat_user_idx ON support_chat(user_id)`,
+    `ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS commission_rate NUMERIC DEFAULT 15`,
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); } catch (e) { /* column already exists */ }

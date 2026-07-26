@@ -16,6 +16,7 @@ const Banners = lazy(() => import('./pages/Banners'));
 const Reviews = lazy(() => import('./pages/Reviews'));
 const Chats = lazy(() => import('./pages/Chats'));
 const LiveOps = lazy(() => import('./pages/LiveOps'));
+const Accounting = lazy(() => import('./pages/Accounting'));
 
 const NAV = [
   { to: '/', icon: '📊', label: 'الرئيسية' },
@@ -34,6 +35,7 @@ const NAV2 = [
   { to: '/banners', icon: '🖼️', label: 'الإعلانات' },
   { to: '/reviews', icon: '⭐', label: 'التقييمات' },
   { to: '/chats', icon: '💬', label: 'المحادثات' },
+  { to: '/accounting', icon: '💰', label: 'المحاسبة' },
 ];
 
 function BottomNav() {
@@ -90,6 +92,7 @@ function AppLayout() {
             <Route path="/reviews" element={<Reviews />} />
             <Route path="/chats" element={<Chats />} />
             <Route path="/live" element={<LiveOps />} />
+            <Route path="/accounting" element={<Accounting />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
