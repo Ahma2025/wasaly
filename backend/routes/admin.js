@@ -341,4 +341,31 @@ router.post('/notifications/broadcast', auth, adminOnly, async (req, res) => {
   }
 });
 
+// لوحة العمليات الحية — كل الطلبات النشطة + السائقون المتصلون
+router.get('/live-ops', auth, adminOnly, async (req, res) => {
+  try {
+    const { rows: orders } = await pool.query(
+      `SELECT o.id, o.order_number, o.status, o.total, o.order_type,
+              o.delivery_lat, o.delivery_lng, o.created_at,
+              r.name_ar AS restaurant_name, r.lat AS restaurant_lat, r.lng AS restaurant_lng,
+              cu.name AS customer_name, cu.phone AS customer_phone,
+              dr.name AS driver_name, dr.phone AS driver_phone,
+              d.current_lat AS driver_lat, d.current_lng AS driver_lng
+       FROM orders o
+       LEFT JOIN restaurants r ON o.restaurant_id = r.id
+       LEFT JOIN users cu ON o.customer_id = cu.id
+       LEFT JOIN users dr ON o.driver_id = dr.id
+       LEFT JOIN drivers d ON d.user_id = o.driver_id
+       WHERE o.status IN ('pending','confirmed','preparing','ready','on_the_way')
+       ORDER BY o.created_at DESC LIMIT 200`
+    );
+    const { rows: drivers } = await pool.query(
+      `SELECT u.name, u.phone, d.current_lat, d.current_lng, d.is_busy, d.rating
+       FROM drivers d JOIN users u ON d.user_id = u.id
+       WHERE d.is_online = true AND d.current_lat IS NOT NULL AND d.current_lng IS NOT NULL`
+    );
+    res.json({ success: true, orders, drivers });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 module.exports = router;
