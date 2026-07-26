@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import Login from './pages/Login';
 
@@ -127,9 +127,9 @@ export default function App() {
   );
 
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Toaster position="top-center" toastOptions={{ style: { fontFamily: 'inherit', direction: 'rtl' } }} />
       <AppLayout />
-    </BrowserRouter>
+    </HashRouter>
   );
 }
