@@ -232,6 +232,18 @@ export default function OrderTrackingScreen() {
     finally { setLoading(false); }
   };
 
+  // كل الـ hooks يجب أن تُستدعى قبل أي return مبكّر (قاعدة ترتيب React hooks)
+  const showMap = ['confirmed', 'preparing', 'ready', 'on_the_way', 'delivered'].includes(order?.status);
+  // تُبنى الخريطة مرة واحدة فقط؛ حركة السائق تتم عبر postMessage (انزلاق ناعم) لا بإعادة البناء كل 5 ثواني
+  const mapHtml = React.useMemo(
+    () => showMap ? buildMapHTML({
+      restLat: order.restaurant_lat, restLng: order.restaurant_lng,
+      custLat: order.delivery_lat,   custLng: order.delivery_lng,
+      driverLat: order.driver_lat,   driverLng: order.driver_lng,
+    }) : null,
+    [showMap, order?.restaurant_lat, order?.restaurant_lng, order?.delivery_lat, order?.delivery_lng]
+  );
+
   if (loading) return (
     <View style={styles.loadingWrap}>
       <ActivityIndicator size="large" color={COLORS.primary} />
@@ -250,17 +262,6 @@ export default function OrderTrackingScreen() {
   const currentStep = STATUS_STEPS[Math.max(currentIdx, 0)];
   const isDelivered = order.status === 'delivered';
   const isCancelled = order.status === 'cancelled';
-  const showMap = ['confirmed', 'preparing', 'ready', 'on_the_way', 'delivered'].includes(order.status);
-
-  // تُبنى الخريطة مرة واحدة فقط؛ حركة السائق تتم عبر postMessage (انزلاق ناعم) لا بإعادة البناء كل 5 ثواني
-  const mapHtml = React.useMemo(
-    () => showMap ? buildMapHTML({
-      restLat: order.restaurant_lat, restLng: order.restaurant_lng,
-      custLat: order.delivery_lat,   custLng: order.delivery_lng,
-      driverLat: order.driver_lat,   driverLng: order.driver_lng,
-    }) : null,
-    [showMap, order.restaurant_lat, order.restaurant_lng, order.delivery_lat, order.delivery_lng]
-  );
 
   return (
     <View style={styles.container}>
