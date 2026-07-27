@@ -22,6 +22,8 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
         "VIBRATE",
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED"
@@ -32,13 +34,18 @@
       "icon": "./assets/icon.png",
       "supportsTablet": false,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["location", "fetch"],
+        "NSLocationWhenInUseUsageDescription": "نحتاج موقعك لعرضه للزبون أثناء توصيل الطلب",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "نحتاج موقعك في الخلفية لمتابعة التوصيل وعرض حركتك للزبون حتى وأنت تقود"
       }
     },
     "plugins": [
       ["expo-location", {
-        "locationAlwaysAndWhenInUsePermission": "نحتاج موقعك لمتابعة التوصيلات",
-        "isIosBackgroundLocationEnabled": true
+        "locationAlwaysAndWhenInUsePermission": "نحتاج موقعك لمتابعة التوصيلات وعرض حركتك للزبون",
+        "isIosBackgroundLocationEnabled": true,
+        "isAndroidBackgroundLocationEnabled": true,
+        "isAndroidForegroundServiceEnabled": true
       }],
       ["expo-notifications", {
         "icon": "./assets/icon.png",

@@ -74,6 +74,10 @@ function mkIcon(emoji,size,bg){
 
 var pts=[];
 var driverMarker=null;
+var curPos=null;              // الموقع المرسوم حالياً للسائق
+var animFrame=null, startPos=null, endPos=null, animStart=0;
+var ANIM_MS=5200;             // مدة انزلاق الدبوس بين نقطتين (أطول قليلاً من فترة الإرسال ليبقى متحركاً دائماً)
+var followDriver=true;        // الكاميرا تتبع السائق مثل وضع الملاحة
 
 ${safeRestLat && safeRestLng ? `
 L.marker([${safeRestLat},${safeRestLng}],{icon:mkIcon('🏪',40,'#FF6B00')}).addTo(map)
@@ -90,6 +94,7 @@ pts.push([${safeCustLat},${safeCustLng}]);
 ${safeDriverLat && safeDriverLng ? `
 driverMarker=L.marker([${safeDriverLat},${safeDriverLng}],{icon:mkIcon('🛵',44,'#FF6B00')}).addTo(map)
   .bindPopup('<div style="direction:rtl;font-weight:700;color:#FF6B00">🛵 السائق</div>',{className:'custom-popup'});
+curPos=[${safeDriverLat},${safeDriverLng}];
 pts.push([${safeDriverLat},${safeDriverLng}]);
 ` : ''}
 
@@ -102,19 +107,47 @@ L.polyline([[${safeRestLat},${safeRestLng}],[${safeCustLat},${safeCustLng}]],{
 if(pts.length===1){map.setView(pts[0],15);}
 else if(pts.length>1){map.fitBounds(pts,{padding:[50,50]});}
 
-// Receive driver live location from React Native
+// لو سحب المستخدم الخريطة يدوياً نوقف التتبع التلقائي حتى يضغط زر التوسيط
+map.on('dragstart',function(){ followDriver=false; });
+
+// إطار الحركة: ينزلق الدبوس تدريجياً من نقطته الحالية للنقطة الجديدة
+function animStep(){
+  var t=(Date.now()-animStart)/ANIM_MS;
+  if(t>1)t=1;
+  var lat=startPos[0]+(endPos[0]-startPos[0])*t;
+  var lng=startPos[1]+(endPos[1]-startPos[1])*t;
+  curPos=[lat,lng];
+  driverMarker.setLatLng(curPos);
+  if(followDriver) map.panTo(curPos,{animate:false});
+  if(t<1){ animFrame=requestAnimationFrame(animStep); }
+}
+
+// استقبال موقع جديد: إنشاء الدبوس أول مرة، أو بدء انزلاق ناعم للنقطة الجديدة
+function moveDriver(lat,lng){
+  var ll=[lat,lng];
+  if(isNaN(lat)||isNaN(lng)) return;
+  if(!driverMarker){
+    driverMarker=L.marker(ll,{icon:mkIcon('🛵',44,'#FF6B00')}).addTo(map)
+      .bindPopup('<div style="direction:rtl;font-weight:700;color:#FF6B00">🛵 السائق</div>',{className:'custom-popup'});
+    curPos=ll;
+    if(followDriver) map.setView(ll,16,{animate:true});
+    return;
+  }
+  startPos=curPos ? [curPos[0],curPos[1]] : [lat,lng];
+  endPos=[lat,lng];
+  animStart=Date.now();
+  if(animFrame) cancelAnimationFrame(animFrame);
+  animStep();
+}
+
 function handleMsg(e){
   try{
     var d=JSON.parse(e.data||e);
     if(d.type==='driver_location'){
-      var ll=[parseFloat(d.lat),parseFloat(d.lng)];
-      if(!driverMarker){
-        driverMarker=L.marker(ll,{icon:mkIcon('🛵',44,'#FF6B00')}).addTo(map)
-          .bindPopup('<div style="direction:rtl;font-weight:700;color:#FF6B00">🛵 السائق</div>',{className:'custom-popup'});
-      } else {
-        driverMarker.setLatLng(ll);
-      }
-      map.panTo(ll,{animate:true,duration:0.6});
+      moveDriver(parseFloat(d.lat),parseFloat(d.lng));
+    } else if(d.type==='recenter'){
+      followDriver=true;
+      if(curPos) map.setView(curPos,16,{animate:true});
     }
   }catch(err){}
 }
@@ -219,12 +252,15 @@ export default function OrderTrackingScreen() {
   const isCancelled = order.status === 'cancelled';
   const showMap = ['confirmed', 'preparing', 'ready', 'on_the_way', 'delivered'].includes(order.status);
 
-  const mapHtml = showMap ? buildMapHTML({
-    restLat: order.restaurant_lat, restLng: order.restaurant_lng,
-    custLat: order.delivery_lat,   custLng: order.delivery_lng,
-    driverLat: driverLoc?.lat || order.driver_lat,
-    driverLng: driverLoc?.lng || order.driver_lng,
-  }) : null;
+  // تُبنى الخريطة مرة واحدة فقط؛ حركة السائق تتم عبر postMessage (انزلاق ناعم) لا بإعادة البناء كل 5 ثواني
+  const mapHtml = React.useMemo(
+    () => showMap ? buildMapHTML({
+      restLat: order.restaurant_lat, restLng: order.restaurant_lng,
+      custLat: order.delivery_lat,   custLng: order.delivery_lng,
+      driverLat: order.driver_lat,   driverLng: order.driver_lng,
+    }) : null,
+    [showMap, order.restaurant_lat, order.restaurant_lng, order.delivery_lat, order.delivery_lng]
+  );
 
   return (
     <View style={styles.container}>
@@ -250,6 +286,10 @@ export default function OrderTrackingScreen() {
             originWhitelist={['*']}
             mixedContentMode="always"
             onMessage={() => {}}
+            onLoadEnd={() => {
+              const dl = driverLoc || (order.driver_lat && { lat: order.driver_lat, lng: order.driver_lng });
+              if (dl) webViewRef.current?.postMessage(JSON.stringify({ type: 'driver_location', lat: dl.lat, lng: dl.lng }));
+            }}
           />
           {order.status === 'on_the_way' && (
             <View style={styles.liveBadge}>
@@ -257,8 +297,8 @@ export default function OrderTrackingScreen() {
               <Text style={styles.liveText}>LIVE</Text>
             </View>
           )}
-          {/* Re-center button */}
-          <TouchableOpacity style={styles.recenterBtn} onPress={() => setMapKey(k => k + 1)}>
+          {/* Re-center button — يعيد التتبع للسائق بنعومة بدون إعادة تحميل الخريطة */}
+          <TouchableOpacity style={styles.recenterBtn} onPress={() => webViewRef.current?.postMessage(JSON.stringify({ type: 'recenter' }))}>
             <Ionicons name="locate" size={20} color={COLORS.primary} />
           </TouchableOpacity>
         </View>

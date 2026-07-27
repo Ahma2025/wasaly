@@ -29,7 +29,7 @@ router.patch('/location', auth, driverOnly, async (req, res) => {
     const { rows: orders } = await pool.query(
       `SELECT o.customer_id, o.id as order_id, r.owner_id
        FROM orders o JOIN restaurants r ON o.restaurant_id=r.id
-       WHERE o.driver_id=$1 AND o.status='on_the_way'`,
+       WHERE o.driver_id=$1 AND o.status IN ('confirmed','preparing','ready','on_the_way')`,
       [req.user.id]
     );
     if (orders[0] && req.io) {

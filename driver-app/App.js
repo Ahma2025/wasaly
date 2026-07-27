@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { View, ActivityIndicator } from 'react-native';
 import SplashScreen from './src/components/SplashScreen';
+import './src/tasks/locationTask'; // يُعرّف مهمة تتبّع الموقع في الخلفية
 
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';

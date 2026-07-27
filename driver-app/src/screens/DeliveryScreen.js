@@ -6,6 +6,7 @@ import * as Location from 'expo-location';
 import { io } from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../utils/api';
+import { LOCATION_TASK } from '../tasks/locationTask';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', green: '#34C759', bg: '#F8F9FA', red: '#FF3B30' };
 const SOCKET_URL = 'https://burger-app-production.up.railway.app';
@@ -58,6 +59,10 @@ function mkIcon(emoji,size,bg){
 
 var pts=[];
 var driverMarker=null;
+var curPos=null;
+var animFrame=null, startPos=null, endPos=null, animStart=0;
+var ANIM_MS=5200;
+var followDriver=true;
 
 ${restLat && restLng ? `
 L.marker([${restLat},${restLng}],{icon:mkIcon('🏪',40,'#FF6B00')}).addTo(map)
@@ -74,6 +79,7 @@ pts.push([${custLat},${custLng}]);
 ${driverLat && driverLng ? `
 driverMarker=L.marker([${driverLat},${driverLng}],{icon:mkIcon('🛵',46,'#FF6B00')}).addTo(map)
   .bindPopup('<div style="direction:rtl;font-weight:700;color:#FF6B00">🛵 موقعك الحالي</div>');
+curPos=[${driverLat},${driverLng}];
 pts.push([${driverLat},${driverLng}]);
 ` : ''}
 
@@ -84,18 +90,44 @@ L.polyline([[${restLat},${restLng}],[${custLat},${custLng}]],{color:'#FF6B00',we
 if(pts.length===1){map.setView(pts[0],15);}
 else if(pts.length>1){map.fitBounds(pts,{padding:[50,50]});}
 
+map.on('dragstart',function(){ followDriver=false; });
+
+function animStep(){
+  var t=(Date.now()-animStart)/ANIM_MS;
+  if(t>1)t=1;
+  var lat=startPos[0]+(endPos[0]-startPos[0])*t;
+  var lng=startPos[1]+(endPos[1]-startPos[1])*t;
+  curPos=[lat,lng];
+  driverMarker.setLatLng(curPos);
+  if(followDriver) map.panTo(curPos,{animate:false});
+  if(t<1){ animFrame=requestAnimationFrame(animStep); }
+}
+
+function moveDriver(lat,lng){
+  if(isNaN(lat)||isNaN(lng)) return;
+  var ll=[lat,lng];
+  if(!driverMarker){
+    driverMarker=L.marker(ll,{icon:mkIcon('🛵',46,'#FF6B00')}).addTo(map)
+      .bindPopup('<div style="direction:rtl;font-weight:700;color:#FF6B00">🛵 موقعك الحالي</div>');
+    curPos=ll;
+    if(followDriver) map.setView(ll,16,{animate:true});
+    return;
+  }
+  startPos=curPos ? [curPos[0],curPos[1]] : [lat,lng];
+  endPos=[lat,lng];
+  animStart=Date.now();
+  if(animFrame) cancelAnimationFrame(animFrame);
+  animStep();
+}
+
 function handleMsg(e){
   try{
     var d=JSON.parse(e.data||e);
     if(d.type==='driver_location'){
-      var ll=[parseFloat(d.lat),parseFloat(d.lng)];
-      if(!driverMarker){
-        driverMarker=L.marker(ll,{icon:mkIcon('🛵',46,'#FF6B00')}).addTo(map)
-          .bindPopup('<div style="direction:rtl;font-weight:700;color:#FF6B00">🛵 موقعك الحالي</div>');
-      } else {
-        driverMarker.setLatLng(ll);
-      }
-      map.panTo(ll,{animate:true,duration:0.5});
+      moveDriver(parseFloat(d.lat),parseFloat(d.lng));
+    } else if(d.type==='recenter'){
+      followDriver=true;
+      if(curPos) map.setView(curPos,16,{animate:true});
     }
   }catch(err){}
 }
@@ -121,9 +153,11 @@ export default function DeliveryScreen({ route, navigation }) {
     loadOrder();
     initSocket();
     startLocationTracking();
+    startBackgroundTracking();
     return () => {
       locationInterval.current && clearInterval(locationInterval.current);
       socketRef.current?.disconnect();
+      stopBackgroundTracking();
     };
   }, []);
 
@@ -157,14 +191,14 @@ export default function DeliveryScreen({ route, navigation }) {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const { latitude: lat, longitude: lng } = loc.coords;
       setDriverLoc({ lat, lng });
       emitLocation(lat, lng);
 
       locationInterval.current = setInterval(async () => {
         try {
-          const newLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          const newLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
           const { latitude, longitude } = newLoc.coords;
           setDriverLoc({ lat: latitude, lng: longitude });
           emitLocation(latitude, longitude);
@@ -178,6 +212,36 @@ export default function DeliveryScreen({ route, navigation }) {
       socketRef.current.emit('driver:location', { lat, lng, orderId });
     }
     api.patch('/drivers/location', { lat, lng }).catch(() => {});
+  };
+
+  // تتبّع الموقع في الخلفية — يبقى يبعث موقع السائق للزبون حتى والشاشة مسكّرة أو التطبيق في الخلفية
+  const startBackgroundTracking = async () => {
+    try {
+      const { status: bg } = await Location.requestBackgroundPermissionsAsync();
+      if (bg !== 'granted') return; // إن رفض السائق: يبقى تتبّع المقدّمة شغّالاً
+      const already = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK).catch(() => false);
+      if (already) return;
+      await Location.startLocationUpdatesAsync(LOCATION_TASK, {
+        accuracy: Location.Accuracy.High,
+        timeInterval: 5000,
+        distanceInterval: 8,
+        showsBackgroundLocationIndicator: true,
+        pausesUpdatesAutomatically: false,
+        activityType: Location.ActivityType.AutomotiveNavigation,
+        foregroundService: {
+          notificationTitle: 'وصلّي - مندوب',
+          notificationBody: 'يتم تتبّع موقعك أثناء التوصيل',
+          notificationColor: '#FF6B00',
+        },
+      });
+    } catch (e) { /* تجاهل */ }
+  };
+
+  const stopBackgroundTracking = async () => {
+    try {
+      const started = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK).catch(() => false);
+      if (started) await Location.stopLocationUpdatesAsync(LOCATION_TASK);
+    } catch (e) { /* تجاهل */ }
   };
 
   const nextStep = async () => {
@@ -216,14 +280,19 @@ export default function DeliveryScreen({ route, navigation }) {
     ? { lat: orderData?.restaurant_lat, lng: orderData?.restaurant_lng }
     : { lat: orderData?.delivery_lat, lng: orderData?.delivery_lng };
 
-  const mapHtml = buildDriverMapHTML({
-    restLat: orderData?.restaurant_lat,
-    restLng: orderData?.restaurant_lng,
-    custLat: orderData?.delivery_lat,
-    custLng: orderData?.delivery_lng,
-    driverLat: driverLoc?.lat,
-    driverLng: driverLoc?.lng,
-  });
+  // تُبنى مرة واحدة؛ حركة الموقع تتم عبر postMessage (انزلاق ناعم) لا بإعادة البناء
+  const mapHtml = React.useMemo(
+    () => buildDriverMapHTML({
+      restLat: orderData?.restaurant_lat,
+      restLng: orderData?.restaurant_lng,
+      custLat: orderData?.delivery_lat,
+      custLng: orderData?.delivery_lng,
+      driverLat: driverLoc?.lat,
+      driverLng: driverLoc?.lng,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [orderData?.restaurant_lat, orderData?.restaurant_lng, orderData?.delivery_lat, orderData?.delivery_lng]
+  );
 
   return (
     <View style={styles.container}>
@@ -247,6 +316,7 @@ export default function DeliveryScreen({ route, navigation }) {
           originWhitelist={['*']}
           mixedContentMode="always"
           onMessage={() => {}}
+          onLoadEnd={() => { if (driverLoc) webViewRef.current?.postMessage(JSON.stringify({ type: 'driver_location', lat: driverLoc.lat, lng: driverLoc.lng })); }}
         />
         {/* Live badge */}
         {currentStep === 1 && (
@@ -256,7 +326,7 @@ export default function DeliveryScreen({ route, navigation }) {
           </View>
         )}
         {/* Re-center */}
-        <TouchableOpacity style={styles.recenterBtn} onPress={() => setMapKey(k => k + 1)}>
+        <TouchableOpacity style={styles.recenterBtn} onPress={() => webViewRef.current?.postMessage(JSON.stringify({ type: 'recenter' }))}>
           <Ionicons name="locate" size={20} color={COLORS.primary} />
         </TouchableOpacity>
         {/* Navigate to destination */}
