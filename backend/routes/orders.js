@@ -27,31 +27,58 @@ async function getDeliveryFee(restaurantLat, restaurantLng, deliveryLat, deliver
 }
 
 // Find nearest available driver and notify them
-async function assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, excludeDriverIds = []) {
+// السائقون الذين رُفض/انتهت مهلتهم لكل طلب (في الذاكرة) — عشان ننتقل للتالي وندور عليهم كلهم
+const triedDrivers = new Map(); // key: orderId (نص) -> Set من معرّفات السائقين (نص)
+
+// يوقف بحث السائق نهائياً لهذا الطلب (عند القبول/الإلغاء/التسليم)
+function stopDispatch(orderId) { triedDrivers.delete(String(orderId)); }
+
+async function assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, addExcludeId = null) {
   try {
+    const key = String(orderId);
+    if (!triedDrivers.has(key)) triedDrivers.set(key, new Set());
+    const tried = triedDrivers.get(key);
+    if (addExcludeId != null) tried.add(String(addExcludeId));
+
+    // الطلب ما زال يحتاج سائقاً؟ (توصيل + قيد الانتظار على سائق)
+    const { rows: ord } = await pool.query('SELECT status, order_type FROM orders WHERE id=$1', [orderId]);
+    if (!ord[0] || ord[0].status !== 'confirmed' || ord[0].order_type === 'pickup') { stopDispatch(orderId); return null; }
+
     const safeLat = parseFloat(restaurantLat) || 31.9;
     const safeLng = parseFloat(restaurantLng) || 35.2;
     const params = [safeLat, safeLng];
     let paramIdx = 3;
 
-    let q = `SELECT d.*, u.name, u.phone, u.fcm_token FROM drivers d
+    let q = `SELECT d.*, u.name, u.phone FROM drivers d
              JOIN users u ON d.user_id=u.id
              WHERE d.is_online=true AND d.is_busy=false`;
-    if (excludeDriverIds.length > 0) {
-      params.push(excludeDriverIds);
-      q += ` AND NOT (d.user_id = ANY($${paramIdx++}::uuid[]))`;
+    if (tried.size > 0) {
+      params.push([...tried]);
+      q += ` AND NOT (d.user_id::text = ANY($${paramIdx++}::text[]))`; // نص عشان يشتغل مع أي نوع معرّف
     }
     q += ` ORDER BY (
       (d.current_lat - $1) * (d.current_lat - $1) +
       (d.current_lng - $2) * (d.current_lng - $2)
-    ) ASC LIMIT 1`;
+    ) ASC NULLS LAST LIMIT 1`;
 
     const { rows: drivers } = await pool.query(q, params);
-    if (!drivers[0]) return null;
+
+    if (!drivers[0]) {
+      // ما في سائق متاح غير اللي جرّبناهم
+      if (tried.size > 0) {
+        // جرّبنا الكل ورفضوا/انتهت مهلتهم → نعيد الدورة من الأول (حتى يقبل حدا)
+        tried.clear();
+        setTimeout(() => assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, null), 12000);
+      } else {
+        // لا يوجد سائقون متصلون متاحون أصلاً → نعيد المحاولة لاحقاً (ربما يتصل سائق)
+        setTimeout(() => assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, null), 20000);
+      }
+      return null;
+    }
 
     const driver = drivers[0];
 
-    // Store pending driver FIRST, then notify (avoid race condition on accept)
+    // نسجّل السائق المعروض عليه أولاً ثم نرسل الإشعار (تجنّب سباق عند القبول)
     await pool.query('UPDATE orders SET driver_id=$1 WHERE id=$2', [driver.user_id, orderId]);
 
     notifyUser(io, driver.user_id, 'new_order_request', {
@@ -59,22 +86,21 @@ async function assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, ex
       restaurant_lat: restaurantLat,
       restaurant_lng: restaurantLng
     });
-    // Also send FCM push so driver gets it even when app is backgrounded
     try {
       const tokens = await getUserTokens(driver.user_id);
       if (tokens.length) await sendFCM(tokens, '🛵 طلب توصيل جديد!', 'يوجد طلب جديد بانتظارك، اقبل الآن!', { type: 'new_order_request', order_id: String(orderId) }, 'com.wasaly.driver');
     } catch (e) { console.error('FCM push to driver failed:', e.message); }
 
-    // Auto-reject after 60s if not accepted
+    // مهلة عدم الرد → ننتقل للسائق التالي تلقائياً
     setTimeout(async () => {
-      const { rows } = await pool.query(
-        "SELECT status, driver_id FROM orders WHERE id=$1", [orderId]
-      );
-      if (rows[0] && rows[0].status === 'confirmed' && rows[0].driver_id === driver.user_id) {
-        await pool.query('UPDATE orders SET driver_id=NULL WHERE id=$1', [orderId]);
-        assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, [...excludeDriverIds, driver.user_id]);
-      }
-    }, 60000);
+      try {
+        const { rows } = await pool.query('SELECT status, driver_id FROM orders WHERE id=$1', [orderId]);
+        if (rows[0] && rows[0].status === 'confirmed' && String(rows[0].driver_id) === String(driver.user_id)) {
+          await pool.query('UPDATE orders SET driver_id=NULL WHERE id=$1', [orderId]);
+          assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, driver.user_id);
+        }
+      } catch (e) { console.error('dispatch timeout error:', e.message); }
+    }, 45000);
 
     return driver;
   } catch (e) { console.error('assignDriver error:', e.message); return null; }
@@ -427,6 +453,7 @@ router.post('/:id/accept', auth, async (req, res) => {
         [req.params.id]
       );
       await pool.query('UPDATE drivers SET is_busy=true WHERE user_id=$1', [req.user.id]);
+      stopDispatch(order.id); // وقف البحث عن سائق — صار الطلب لهذا السائق
 
       // Notifications — don't let these fail the whole request
       try {
@@ -460,7 +487,8 @@ router.post('/:id/reject', auth, async (req, res) => {
     await pool.query('UPDATE orders SET driver_id=NULL WHERE id=$1', [order.id]);
 
     const { rows: restaurants } = await pool.query('SELECT lat, lng FROM restaurants WHERE id=$1', [order.restaurant_id]);
-    assignDriverToOrder(req.io, order.id, restaurants[0]?.lat, restaurants[0]?.lng, [req.user.id]);
+    // ننتقل فوراً للسائق التالي (مع استبعاد اللي رفض)
+    assignDriverToOrder(req.io, order.id, restaurants[0]?.lat, restaurants[0]?.lng, req.user.id);
 
     res.json({ success: true });
   } catch (e) {
@@ -483,6 +511,7 @@ router.patch('/:id/cancel', auth, async (req, res) => {
       `UPDATE orders SET status='cancelled', cancel_reason=$1, cancelled_at=NOW() WHERE id=$2`,
       [reason || '', order.id]
     );
+    stopDispatch(order.id); // وقف البحث عن سائق — الطلب أُلغي
     if (order.driver_id) {
       await pool.query('UPDATE drivers SET is_busy=false WHERE user_id=$1', [order.driver_id]);
     }
