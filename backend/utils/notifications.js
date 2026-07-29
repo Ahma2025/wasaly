@@ -247,7 +247,7 @@ async function getUserTokensWithRole(userId) {
 
 function bundleForRole(role) {
   if (role === 'driver')           return BUNDLE_IDS.driver;
-  if (role === 'restaurant_owner') return BUNDLE_IDS.restaurant;
+  if (role === 'restaurant_owner' || role === 'restaurant') return BUNDLE_IDS.restaurant;
   if (role === 'admin')            return BUNDLE_IDS.admin;
   return BUNDLE_IDS.customer;
 }

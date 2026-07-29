@@ -310,7 +310,7 @@ router.post('/notifications/broadcast', auth, adminOnly, async (req, res) => {
     const { title, body, target, role } = req.body;
     if (!title || !body) return res.status(400).json({ success: false, message: 'العنوان والمحتوى مطلوبان' });
 
-    let query = 'SELECT id, fcm_token FROM users WHERE fcm_token IS NOT NULL AND is_active=true';
+    let query = 'SELECT id, fcm_token, role FROM users WHERE fcm_token IS NOT NULL AND is_active=true';
     const params = [];
     if (target === 'role' && role) {
       query += ' AND role=$1';
@@ -327,13 +327,18 @@ router.post('/notifications/broadcast', auth, adminOnly, async (req, res) => {
     }
 
     const { sendFCM } = require('../utils/notifications');
-    const bundleMap = { customer: 'com.wasaly.customer', driver: 'com.wasaly.driver', restaurant: 'com.wasaly.restaurant' };
-    const bundleId = (target === 'role' && role) ? (bundleMap[role] || 'com.wasaly.customer') : 'com.wasaly.customer';
-    const tokens = users.map(u => u.fcm_token).filter(Boolean);
-    if (tokens.length > 0) {
-      const chunks = [];
-      for (let i = 0; i < tokens.length; i += 100) chunks.push(tokens.slice(i, i + 100));
-      for (const chunk of chunks) await sendFCM(chunk, title, body, { type: 'broadcast' }, bundleId);
+    // كل توكن لازم يُبعث بالـ topic تبع تطبيق صاحبه، وإلا ترفضه آبل (DeviceTokenNotForTopic)
+    const bundleMap = { customer: 'com.wasaly.customer', driver: 'com.wasaly.driver', restaurant: 'com.wasaly.restaurant', restaurant_owner: 'com.wasaly.restaurant', admin: 'com.wasaly.admin' };
+    const byBundle = {};
+    for (const u of users) {
+      if (!u.fcm_token) continue;
+      const b = bundleMap[u.role] || 'com.wasaly.customer';
+      (byBundle[b] = byBundle[b] || []).push(u.fcm_token);
+    }
+    for (const [bundleId, toks] of Object.entries(byBundle)) {
+      for (let i = 0; i < toks.length; i += 100) {
+        await sendFCM(toks.slice(i, i + 100), title, body, { type: 'broadcast' }, bundleId);
+      }
     }
     res.json({ success: true, recipients: users.length });
   } catch (e) {
