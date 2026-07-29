@@ -307,6 +307,18 @@ export default function HomeScreen() {
           </ScrollView>
         </View>
 
+        {/* 👥 طلب جماعي */}
+        <TouchableOpacity
+          onPress={() => navigation.navigate('GroupOrder')}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.primary, marginHorizontal: 16, marginBottom: 12, borderRadius: 16, padding: 14 }}>
+          <Text style={{ fontSize: 24 }}>🧑‍🤝‍🧑</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 15 }}>اطلبوا سوا — كسر الحساب</Text>
+            <Text style={{ color: '#FFF', opacity: 0.85, fontSize: 11, marginTop: 2 }}>عندك كود مجموعة؟ انضم واطلبوا مع بعض</Text>
+          </View>
+          <Ionicons name="chevron-back" size={20} color="#FFF" />
+        </TouchableOpacity>
+
         <View style={s.divider} />
 
         {/* فرز المطاعم + فاجئني + المفتوحة الآن */}

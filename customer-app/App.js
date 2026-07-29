@@ -44,6 +44,7 @@ import MarketScreen from './src/screens/MarketScreen';
 import PaymentWebViewScreen from './src/screens/PaymentWebViewScreen';
 import CategoryScreen from './src/screens/CategoryScreen';
 import SupportChatScreen from './src/screens/SupportChatScreen';
+import GroupOrderScreen from './src/screens/GroupOrderScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -97,6 +98,7 @@ function AppNavigator() {
           <Stack.Screen name="PaymentWebView" component={PaymentWebViewScreen} />
           <Stack.Screen name="Category" component={CategoryScreen} />
           <Stack.Screen name="SupportChat" component={SupportChatScreen} />
+          <Stack.Screen name="GroupOrder" component={GroupOrderScreen} />
         </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} />

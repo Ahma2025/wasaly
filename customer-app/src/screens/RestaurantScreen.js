@@ -17,6 +17,8 @@ export default function RestaurantScreen() {
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   const { user } = useAuth();
   const { addItem, count, total, clearAndAdd } = useCart();
+  const groupId = route.params?.groupId;      // وضع الطلب الجماعي (إن وُجد)
+  const groupCode = route.params?.groupCode;
   const [restaurant, setRestaurant] = useState(null);
   const [menu, setMenu] = useState([]);
   const [activeCategory, setActiveCategory] = useState(0);
@@ -83,9 +85,32 @@ export default function RestaurantScreen() {
     return extra;
   };
 
-  const confirmAddItem = () => {
+  const createGroup = async () => {
+    try {
+      const r = await api.post('/group-orders', { restaurant_id: restaurant.id, restaurant_name: restaurant.name_ar });
+      const g = r.data || r;
+      navigation.navigate('GroupOrder', { code: g.code });
+    } catch { Alert.alert('خطأ', 'تعذّر بدء المجموعة، حاول مرة ثانية'); }
+  };
+
+  const confirmAddItem = async () => {
     if (!selectedItem) return;
     const addonsFlat = Object.entries(selectedAddons).flatMap(([group, items]) => items.map(a => ({ group, ...a })));
+    // وضع المجموعة: نضيف الصنف للمجموعة بدل السلّة المحلية
+    if (groupId) {
+      try {
+        await api.post(`/group-orders/${groupId}/items`, {
+          menu_item_id: selectedItem.id,
+          name: selectedItem.name_ar,
+          image: selectedItem.image,
+          price: parseFloat(selectedItem.discount_price || selectedItem.price || 0),
+          quantity: 1,
+          options: addonsFlat,
+        });
+        setSelectedItem(null);
+      } catch { Alert.alert('خطأ', 'تعذّر إضافة الصنف للمجموعة'); }
+      return;
+    }
     // نخزّن السعر الأساسي فقط؛ الإضافات تُحسب مرة واحدة في CartContext/CartScreen (تجنّب الحساب المزدوج)
     const itemWithAddons = { ...selectedItem, addons: addonsFlat };
     const result = addItem(itemWithAddons, restaurant);
@@ -164,6 +189,23 @@ export default function RestaurantScreen() {
           </View>
         )}
 
+        {/* 👥 الطلب الجماعي */}
+        {groupId ? (
+          <TouchableOpacity style={styles.groupModeBanner} onPress={() => navigation.navigate('GroupOrder', { code: groupCode })}>
+            <Text style={styles.groupModeTxt}>🧑‍🤝‍🧑 أنت تضيف لمجموعة {groupCode} — اضغط للرجوع</Text>
+            <Ionicons name="arrow-back" size={16} color="#FFF" />
+          </TouchableOpacity>
+        ) : restaurant.is_open && (
+          <TouchableOpacity style={styles.groupCta} onPress={createGroup}>
+            <Text style={{ fontSize: 22 }}>🧑‍🤝‍🧑</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.groupCtaTitle}>اطلبوا سوا — كسر الحساب</Text>
+              <Text style={styles.groupCtaSub}>افتح مجموعة، وكل واحد يزيد أكله والحساب بينقسم</Text>
+            </View>
+            <Ionicons name="chevron-back" size={20} color={COLORS.primary} />
+          </TouchableOpacity>
+        )}
+
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryTabs}>
           {menu.map((cat, idx) => (
             <TouchableOpacity key={cat.id} style={[styles.catTab, activeCategory === idx && styles.catTabActive]} onPress={() => setActiveCategory(idx)}>
@@ -202,7 +244,12 @@ export default function RestaurantScreen() {
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {count > 0 && <CartBar count={count} total={total} onPress={() => navigation.navigate('سلتي')} />}
+      {groupId ? (
+        <TouchableOpacity style={styles.groupReturnBar} onPress={() => navigation.navigate('GroupOrder', { code: groupCode })}>
+          <Ionicons name="checkmark-circle" size={20} color="#FFF" />
+          <Text style={styles.groupReturnTxt}>خلّصت؟ ارجع للمجموعة</Text>
+        </TouchableOpacity>
+      ) : count > 0 && <CartBar count={count} total={total} onPress={() => navigation.navigate('سلتي')} />}
 
       <Modal visible={!!selectedItem} animationType="slide" transparent onRequestClose={() => setSelectedItem(null)}>
         <Pressable style={styles.modalOverlay} onPress={() => setSelectedItem(null)} />
@@ -279,6 +326,13 @@ const makeStyles = (COLORS) => StyleSheet.create({
   minOrder: { fontSize: 11, color: COLORS.primary, marginTop: 4, fontWeight: '600' },
   closedBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FFF0EE', marginHorizontal: 16, marginTop: -8, marginBottom: 4, borderRadius: 14, paddingVertical: 12, borderWidth: 1, borderColor: '#FFD5CE' },
   closedBannerTxt: { color: '#FF3B30', fontWeight: '800', fontSize: 14 },
+  groupCta: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: COLORS.tint, marginHorizontal: 16, marginBottom: 8, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#FFE0CC' },
+  groupCtaTitle: { fontSize: 14, fontWeight: '900', color: COLORS.primary },
+  groupCtaSub: { fontSize: 11, color: COLORS.gray, marginTop: 2 },
+  groupModeBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.primary, marginHorizontal: 16, marginBottom: 8, borderRadius: 14, paddingVertical: 12 },
+  groupModeTxt: { color: '#FFF', fontWeight: '800', fontSize: 13 },
+  groupReturnBar: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.primary, paddingVertical: 16, paddingBottom: 24 },
+  groupReturnTxt: { color: '#FFF', fontWeight: '900', fontSize: 16 },
   categoryTabs: { paddingHorizontal: 16, marginBottom: 8 },
   catTab: { paddingHorizontal: 16, paddingVertical: 9, marginRight: 8, borderRadius: 22, backgroundColor: COLORS.card, borderWidth: 1.5, borderColor: COLORS.border },
   catTabActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary, elevation: 3, shadowColor: COLORS.primary, shadowOpacity: 0.35, shadowRadius: 7, shadowOffset: { width: 0, height: 3 } },

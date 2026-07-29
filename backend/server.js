@@ -15,6 +15,10 @@ async function runMigrations() {
     `CREATE TABLE IF NOT EXISTS support_chat (id SERIAL PRIMARY KEY, user_id TEXT, sender TEXT, message TEXT, is_read BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE INDEX IF NOT EXISTS support_chat_user_idx ON support_chat(user_id)`,
     `ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS commission_rate NUMERIC DEFAULT 15`,
+    // 👥 الطلب الجماعي "كسر الحساب"
+    `CREATE TABLE IF NOT EXISTS group_orders (id SERIAL PRIMARY KEY, code TEXT UNIQUE, host_id TEXT, restaurant_id TEXT, restaurant_name TEXT, status TEXT DEFAULT 'open', order_id TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS group_order_items (id SERIAL PRIMARY KEY, group_id INTEGER, user_id TEXT, user_name TEXT, menu_item_id TEXT, name TEXT, price NUMERIC DEFAULT 0, image TEXT, quantity INTEGER DEFAULT 1, options TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE INDEX IF NOT EXISTS group_order_items_group_idx ON group_order_items(group_id)`,
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); } catch (e) { /* column already exists */ }
@@ -94,6 +98,7 @@ app.use('/api/categories', require('./routes/categories'));
 app.use('/api/banners', require('./routes/banners'));
 app.use('/api/wallet', require('./routes/wallet'));
 app.use('/api/support', require('./routes/support'));
+app.use('/api/group-orders', require('./routes/group-orders'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/upload', require('./routes/upload'));
 app.use('/api/payments', require('./routes/payments'));
