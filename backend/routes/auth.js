@@ -8,22 +8,25 @@ const { auth } = require('../middleware/auth');
 const generateToken = (user) =>
   jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE || '30d' });
 
-// TEMP DEBUG: echo back what was received
-const lastAttempts = [];
-router.post('/debug-login', (req, res) => {
-  const entry = { time: new Date().toISOString(), body: req.body, chars: {} };
-  if (req.body.phone) {
-    entry.chars = [...req.body.phone].map(c => ({ char: c, code: c.charCodeAt(0) }));
-  }
-  lastAttempts.unshift(entry);
-  if (lastAttempts.length > 5) lastAttempts.pop();
-  res.json({ received: req.body, charCodes: entry.chars });
-});
-router.get('/debug-login', (req, res) => res.json({ lastAttempts }));
-router.get('/debug-users', async (req, res) => {
-  const { rows } = await pool.query("SELECT id, phone, role, is_active, is_blocked FROM users WHERE phone LIKE '0599039%'");
-  res.json(rows);
-});
+// ─── حماية ضد التخمين (brute-force) — عدّاد محاولات فاشلة في الذاكرة ───
+const _failMap = new Map(); // key → { count, first }
+function _tooMany(key, max, windowMs) {
+  const rec = _failMap.get(key);
+  if (!rec || Date.now() - rec.first > windowMs) return false;
+  return rec.count >= max;
+}
+function _recordFail(key, windowMs) {
+  const rec = _failMap.get(key);
+  if (!rec || Date.now() - rec.first > windowMs) _failMap.set(key, { count: 1, first: Date.now() });
+  else rec.count++;
+}
+function _clearFail(key) { _failMap.delete(key); }
+// تنظيف دوري لمنع تضخّم الذاكرة
+const _cleanupTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of _failMap) if (now - v.first > 30 * 60 * 1000) _failMap.delete(k);
+}, 15 * 60 * 1000);
+if (_cleanupTimer.unref) _cleanupTimer.unref();
 
 // Send OTP
 router.post('/send-otp', async (req, res) => {
@@ -61,11 +64,20 @@ router.post('/verify-otp', async (req, res) => {
   try {
     const { phone, code, name } = req.body;
 
+    const otpKey = 'otp:' + phone;
+    if (_tooMany(otpKey, 6, 10 * 60 * 1000)) {
+      return res.status(429).json({ success: false, message: 'محاولات كثيرة، انتظر 10 دقائق ثم حاول مجدداً' });
+    }
+
     const { rows: otpRows } = await pool.query(
       'SELECT * FROM otp_codes WHERE phone=$1 AND code=$2 AND used=false AND expires_at > NOW()',
       [phone, code]
     );
-    if (!otpRows[0]) return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
+    if (!otpRows[0]) {
+      _recordFail(otpKey, 10 * 60 * 1000);
+      return res.status(400).json({ success: false, message: 'رمز غير صحيح أو منتهي الصلاحية' });
+    }
+    _clearFail(otpKey);
 
     await pool.query('UPDATE otp_codes SET used=true WHERE id=$1', [otpRows[0].id]);
 
@@ -131,17 +143,20 @@ router.post('/register', async (req, res) => {
 router.post('/login-password', async (req, res) => {
   try {
     let { phone, password, role } = req.body;
-    console.log('[LOGIN] raw phone:', JSON.stringify(phone), 'role:', role);
     // Normalize phone: remove all non-digit chars, convert Arabic-Indic numerals
     if (phone) phone = phone.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
-    console.log('[LOGIN] normalized phone:', phone);
+    const pwKey = 'pw:' + phone;
+    if (_tooMany(pwKey, 8, 10 * 60 * 1000)) {
+      return res.status(429).json({ success: false, message: 'محاولات كثيرة، انتظر 10 دقائق ثم حاول مجدداً' });
+    }
     // Match by phone only — role check removed so any account can login to any app
     const { rows } = await pool.query('SELECT * FROM users WHERE phone=$1 AND is_active=true', [phone]);
     const user = rows[0];
-    if (!user || !user.password_hash) return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' });
+    if (!user || !user.password_hash) { _recordFail(pwKey, 10 * 60 * 1000); return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' }); }
     const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' });
+    if (!valid) { _recordFail(pwKey, 10 * 60 * 1000); return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' }); }
     if (user.is_blocked) return res.status(403).json({ success: false, message: 'الحساب محظور' });
+    _clearFail(pwKey);
     res.json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
   } catch (e) {
     console.error(e.message);

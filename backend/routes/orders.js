@@ -321,7 +321,7 @@ router.get('/:id', auth, async (req, res) => {
   try {
     const { rows: orders } = await pool.query(
       `SELECT o.*, r.name_ar as restaurant_name, r.logo, r.lat as restaurant_lat, r.lng as restaurant_lng,
-              r.phone as restaurant_phone, u.name as driver_name, u.phone as driver_phone,
+              r.phone as restaurant_phone, r.owner_id as restaurant_owner_id, u.name as driver_name, u.phone as driver_phone,
               d.current_lat as driver_lat, d.current_lng as driver_lng, d.vehicle_type, d.vehicle_plate,
               cu.phone as customer_phone, cu.name as customer_name
        FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
@@ -331,6 +331,14 @@ router.get('/:id', auth, async (req, res) => {
       [req.params.id]
     );
     if (!orders[0]) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
+    // 🔒 فحص الملكية — فقط صاحب الطلب، أو السائق المكلّف، أو صاحب المطعم، أو الإدارة
+    const _o = orders[0];
+    const _uid = String(req.user.id);
+    const _authorized = req.user.role === 'admin'
+      || String(_o.customer_id) === _uid
+      || (_o.driver_id && String(_o.driver_id) === _uid)
+      || (_o.restaurant_owner_id && String(_o.restaurant_owner_id) === _uid);
+    if (!_authorized) return res.status(403).json({ success: false, message: 'غير مصرح بعرض هذا الطلب' });
     const { rows: items } = await pool.query('SELECT * FROM order_items WHERE order_id=$1', [req.params.id]);
     res.json({ success: true, data: { ...orders[0], items } });
   } catch (e) {
@@ -345,6 +353,14 @@ router.patch('/:id/confirm', auth, async (req, res) => {
     const { rows: orders } = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
     const order = orders[0];
     if (!order) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
+
+    // 🔒 فقط صاحب المطعم (أو الإدارة) يقدر يقبل الطلب
+    if (req.user.role !== 'admin') {
+      const { rows: rest } = await pool.query('SELECT owner_id FROM restaurants WHERE id=$1', [order.restaurant_id]);
+      if (!rest[0] || String(rest[0].owner_id) !== String(req.user.id)) {
+        return res.status(403).json({ success: false, message: 'غير مصرح' });
+      }
+    }
 
     await pool.query(
       `UPDATE orders SET status='confirmed', restaurant_accepted_at=NOW(), updated_at=NOW() WHERE id=$1`,
