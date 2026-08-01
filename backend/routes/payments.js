@@ -111,21 +111,8 @@ router.post('/webhook', async (req, res) => {
   }
 });
 
-// Add wallet balance
-router.post('/wallet/topup', auth, async (req, res) => {
-  try {
-    const { amount } = req.body;
-    await pool.query('UPDATE users SET wallet_balance = wallet_balance + $1 WHERE id=$2', [amount, req.user.id]);
-    await pool.query(
-      `INSERT INTO wallet_transactions (user_id, type, amount, description)
-       VALUES ($1,'credit',$2,'شحن المحفظة')`,
-      [req.user.id, amount]
-    );
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
-  }
-});
+// ⚠️ أُزيلت نقطة "شحن المحفظة" المباشرة — كانت تسمح بإضافة رصيد بدون دفع فعلي (ثغرة أموال مجانية).
+// أي شحن مستقبلي يجب أن يمرّ عبر دفع مُتحقَّق من Lahza (server-to-server) قبل إضافة الرصيد.
 
 // Wallet transactions
 router.get('/wallet/transactions', auth, async (req, res) => {

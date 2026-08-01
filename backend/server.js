@@ -101,7 +101,10 @@ app.get('/portal/*', (req, res) => res.sendFile(path.join(portalDist, 'index.htm
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(err.status || 500).json({ success: false, message: err.message || 'Server Error' });
+  const status = err.status || 500;
+  // بالإنتاج لا نكشف تفاصيل الأخطاء الداخلية (5xx) للعميل
+  const message = status < 500 ? (err.message || 'خطأ في الطلب') : 'حدث خطأ في الخادم';
+  res.status(status).json({ success: false, message });
 });
 
 const PORT = process.env.PORT || 5000;
