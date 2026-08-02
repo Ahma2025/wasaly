@@ -53,5 +53,11 @@
 	<string>نحتاج موقعك لتحديد موقع مطعمك على الخريطة</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>نحتاج موقعك لتحديد موقع مطعمك على الخريطة</string>
+	<key>NSCameraUsageDescription</key>
+	<string>نحتاج إذن الكاميرا لالتقاط صور الأصناف والمطعم</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>نحتاج إذن الصور لاختيار صور الأصناف والمطعم من معرض الصور</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>نحتاج الإذن لحفظ الصور في معرض الصور</string>
 </dict>
 </plist>

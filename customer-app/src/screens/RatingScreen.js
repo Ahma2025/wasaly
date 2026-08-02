@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Image, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { pickImage } from '../utils/pickImage';
 import api from '../utils/api';
 import { useTheme } from '../context/ThemeContext';
 
@@ -19,13 +20,11 @@ export default function RatingScreen({ route, navigation }) {
   const addPhoto = async () => {
     if (images.length >= 3) return Alert.alert('تنبيه', 'حد أقصى 3 صور');
     try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) return Alert.alert('تنبيه', 'نحتاج إذن الصور');
-      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.6 });
-      if (res.canceled || !res.assets?.[0]) return;
+      const asset = await pickImage({ quality: 0.6 });
+      if (!asset) return;
       setUploading(true);
       const form = new FormData();
-      form.append('file', { uri: res.assets[0].uri, name: 'review.jpg', type: 'image/jpeg' });
+      form.append('file', { uri: asset.uri, name: 'review.jpg', type: 'image/jpeg' });
       const up = await api.post('/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } });
       if (up.url) setImages(arr => [...arr, up.url]);
     } catch { Alert.alert('خطأ', 'فشل رفع الصورة'); }

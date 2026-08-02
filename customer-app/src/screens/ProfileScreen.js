@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Switch, Share, Linking, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { pickImage } from '../utils/pickImage';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -30,12 +31,9 @@ export default function ProfileScreen({ navigation }) {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const pickAvatar = async () => {
     try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) return Alert.alert('تنبيه', 'نحتاج إذن الصور');
-      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.6 });
-      if (res.canceled || !res.assets?.[0]) return;
+      const asset = await pickImage({ allowsEditing: true, aspect: [1, 1], quality: 0.6 });
+      if (!asset) return;
       setUploadingAvatar(true);
-      const asset = res.assets[0];
       const form = new FormData();
       form.append('file', { uri: asset.uri, name: 'avatar.jpg', type: 'image/jpeg' });
       const up = await api.post('/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } });

@@ -45,5 +45,11 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>نحتاج إذن الكاميرا لالتقاط صور الإعلانات والمحتوى</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>نحتاج إذن الصور لاختيار الصور من معرض الصور</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>نحتاج الإذن لحفظ الصور في معرض الصور</string>
 </dict>
 </plist>

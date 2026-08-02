@@ -12,6 +12,7 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
+        "CAMERA",
         "VIBRATE",
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED"
@@ -29,6 +30,10 @@
     "plugins": [
       ["expo-location", {
         "locationAlwaysAndWhenInUsePermission": "نحتاج موقعك لتوصيل الطلبات"
+      }],
+      ["expo-image-picker", {
+        "photosPermission": "نحتاج إذن الصور لاختيار صورة من معرض الصور",
+        "cameraPermission": "نحتاج إذن الكاميرا لالتقاط صورة"
       }],
       ["expo-notifications", {
         "icon": "./assets/icon.png",
