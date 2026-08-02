@@ -34,6 +34,7 @@ const morgan = require('morgan');
 const path = require('path');
 
 const app = express();
+app.set('trust proxy', 1); // خلف بروكسي Railway — نقرأ IP العميل الحقيقي من X-Forwarded-For
 const server = http.createServer(app);
 
 const io = new Server(server, {
@@ -47,6 +48,25 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// 🛡️ حدّ معدّل الطلبات لكل IP — حماية ضد الإغراق (DoS) والسحب والتخمين الآلي
+const _rl = new Map(); // ip → { count, reset }
+const RL_MAX = 300, RL_WINDOW = 60 * 1000; // 300 طلب/دقيقة — أكثر بكثير من أي استخدام طبيعي
+app.use((req, res, next) => {
+  if (req.path === '/health') return next();
+  const ip = req.ip || 'unknown';
+  const now = Date.now();
+  let r = _rl.get(ip);
+  if (!r || now > r.reset) { r = { count: 0, reset: now + RL_WINDOW }; _rl.set(ip, r); }
+  r.count++;
+  if (r.count > RL_MAX) {
+    res.set('Retry-After', String(Math.ceil((r.reset - now) / 1000)));
+    return res.status(429).json({ success: false, message: 'طلبات كثيرة، انتظر قليلاً' });
+  }
+  next();
+});
+const _rlCleanup = setInterval(() => { const now = Date.now(); for (const [k, v] of _rl) if (now > v.reset) _rl.delete(k); }, 2 * 60 * 1000);
+if (_rlCleanup.unref) _rlCleanup.unref();
 
 // Socket.io
 require('./utils/socket')(io);
