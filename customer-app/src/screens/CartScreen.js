@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, Keyboard } from 'react-native';
 import DismissKeyboard from '../components/DismissKeyboard';
+import PressableScale from '../components/PressableScale';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
@@ -499,12 +500,12 @@ export default function CartScreen() {
         <View style={{ height: 110 }} />
       </ScrollView>
 
-      <TouchableOpacity style={[styles.orderBtn, loading && { opacity: 0.7 }]} onPress={placeOrder} disabled={loading}>
+      <PressableScale style={[styles.orderBtn, loading && { opacity: 0.7 }]} onPress={placeOrder} disabled={loading}>
         {loading
           ? <ActivityIndicator color="#FFF" />
           : <Text style={styles.orderBtnText}>تأكيد الطلب • {finalTotal.toFixed(2)}₪</Text>
         }
-      </TouchableOpacity>
+      </PressableScale>
     </View>
     </DismissKeyboard>
   );

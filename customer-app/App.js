@@ -3,10 +3,36 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { View, ActivityIndicator, Text, ScrollView, Keyboard, Platform, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, Text, TextInput, ScrollView, Keyboard, Platform, TouchableOpacity, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Notifications from 'expo-notifications';
+import { useFonts, Cairo_400Regular, Cairo_500Medium, Cairo_600SemiBold, Cairo_700Bold, Cairo_800ExtraBold } from '@expo-google-fonts/cairo';
 import SplashScreen from './src/components/SplashScreen';
+
+// خريطة الأوزان → عائلة Cairo المناسبة (عشان الخط يبان صح مع كل fontWeight)
+const WEIGHT_MAP = {
+  '400': 'Cairo_400Regular', 'normal': 'Cairo_400Regular',
+  '500': 'Cairo_500Medium', '600': 'Cairo_600SemiBold',
+  '700': 'Cairo_700Bold', 'bold': 'Cairo_700Bold',
+  '800': 'Cairo_800ExtraBold', '900': 'Cairo_800ExtraBold',
+};
+let _fontPatched = false;
+function applyGlobalFont() {
+  if (_fontPatched) return;
+  _fontPatched = true;
+  const patch = (Comp) => {
+    const orig = Comp.render;
+    Comp.render = function (...args) {
+      const el = orig.apply(this, args);
+      if (!el || !el.props) return el;
+      const flat = StyleSheet.flatten(el.props.style) || {};
+      const w = flat.fontWeight ? String(flat.fontWeight) : '400';
+      const fam = flat.fontFamily || WEIGHT_MAP[w] || 'Cairo_400Regular';
+      return React.cloneElement(el, { style: [{ fontFamily: fam }, el.props.style, { fontWeight: undefined }] });
+    };
+  };
+  try { patch(Text); patch(TextInput); } catch {}
+}
 
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
@@ -174,6 +200,10 @@ function MainApp() {
 
 export default function App() {
   const [splashDone, setSplashDone] = useState(false);
+  const [fontsLoaded] = useFonts({
+    Cairo_400Regular, Cairo_500Medium, Cairo_600SemiBold, Cairo_700Bold, Cairo_800ExtraBold,
+  });
+  if (fontsLoaded) applyGlobalFont();
 
   if (!splashDone) {
     return (

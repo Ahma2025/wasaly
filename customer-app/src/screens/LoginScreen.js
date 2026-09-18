@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert, ScrollView } from 'react-native';
+import PressableScale from '../components/PressableScale';
 import DismissKeyboard from '../components/DismissKeyboard';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
@@ -76,10 +77,10 @@ export default function LoginScreen() {
           <TextInput style={styles.input} placeholder="رقم الهاتف" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
           <TextInput style={styles.input} placeholder="كلمة المرور" secureTextEntry value={password} onChangeText={setPassword} />
 
-          <TouchableOpacity style={[styles.btn, loading && { opacity: 0.7 }]}
+          <PressableScale style={[styles.btn, loading && { opacity: 0.7 }]}
             onPress={tab === 'login' ? handleLogin : handleRegister} disabled={loading}>
             <Text style={styles.btnText}>{loading ? 'جاري التحميل...' : tab === 'login' ? 'دخول' : 'إنشاء الحساب'}</Text>
-          </TouchableOpacity>
+          </PressableScale>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

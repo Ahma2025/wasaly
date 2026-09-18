@@ -7,6 +7,7 @@ import { readCache, writeCache } from '../utils/cache';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import ItemCard from '../components/ItemCard';
+import PressableScale from '../components/PressableScale';
 import CartBar from '../components/CartBar';
 import { useTheme } from '../context/ThemeContext';
 
@@ -300,10 +301,10 @@ export default function RestaurantScreen() {
           </ScrollView>
 
           <View style={styles.sheetFooter}>
-            <TouchableOpacity style={styles.addBtn} onPress={confirmAddItem}>
+            <PressableScale style={styles.addBtn} onPress={confirmAddItem}>
               <Text style={styles.addBtnText}>إضافة للسلة</Text>
               <Text style={styles.addBtnPrice}>{(parseFloat(selectedItem?.price || 0) + getAddonPrice()).toFixed(2)}₪</Text>
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </View>
       </Modal>
