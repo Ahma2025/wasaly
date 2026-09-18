@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 
 const roleLabel = { customer: 'زبون', restaurant: 'مطعم', driver: 'مندوب', admin: 'مدير' };
@@ -11,10 +12,10 @@ const roleColor = {
 };
 
 export default function Users() {
-  const [users, setUsers] = useState([]);
+  const [users, setUsers] = useState(readCache('adm_users') || []);
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!readCache('adm_users'));
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ name: '', phone: '', password: '', role: 'driver', city: '' });
   const [creating, setCreating] = useState(false);
@@ -30,7 +31,7 @@ export default function Users() {
     setLoading(true);
     try {
       const data = await api.get('/admin/users', { params: { search, role, limit: 50 } });
-      setUsers(data.data || []);
+      setUsers(data.data || []); writeCache('adm_users', data.data || []);
     } catch { toast.error('خطأ في تحميل المستخدمين'); }
     finally { setLoading(false); }
   };

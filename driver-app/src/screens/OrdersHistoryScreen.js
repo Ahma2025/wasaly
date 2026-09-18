@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA', green: '#34C759' };
 
@@ -10,13 +11,22 @@ export default function OrdersHistoryScreen() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
 
-  useEffect(() => { fetchOrders(); }, [page]);
+  useEffect(() => {
+    (async () => {
+      if (page === 1) {
+        const cached = await readCache('driver_orders');
+        if (cached) { setOrders(cached); setLoading(false); }
+      }
+      fetchOrders();
+    })();
+  }, [page]);
 
   const fetchOrders = async () => {
     try {
       const data = await api.get(`/drivers/orders?page=${page}&limit=20`);
       const newOrders = data.data || [];
       setOrders(prev => page === 1 ? newOrders : [...prev, ...newOrders]);
+      if (page === 1) writeCache('driver_orders', newOrders);
       if (newOrders.length < 20) setHasMore(false);
     } catch {} finally { setLoading(false); }
   };

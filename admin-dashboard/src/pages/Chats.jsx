@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 
 export default function Chats() {
-  const [convos, setConvos] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [convos, setConvos] = useState(readCache('adm_convos') || []);
+  const [loading, setLoading] = useState(!readCache('adm_convos'));
   const [active, setActive] = useState(null); // {user_id, name, role_ar}
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const endRef = useRef(null);
 
-  const loadConvos = () => api.get('/support/chat/conversations').then(r => setConvos(r.data || [])).catch(() => toast.error('فشل التحميل')).finally(() => setLoading(false));
+  const loadConvos = () => api.get('/support/chat/conversations').then(r => { setConvos(r.data || []); writeCache('adm_convos', r.data || []); }).catch(() => toast.error('فشل التحميل')).finally(() => setLoading(false));
   useEffect(() => { loadConvos(); const t = setInterval(loadConvos, 6000); return () => clearInterval(t); }, []);
 
   const loadThread = (uid) => api.get(`/support/chat/user/${uid}`).then(r => setMessages(r.data || [])).catch(() => {});

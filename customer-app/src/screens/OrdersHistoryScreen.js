@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, A
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import { useCart } from '../context/CartContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -28,7 +29,13 @@ export default function OrdersHistoryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [reordering, setReordering] = useState(null);
 
-  useFocusEffect(useCallback(() => { fetchOrders(); }, []));
+  useFocusEffect(useCallback(() => {
+    (async () => {
+      const cached = await readCache('orders_my');
+      if (cached) { setOrders(cached); setLoading(false); }
+      fetchOrders();
+    })();
+  }, []));
 
   const handleReorder = async (order) => {
     setReordering(order.id);
@@ -58,7 +65,9 @@ export default function OrdersHistoryScreen() {
   const fetchOrders = async () => {
     try {
       const data = await api.get('/orders/my');
-      setOrders(data.data || data || []);
+      const list = data.data || data || [];
+      setOrders(list);
+      writeCache('orders_my', list);
     } catch {}
     finally { setLoading(false); setRefreshing(false); }
   };

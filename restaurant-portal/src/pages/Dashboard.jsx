@@ -1,19 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 
 export default function Dashboard() {
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('week'); // week | month
   const restaurant = JSON.parse(localStorage.getItem('restaurant') || '{}');
+  const cachedStats = readCache('rest_stats_' + restaurant.id);
+  const [stats, setStats] = useState(cachedStats || null);
+  const [loading, setLoading] = useState(!cachedStats);
+  const [view, setView] = useState('week'); // week | month
 
   useEffect(() => {
     if (!restaurant.id) return setLoading(false);
     api.get(`/restaurants/${restaurant.id}/stats`)
-      .then(r => setStats(r.data))
-      .catch(e => { console.error(e); toast.error('فشل تحميل البيانات'); })
+      .then(r => { setStats(r.data); writeCache('rest_stats_' + restaurant.id, r.data); })
+      .catch(e => { console.error(e); if (!cachedStats) toast.error('فشل تحميل البيانات'); })
       .finally(() => setLoading(false));
   }, []);
 

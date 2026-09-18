@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 
 const STATUS = {
   pending:    { l: 'قيد الانتظار', c: 'bg-yellow-100 text-yellow-700' },
@@ -14,11 +15,11 @@ export default function LiveOps() {
   const mapRef = useRef(null);
   const layerRef = useRef(null);
   const fittedRef = useRef(false);
-  const [data, setData] = useState({ orders: [], drivers: [] });
+  const [data, setData] = useState(readCache('adm_liveops') || { orders: [], drivers: [] });
   const [failed, setFailed] = useState(false);
 
   const load = () => api.get('/admin/live-ops')
-    .then(r => setData({ orders: r.orders || [], drivers: r.drivers || [] }))
+    .then(r => { const d={ orders: r.orders || [], drivers: r.drivers || [] }; setData(d); writeCache('adm_liveops', d); })
     .catch(() => {});
 
   // init map (Leaflet from CDN)

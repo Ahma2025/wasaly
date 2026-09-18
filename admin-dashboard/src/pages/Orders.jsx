@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 
 const STATUS_LABELS = { pending: 'انتظار', confirmed: 'مؤكد', preparing: 'تحضير', ready: 'جاهز', picked_up: 'مع السائق', delivered: 'تم التوصيل', cancelled: 'ملغي' };
 const STATUS_COLORS = { pending: 'bg-yellow-100 text-yellow-700', confirmed: 'bg-blue-100 text-blue-700', preparing: 'bg-purple-100 text-purple-700', ready: 'bg-cyan-100 text-cyan-700', picked_up: 'bg-orange-100 text-orange-700', delivered: 'bg-green-100 text-green-700', cancelled: 'bg-red-100 text-red-700' };
 
 export default function AdminOrders() {
-  const [orders, setOrders] = useState([]);
+  const [orders, setOrders] = useState(readCache('adm_orders') || []);
   const [status, setStatus] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!readCache('adm_orders'));
   const [selected, setSelected] = useState(null);
 
   useEffect(() => { fetchOrders(); }, [status]);
@@ -17,7 +18,7 @@ export default function AdminOrders() {
     setLoading(true);
     try {
       const data = await api.get(`/admin/orders?status=${status}&limit=50`);
-      setOrders(data.data || []);
+      setOrders(data.data || []); writeCache('adm_orders', data.data || []);
     } catch { toast.error('خطأ'); }
     finally { setLoading(false); }
   };

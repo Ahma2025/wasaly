@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 import OrderMap from '../components/OrderMap';
 import { showBrowserNotification } from '../utils/pushNotifications';
@@ -79,6 +80,9 @@ export default function Orders() {
 
   const fetchOrders = async () => {
     if (!restaurant.id) return setLoading(false);
+    const ckey = 'rest_orders_' + restaurant.id + '_' + filter;
+    const cached = readCache(ckey);
+    if (cached) { setOrders(cached); setLoading(false); }
     try {
       const statusMap = {
         active: 'pending,confirmed,preparing',
@@ -88,7 +92,8 @@ export default function Orders() {
       const statusParam = statusMap[filter] || '';
       const r = await api.get(`/restaurants/${restaurant.id}/orders${statusParam ? `?status=${statusParam}` : ''}`);
       setOrders(r.data || []);
-    } catch { toast.error('فشل تحميل الطلبات'); }
+      writeCache(ckey, r.data || []);
+    } catch { if (!cached) toast.error('فشل تحميل الطلبات'); }
     finally { setLoading(false); }
   };
 

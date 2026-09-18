@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import * as Location from 'expo-location';
 import BannerSlider from '../components/BannerSlider';
 import SkeletonCard from '../components/SkeletonCard';
@@ -172,7 +173,20 @@ export default function HomeScreen() {
   const [recentRests, setRecentRests] = useState([]);
   const suggestedRef = useRef(null);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    // اعرض من الكاش فوراً (بدون تحميل) ثم حدّث بالخلفية
+    (async () => {
+      const cached = await readCache('home');
+      if (cached) {
+        if (cached.restaurants) setRestaurants(cached.restaurants);
+        if (cached.categories) setCategories(cached.categories);
+        if (cached.banners) setBanners(cached.banners);
+        if (cached.recentRests) setRecentRests(cached.recentRests);
+        setLoading(false);
+      }
+      load();
+    })();
+  }, []);
 
   // موقع المستخدم لترتيب "الأقرب إليك"
   useEffect(() => {
@@ -188,7 +202,6 @@ export default function HomeScreen() {
   }, []);
 
   const load = async () => {
-    setLoading(true);
     try {
       const [r, c, b] = await Promise.allSettled([
         api.get('/restaurants?limit=60'),
@@ -196,16 +209,18 @@ export default function HomeScreen() {
         api.get('/banners'),
       ]);
       const allRests = r.status === 'fulfilled' ? (r.value?.data || []) : [];
+      const cats = c.status === 'fulfilled' ? (c.value?.data || []) : [];
+      const bans = b.status === 'fulfilled' ? (b.value?.data || []) : [];
       if (r.status === 'fulfilled') setRestaurants(allRests);
-      if (c.status === 'fulfilled') setCategories(c.value?.data || []);
-      if (b.status === 'fulfilled') setBanners(b.value?.data || []);
+      if (c.status === 'fulfilled') setCategories(cats);
+      if (b.status === 'fulfilled') setBanners(bans);
 
       // مطاعم طلبت منها مؤخراً
+      let recent = [];
       try {
         const my = await api.get('/orders/my');
         const orders = my?.data || [];
         const seen = new Set();
-        const recent = [];
         for (const o of orders) {
           if (o.restaurant_id && !seen.has(o.restaurant_id)) {
             seen.add(o.restaurant_id);
@@ -216,6 +231,11 @@ export default function HomeScreen() {
         }
         setRecentRests(recent);
       } catch {}
+
+      // خزّن للعرض الفوري في المرة الجاية
+      if (allRests.length || cats.length || bans.length) {
+        writeCache('home', { restaurants: allRests, categories: cats, banners: bans, recentRests: recent });
+      }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };

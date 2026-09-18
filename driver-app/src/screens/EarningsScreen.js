@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', green: '#34C759', bg: '#F8F9FA' };
 
@@ -11,13 +12,20 @@ export default function EarningsScreen() {
   const [loading, setLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
 
-  useEffect(() => { fetchEarnings(); }, [period]);
+  useEffect(() => {
+    (async () => {
+      const cached = await readCache('driver_earnings_' + period);
+      if (cached) { setData(cached); setLoading(false); }
+      fetchEarnings();
+    })();
+  }, [period]);
 
   const fetchEarnings = async () => {
     setHasError(false);
     try {
       const res = await api.get(`/drivers/earnings?period=${period}`);
       setData(res.data);
+      writeCache('driver_earnings_' + period, res.data);
     } catch (e) {
       console.error('fetchEarnings error:', e);
       setHasError(true);

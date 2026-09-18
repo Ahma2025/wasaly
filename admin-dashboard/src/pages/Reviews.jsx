@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 
 const Stars = ({ n }) => n ? (
@@ -7,13 +8,13 @@ const Stars = ({ n }) => n ? (
 ) : <span className="text-gray-300 text-xs">—</span>;
 
 export default function Reviews() {
-  const [reviews, setReviews] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [reviews, setReviews] = useState(readCache('adm_reviews') || []);
+  const [loading, setLoading] = useState(!readCache('adm_reviews'));
   const [filter, setFilter] = useState('all'); // all | restaurant | driver
 
   useEffect(() => {
     api.get('/reviews/all')
-      .then(r => setReviews(r.data || []))
+      .then(r => { setReviews(r.data || []); writeCache('adm_reviews', r.data || []); })
       .catch(() => toast.error('فشل تحميل التقييمات'))
       .finally(() => setLoading(false));
   }, []);

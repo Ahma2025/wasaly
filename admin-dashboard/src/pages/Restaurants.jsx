@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 
 export default function Restaurants() {
-  const [restaurants, setRestaurants] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [restaurants, setRestaurants] = useState(readCache('adm_restaurants') || []);
+  const [loading, setLoading] = useState(!readCache('adm_restaurants'));
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
@@ -25,7 +26,7 @@ export default function Restaurants() {
   const fetchRestaurants = async () => {
     try {
       const r = await api.get('/admin/restaurants', { params: { search } });
-      setRestaurants(r.data || []);
+      setRestaurants(r.data || []); writeCache('adm_restaurants', r.data || []);
     } catch { toast.error('فشل التحميل'); }
     finally { setLoading(false); }
   };

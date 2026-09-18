@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, ActivityIn
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import { useTheme } from '../context/ThemeContext';
 
 export default function FavoritesScreen() {
@@ -16,12 +17,20 @@ export default function FavoritesScreen() {
   const fetchFavs = async () => {
     try {
       const data = await api.get('/users/favorites');
-      setFavs(data.data || data || []);
+      const list = data.data || data || [];
+      setFavs(list);
+      writeCache('favorites', list);
     } catch {}
     finally { setLoading(false); setRefreshing(false); }
   };
 
-  useFocusEffect(useCallback(() => { fetchFavs(); }, []));
+  useFocusEffect(useCallback(() => {
+    (async () => {
+      const cached = await readCache('favorites');
+      if (cached) { setFavs(cached); setLoading(false); }
+      fetchFavs();
+    })();
+  }, []));
 
   const removeFav = async (id) => {
     setFavs(prev => prev.filter(r => r.id !== id));

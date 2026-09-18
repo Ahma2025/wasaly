@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA', star: '#FFB800' };
 
@@ -14,10 +15,14 @@ export default function ReviewsScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/reviews/driver/me')
-      .then(d => { setList(d.data || []); setAvg(d.avg_rating || 0); setCount(d.count || 0); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    (async () => {
+      const cached = await readCache('driver_reviews');
+      if (cached) { setList(cached.data || []); setAvg(cached.avg || 0); setCount(cached.count || 0); setLoading(false); }
+      api.get('/reviews/driver/me')
+        .then(d => { setList(d.data || []); setAvg(d.avg_rating || 0); setCount(d.count || 0); writeCache('driver_reviews', { data: d.data || [], avg: d.avg_rating || 0, count: d.count || 0 }); })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    })();
   }, []);
 
   return (

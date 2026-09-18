@@ -3,6 +3,7 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, RefreshCon
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import { useTheme } from '../context/ThemeContext';
 
 const { width } = Dimensions.get('window');
@@ -50,12 +51,20 @@ export default function MarketScreen() {
   const [selected, setSelected] = useState('supermarket');
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    (async () => {
+      const cached = await readCache('market');
+      if (cached) setStores(cached);
+      load();
+    })();
+  }, []);
 
   const load = async () => {
     try {
       const r = await api.get('/restaurants?limit=60&store_type=market');
-      setStores(r.data || []);
+      const list = r.data || [];
+      setStores(list);
+      writeCache('market', list);
     } catch (e) { console.error(e); }
   };
 

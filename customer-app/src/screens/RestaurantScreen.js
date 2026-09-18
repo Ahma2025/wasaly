@@ -3,6 +3,7 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Animated, 
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import ItemCard from '../components/ItemCard';
@@ -31,7 +32,11 @@ export default function RestaurantScreen() {
 
   useEffect(() => {
     if (!id) { navigation.goBack(); return; }
-    fetchRestaurant();
+    (async () => {
+      const cached = await readCache('rest_' + id);
+      if (cached) { setRestaurant(cached.restaurant); setMenu(cached.menu); setLoading(false); }
+      fetchRestaurant();
+    })();
   }, [id]);
 
   const fetchRestaurant = async () => {
@@ -56,6 +61,7 @@ export default function RestaurantScreen() {
       }));
       setRestaurant(r);
       setMenu(menu);
+      writeCache('rest_' + id, { restaurant: r, menu });
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };

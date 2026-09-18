@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 
 const StatCard = ({ icon, label, value, sub, color }) => (
@@ -13,12 +14,12 @@ const StatCard = ({ icon, label, value, sub, color }) => (
 );
 
 export default function Dashboard() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(readCache('adm_dashboard') || null);
+  const [loading, setLoading] = useState(!readCache('adm_dashboard'));
 
   useEffect(() => {
     api.get('/admin/dashboard')
-      .then(r => setData(r.data))
+      .then(r => { setData(r.data); writeCache('adm_dashboard', r.data); })
       .catch(e => { console.error(e); toast.error('فشل تحميل البيانات'); })
       .finally(() => setLoading(false));
   }, []);

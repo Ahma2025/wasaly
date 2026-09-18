@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 
 const MAX_KM = 100;
 
 export default function DeliveryZones() {
-  const [zones, setZones] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [zones, setZones] = useState(readCache('adm_zones') || []);
+  const [loading, setLoading] = useState(!readCache('adm_zones'));
   const [editing, setEditing] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [newZone, setNewZone] = useState({ name: '', min_km: '', max_km: '', price: '' });
@@ -17,7 +18,7 @@ export default function DeliveryZones() {
   const fetchZones = async () => {
     try {
       const r = await api.get('/delivery-zones');
-      setZones(r.data || []);
+      setZones(r.data || []); writeCache('adm_zones', r.data || []);
     } catch { toast.error('فشل تحميل المناطق'); }
     finally { setLoading(false); }
   };

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 
 const Stars = ({ n }) => (
@@ -7,15 +8,16 @@ const Stars = ({ n }) => (
 );
 
 export default function Reviews() {
-  const [reviews, setReviews] = useState([]);
-  const [loading, setLoading] = useState(true);
   const restaurant = JSON.parse(localStorage.getItem('restaurant') || '{}');
+  const cachedRev = readCache('rest_reviews_' + restaurant.id);
+  const [reviews, setReviews] = useState(cachedRev || []);
+  const [loading, setLoading] = useState(!cachedRev);
 
   useEffect(() => {
     if (!restaurant.id) return setLoading(false);
     api.get(`/reviews/restaurant/${restaurant.id}`)
-      .then(r => setReviews(r.data || []))
-      .catch(() => toast.error('فشل تحميل التقييمات'))
+      .then(r => { setReviews(r.data || []); writeCache('rest_reviews_' + restaurant.id, r.data || []); })
+      .catch(() => { if (!cachedRev) toast.error('فشل تحميل التقييمات'); })
       .finally(() => setLoading(false));
   }, []);
 

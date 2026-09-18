@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { pickImage } from '../utils/pickImage';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -20,7 +21,11 @@ export default function ProfileScreen({ navigation }) {
   const [notifs, setNotifs] = useState(true);
 
   useEffect(() => {
-    api.get('/users/profile').then(d => { setProfile(d.data); setName(d.data.name); });
+    (async () => {
+      const cached = await readCache('profile');
+      if (cached) { setProfile(cached); setName(cached.name || ''); }
+      try { const d = await api.get('/users/profile'); setProfile(d.data); setName(d.data.name); writeCache('profile', d.data); } catch {}
+    })();
   }, []);
 
   const save = async () => {

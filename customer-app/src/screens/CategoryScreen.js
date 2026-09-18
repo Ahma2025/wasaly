@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../utils/api';
+import { readCache } from '../utils/cache';
 import RestaurantCard from '../components/RestaurantCard';
 import { useTheme } from '../context/ThemeContext';
 
@@ -14,13 +15,13 @@ export default function CategoryScreen({ route, navigation }) {
 
   useEffect(() => {
     const cn = categoryName || '';
-    api.get('/restaurants?limit=100')
-      .then(d => {
-        const all = d.data || [];
-        setList(all.filter(r => (r.menu_cats || []).some(mc => mc && (mc.includes(cn) || cn.includes(mc)))));
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    const applyFilter = (all) => setList((all || []).filter(r => (r.menu_cats || []).some(mc => mc && (mc.includes(cn) || cn.includes(mc)))));
+    (async () => {
+      const cached = await readCache('home'); // نستخدم مطاعم الرئيسية المخزّنة للعرض الفوري
+      if (cached?.restaurants?.length) { applyFilter(cached.restaurants); setLoading(false); }
+      try { const d = await api.get('/restaurants?limit=100'); applyFilter(d.data || []); } catch {}
+      finally { setLoading(false); }
+    })();
   }, [categoryId, categoryName]);
 
   return (

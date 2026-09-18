@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 
 const money = (n) => `${(parseFloat(n) || 0).toFixed(2)}₪`;
 
 export default function Accounting() {
-  const [data, setData] = useState({ totals: {}, restaurants: [], drivers: [] });
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(readCache('adm_accounting') || { totals: {}, restaurants: [], drivers: [] });
+  const [loading, setLoading] = useState(!readCache('adm_accounting'));
   const [rates, setRates] = useState({});
 
   const load = () => api.get('/admin/accounting')
     .then(r => {
-      setData({ totals: r.totals || {}, restaurants: r.restaurants || [], drivers: r.drivers || [] });
+      const d = { totals: r.totals || {}, restaurants: r.restaurants || [], drivers: r.drivers || [] };
+      setData(d); writeCache('adm_accounting', d);
       const rt = {}; (r.restaurants || []).forEach(x => { rt[x.id] = x.commission_rate; });
       setRates(rt);
     })

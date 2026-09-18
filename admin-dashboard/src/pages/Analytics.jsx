@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 
 export default function Analytics() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(readCache('adm_analytics') || null);
+  const [loading, setLoading] = useState(!readCache('adm_analytics'));
 
   useEffect(() => {
-    api.get('/admin/analytics').then(r => setData(r.data)).catch(e => { console.error(e); toast.error('فشل تحميل التحليلات'); }).finally(() => setLoading(false));
+    api.get('/admin/analytics').then(r => { setData(r.data); writeCache('adm_analytics', r.data); }).catch(e => { console.error(e); toast.error('فشل تحميل التحليلات'); }).finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="flex justify-center items-center h-64"><div className="animate-spin h-8 w-8 rounded-full border-b-2 border-orange-500" /></div>;

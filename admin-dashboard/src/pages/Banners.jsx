@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 
 export default function Banners() {
-  const [banners, setBanners] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [banners, setBanners] = useState(readCache('adm_banners') || []);
+  const [loading, setLoading] = useState(!readCache('adm_banners'));
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({ title_ar: '', sort_order: '' });
   const [preview, setPreview] = useState(null);
@@ -16,7 +17,7 @@ export default function Banners() {
   const load = async () => {
     try {
       const r = await api.get('/banners/all');
-      setBanners(r.data || []);
+      setBanners(r.data || []); writeCache('adm_banners', r.data || []);
     } catch {
       // fallback to public endpoint
       try {

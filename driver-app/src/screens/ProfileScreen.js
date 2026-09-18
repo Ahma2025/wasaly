@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import { useAuth } from '../context/AuthContext';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
@@ -13,11 +14,16 @@ export default function ProfileScreen({ navigation }) {
   const [form, setForm] = useState({ name: '', vehicle_type: '', vehicle_plate: '' });
 
   useEffect(() => {
-    api.get('/drivers/me').then(d => {
-      const data = d.data;
-      setProfile(data);
-      setForm({ name: data.name || '', vehicle_type: data.vehicle_type || '', vehicle_plate: data.vehicle_plate || '' });
-    }).catch(() => {});
+    (async () => {
+      const cached = await readCache('driver_profile');
+      if (cached) { setProfile(cached); setForm({ name: cached.name || '', vehicle_type: cached.vehicle_type || '', vehicle_plate: cached.vehicle_plate || '' }); }
+      api.get('/drivers/me').then(d => {
+        const data = d.data;
+        setProfile(data);
+        setForm({ name: data.name || '', vehicle_type: data.vehicle_type || '', vehicle_plate: data.vehicle_plate || '' });
+        writeCache('driver_profile', data);
+      }).catch(() => {});
+    })();
   }, []);
 
   const save = async () => {

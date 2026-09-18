@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 
 export default function Menu() {
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const restaurant = JSON.parse(localStorage.getItem('restaurant') || '{}');
+  const cachedMenu = readCache('rest_menu_' + restaurant.id);
+  const [categories, setCategories] = useState(cachedMenu || []);
+  const [loading, setLoading] = useState(!cachedMenu);
   const [showAddCat, setShowAddCat] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const [expandedCat, setExpandedCat] = useState(null);
   const [showAddItem, setShowAddItem] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [showOptions, setShowOptions] = useState(null);
-  const restaurant = JSON.parse(localStorage.getItem('restaurant') || '{}');
 
   useEffect(() => { fetchMenu(); }, []);
 
@@ -19,8 +21,10 @@ export default function Menu() {
     if (!restaurant.id) return setLoading(false);
     try {
       const r = await api.get(`/restaurants/${restaurant.id}`);
-      setCategories(r.data?.menu || []);
-    } catch { toast.error('فشل تحميل المنيو'); }
+      const menu = r.data?.menu || [];
+      setCategories(menu);
+      writeCache('rest_menu_' + restaurant.id, menu);
+    } catch { if (!cachedMenu) toast.error('فشل تحميل المنيو'); }
     finally { setLoading(false); }
   };
 

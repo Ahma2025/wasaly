@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 
 export default function Drivers() {
-  const [drivers, setDrivers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [drivers, setDrivers] = useState(readCache('adm_drivers') || []);
+  const [loading, setLoading] = useState(!readCache('adm_drivers'));
   const [showForm, setShowForm] = useState(false);
   const [selectedDriver, setSelectedDriver] = useState(null);
   const [form, setForm] = useState({ name: '', phone: '', password: '123456', vehicle_type: 'دراجة', vehicle_plate: '' });
@@ -15,7 +16,7 @@ export default function Drivers() {
   const fetchDrivers = async () => {
     try {
       const r = await api.get('/drivers');
-      setDrivers(r.data || []);
+      setDrivers(r.data || []); writeCache('adm_drivers', r.data || []);
     } catch (e) { toast.error('فشل تحميل السائقين'); }
     finally { setLoading(false); }
   };

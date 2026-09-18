@@ -1,19 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 
 export default function Coupons() {
-  const [coupons, setCoupons] = useState([]);
+  const [coupons, setCoupons] = useState(readCache('adm_coupons') || []);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ code: '', type: 'percentage', value: '', min_order: '', max_uses: '', expires_at: '' });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!readCache('adm_coupons'));
 
   useEffect(() => { fetchCoupons(); }, []);
 
   const fetchCoupons = async () => {
     try {
       const data = await api.get('/coupons');
-      setCoupons(data.data || []);
+      setCoupons(data.data || []); writeCache('adm_coupons', data.data || []);
     } catch { toast.error('خطأ'); }
     finally { setLoading(false); }
   };

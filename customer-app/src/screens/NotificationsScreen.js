@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
 import { useTheme } from '../context/ThemeContext';
 
 const TYPE_ICONS = { order: '📦', promo: '🎁', system: '🔔', driver: '🏍️', payment: '💳' };
@@ -12,7 +13,11 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/notifications').then(d => setNotifications(d.data)).catch(() => {}).finally(() => setLoading(false));
+    (async () => {
+      const cached = await readCache('notifications');
+      if (cached) { setNotifications(cached); setLoading(false); }
+      api.get('/notifications').then(d => { setNotifications(d.data); writeCache('notifications', d.data); }).catch(() => {}).finally(() => setLoading(false));
+    })();
   }, []);
 
   const markRead = async (id) => {
