@@ -31,6 +31,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const compression = require('compression');
 const path = require('path');
 
 const app = express();
@@ -42,6 +43,7 @@ const io = new Server(server, {
 });
 
 // Middleware
+app.use(compression()); // ضغط gzip — يقلّص ردود JSON/الصور base64 بأكثر من 50%
 app.use(helmet());
 app.use(cors());
 app.use(morgan('dev'));
