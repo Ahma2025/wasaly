@@ -1,0 +1,1 @@
+const a=e=>{try{const t=localStorage.getItem("cache_"+e);return t?JSON.parse(t):null}catch{return null}},c=(e,t)=>{try{localStorage.setItem("cache_"+e,JSON.stringify(t))}catch{}};export{a as r,c as w};
