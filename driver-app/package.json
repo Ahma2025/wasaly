@@ -8,6 +8,7 @@
     "ios": "expo run:ios"
   },
   "dependencies": {
+    "@expo-google-fonts/cairo": "^0.4.2",
     "@expo/vector-icons": "^14.0.0",
     "@react-native-async-storage/async-storage": "1.21.0",
     "@react-navigation/bottom-tabs": "^6.5.20",
@@ -16,6 +17,7 @@
     "axios": "^1.6.2",
     "expo": "~50.0.0",
     "expo-font": "~11.10.3",
+    "expo-haptics": "^57.0.3",
     "expo-location": "~16.5.5",
     "expo-notifications": "~0.27.7",
     "expo-secure-store": "~12.8.1",

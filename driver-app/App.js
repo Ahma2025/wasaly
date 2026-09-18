@@ -4,9 +4,34 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Text, TextInput, StyleSheet } from 'react-native';
+import { useFonts, Cairo_400Regular, Cairo_500Medium, Cairo_600SemiBold, Cairo_700Bold, Cairo_800ExtraBold } from '@expo-google-fonts/cairo';
 import SplashScreen from './src/components/SplashScreen';
 import './src/tasks/locationTask'; // يُعرّف مهمة تتبّع الموقع في الخلفية
+
+const WEIGHT_MAP = {
+  '400': 'Cairo_400Regular', 'normal': 'Cairo_400Regular',
+  '500': 'Cairo_500Medium', '600': 'Cairo_600SemiBold',
+  '700': 'Cairo_700Bold', 'bold': 'Cairo_700Bold',
+  '800': 'Cairo_800ExtraBold', '900': 'Cairo_800ExtraBold',
+};
+let _fontPatched = false;
+function applyGlobalFont() {
+  if (_fontPatched) return;
+  _fontPatched = true;
+  const patch = (Comp) => {
+    const orig = Comp.render;
+    Comp.render = function (...args) {
+      const el = orig.apply(this, args);
+      if (!el || !el.props) return el;
+      const flat = StyleSheet.flatten(el.props.style) || {};
+      const w = flat.fontWeight ? String(flat.fontWeight) : '400';
+      const fam = flat.fontFamily || WEIGHT_MAP[w] || 'Cairo_400Regular';
+      return React.cloneElement(el, { style: [{ fontFamily: fam }, el.props.style, { fontWeight: undefined }] });
+    };
+  };
+  try { patch(Text); patch(TextInput); } catch {}
+}
 
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
@@ -59,6 +84,8 @@ function AppNavigator() {
 
 export default function App() {
   const [splashDone, setSplashDone] = useState(false);
+  const [fontsLoaded] = useFonts({ Cairo_400Regular, Cairo_500Medium, Cairo_600SemiBold, Cairo_700Bold, Cairo_800ExtraBold });
+  if (fontsLoaded) applyGlobalFont();
 
   if (!splashDone) {
     return <SplashScreen onFinish={() => setSplashDone(true)} />;

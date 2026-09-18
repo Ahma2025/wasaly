@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import PressableScale from '../components/PressableScale';
 import DismissKeyboard from '../components/DismissKeyboard';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
@@ -44,9 +45,9 @@ export default function LoginScreen() {
         <TextInput style={styles.input} placeholder="••••••" secureTextEntry
           value={password} onChangeText={setPassword} textAlign="right" />
 
-        <TouchableOpacity style={[styles.btn, loading && { opacity: 0.7 }]} onPress={handleLogin} disabled={loading}>
+        <PressableScale style={[styles.btn, loading && { opacity: 0.7 }]} onPress={handleLogin} disabled={loading}>
           <Text style={styles.btnText}>{loading ? 'جاري الدخول...' : 'دخول'}</Text>
-        </TouchableOpacity>
+        </PressableScale>
 
         <Text style={styles.note}>يتم إنشاء حسابات المناديب عبر لوحة الإدارة</Text>
       </View>
