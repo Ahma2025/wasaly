@@ -102,6 +102,7 @@ export default function MarketScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load().finally(() => setRefreshing(false)); }} tintColor={C.primary} />}>
 
         {/* بنر علوي */}

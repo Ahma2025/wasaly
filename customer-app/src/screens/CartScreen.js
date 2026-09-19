@@ -215,11 +215,11 @@ export default function CartScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={24} color={COLORS.text} /></TouchableOpacity>
+      <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}><Ionicons name="arrow-back" size={22} color="#FFF" /></TouchableOpacity>
         <Text style={styles.title}>سلة الطلبات ({count})</Text>
-        <TouchableOpacity onPress={clearCart}><Text style={{ color: COLORS.red, fontWeight: '600' }}>إفراغ</Text></TouchableOpacity>
-      </View>
+        <TouchableOpacity onPress={clearCart} style={styles.headerBtn}><Ionicons name="trash-outline" size={20} color="#FFF" /></TouchableOpacity>
+      </LinearGradient>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -500,7 +500,7 @@ export default function CartScreen() {
           </View>
         </View>
 
-        <View style={{ height: 110 }} />
+        <View style={{ height: 190 }} />
       </ScrollView>
       <PressableScale style={[styles.orderBtn, loading && { opacity: 0.7 }]} onPress={placeOrder} disabled={loading}>
         <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.orderBtnGrad}>
@@ -516,8 +516,9 @@ export default function CartScreen() {
 
 const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 12, backgroundColor: COLORS.card, borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  title: { fontSize: 17, fontWeight: '800', color: COLORS.text },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingTop: 54, paddingBottom: 18, borderBottomLeftRadius: 26, borderBottomRightRadius: 26, ...COLORS.shadow.float },
+  headerBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 18, fontWeight: '900', color: '#FFF' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16, backgroundColor: COLORS.bg },
   emptyTitle: { fontSize: 20, fontWeight: '700', color: COLORS.text },
   shopBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 5 } },
@@ -577,7 +578,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   summaryLabel: { fontSize: 14, color: COLORS.gray },
   summaryVal: { fontSize: 14, fontWeight: '600', color: COLORS.text },
-  orderBtn: { position: 'absolute', bottom: 24, left: 16, right: 16, borderRadius: 20, overflow: 'hidden', elevation: 12, shadowColor: COLORS.primary, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 10 } },
+  orderBtn: { position: 'absolute', bottom: 100, left: 16, right: 16, borderRadius: 20, overflow: 'hidden', zIndex: 30, elevation: 12, shadowColor: COLORS.primary, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 10 } },
   orderBtnGrad: { padding: 18, alignItems: 'center', borderRadius: 20 },
   orderBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16, letterSpacing: 0.3 },
 });

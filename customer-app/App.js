@@ -83,7 +83,8 @@ function MainTabs() {
     <Tab.Navigator
       initialRouteName="الرئيسية"
       tabBar={(props) => <FloatingTabBar {...props} />}
-      screenOptions={{ headerShown: false, tabBarHideOnKeyboard: true, sceneContainerStyle: { paddingBottom: 92 } }}>
+      sceneContainerStyle={{ paddingBottom: 0 }}
+      screenOptions={{ headerShown: false, tabBarHideOnKeyboard: true }}>
       {/* الترتيب من اليسار لليمين: حسابي ← طلباتي ← ماركت ← سلتي ← بحث ← الرئيسية */}
       <Tab.Screen name="حسابي"    component={ProfileScreen} />
       <Tab.Screen name="طلباتي"   component={OrdersHistoryScreen} />

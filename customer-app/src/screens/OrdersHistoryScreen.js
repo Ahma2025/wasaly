@@ -97,6 +97,7 @@ export default function OrdersHistoryScreen() {
       </View>
 
       <ScrollView
+        contentContainerStyle={{ paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchOrders(); }} tintColor={COLORS.primary} />}
       >
         {/* Active */}
