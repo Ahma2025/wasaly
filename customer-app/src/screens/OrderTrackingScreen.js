@@ -8,6 +8,8 @@ import * as SecureStore from 'expo-secure-store';
 import api from '../utils/api';
 import { Skeleton } from '../components/Skeleton';
 import GradientHeader from '../components/GradientHeader';
+import { LinearGradient } from 'expo-linear-gradient';
+import { FadeIn } from '../components/Anim';
 
 import { useTheme } from '../context/ThemeContext';
 
@@ -318,6 +320,7 @@ export default function OrderTrackingScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
 
         {/* Status Card */}
+        <FadeIn>
         <View style={[styles.statusCard, isCancelled && { borderColor: COLORS.red }, isDelivered && { borderColor: COLORS.green }]}>
           <Text style={[styles.statusTitle, isCancelled && { color: COLORS.red }, isDelivered && { color: COLORS.green }]}>
             {isCancelled ? '❌ تم إلغاء الطلب' : currentStep?.label}
@@ -326,18 +329,20 @@ export default function OrderTrackingScreen() {
           {!isCancelled && !isDelivered && order.estimated_delivery_time && (() => {
             const mins = Math.round((new Date(order.estimated_delivery_time).getTime() - now) / 60000);
             return (
-              <View style={styles.etaBox}>
-                <Ionicons name="time" size={16} color={COLORS.primary} />
+              <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.etaBox}>
+                <Ionicons name="time" size={16} color="#FFF" />
                 <Text style={styles.etaText}>
                   {mins > 0 ? `الوصول المتوقّع خلال ~${mins} دقيقة` : 'طلبك في طريقه، وصولك قريب جداً 🎉'}
                 </Text>
-              </View>
+              </LinearGradient>
             );
           })()}
         </View>
+        </FadeIn>
 
         {/* Progress Steps */}
         {!isCancelled && (
+          <FadeIn delay={80}>
           <View style={styles.card}>
             {STATUS_STEPS.map((step, idx) => {
               const done = idx <= currentIdx;
@@ -358,6 +363,7 @@ export default function OrderTrackingScreen() {
               );
             })}
           </View>
+          </FadeIn>
         )}
 
         {/* Driver Card */}
@@ -445,8 +451,8 @@ const makeStyles = (COLORS) => StyleSheet.create({
   statusCard: { backgroundColor: COLORS.card, borderRadius: 18, padding: 18, alignItems: 'center', borderWidth: 2, borderColor: '#FFE0CC', elevation: 2 },
   statusTitle: { fontSize: 20, fontWeight: '900', color: COLORS.primary, marginBottom: 6 },
   statusDesc: { fontSize: 13, color: COLORS.gray },
-  etaBox: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, backgroundColor: COLORS.tint, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12, alignSelf: 'flex-start' },
-  etaText: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
+  etaBox: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13, alignSelf: 'flex-start' },
+  etaText: { fontSize: 13, fontWeight: '800', color: '#FFF' },
   card: { backgroundColor: COLORS.card, borderRadius: 18, padding: 16, elevation: 1 },
   cardTitle: { fontSize: 14, fontWeight: '800', color: COLORS.text, marginBottom: 10 },
   stepRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 10 },
