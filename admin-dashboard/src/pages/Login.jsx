@@ -21,11 +21,13 @@ export default function Login({ onLogin }) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-500 via-orange-600 to-orange-700 flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-card animate-fade-up" dir="rtl">
+    <div className="min-h-screen grad-sunset flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute -top-24 -right-24 w-80 h-80 rounded-full bg-white/10 blur-2xl" />
+      <div className="absolute -bottom-32 -left-20 w-96 h-96 rounded-full bg-white/10 blur-2xl" />
+      <div className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-card animate-fade-up relative z-10" dir="rtl">
         <div className="text-center mb-8">
-          <div className="text-4xl w-20 h-20 mx-auto mb-4 rounded-3xl bg-orange-50 flex items-center justify-center shadow-soft">🚀</div>
-          <h1 className="text-2xl font-black text-gray-900">وصلّي</h1>
+          <div className="text-4xl w-20 h-20 mx-auto mb-4 rounded-3xl grad-brand flex items-center justify-center shadow-brand">🚀</div>
+          <h1 className="text-3xl font-black grad-text">وصلّي</h1>
           <p className="text-gray-500 text-sm mt-1">لوحة تحكم المدير</p>
         </div>
 
@@ -38,7 +40,7 @@ export default function Login({ onLogin }) {
             <label className="text-sm font-semibold text-gray-600 mb-1 block">كلمة المرور</label>
             <input type="password" className="border-[1.5px] border-gray-200 bg-gray-50 rounded-xl px-4 py-3 w-full focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 focus:bg-white" placeholder="••••••••" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required />
           </div>
-          <button type="submit" disabled={loading} className="w-full bg-gradient-to-l from-orange-500 to-orange-600 text-white py-3.5 rounded-xl font-bold hover:shadow-brand disabled:opacity-50">
+          <button type="submit" disabled={loading} className="w-full grad-brand text-white py-3.5 rounded-xl font-bold shadow-brand hover:-translate-y-0.5 disabled:opacity-50">
             {loading ? 'جاري الدخول...' : 'دخول'}
           </button>
         </form>

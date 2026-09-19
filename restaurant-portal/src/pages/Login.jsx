@@ -34,11 +34,13 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-100 flex items-center justify-center p-4" dir="rtl">
-      <div className="bg-white rounded-3xl shadow-card p-8 w-full max-w-md animate-fade-up border border-orange-50">
+    <div className="min-h-screen grad-sunset flex items-center justify-center p-4 relative overflow-hidden" dir="rtl">
+      <div className="absolute -top-24 -right-24 w-80 h-80 rounded-full bg-white/10 blur-2xl" />
+      <div className="absolute -bottom-32 -left-20 w-96 h-96 rounded-full bg-white/10 blur-2xl" />
+      <div className="bg-white rounded-3xl shadow-card p-8 w-full max-w-md animate-fade-up relative z-10">
         <div className="text-center mb-8">
-          <div className="text-4xl w-20 h-20 mx-auto mb-4 rounded-3xl bg-orange-50 flex items-center justify-center shadow-soft">🏪</div>
-          <h1 className="text-2xl font-extrabold text-gray-900">بورتال المطعم</h1>
+          <div className="text-4xl w-20 h-20 mx-auto mb-4 rounded-3xl grad-brand flex items-center justify-center shadow-brand">🏪</div>
+          <h1 className="text-3xl font-black grad-text">بورتال المطعم</h1>
           <p className="text-gray-500 mt-1">وصلي - منصة التوصيل</p>
         </div>
 
@@ -51,7 +53,7 @@ export default function Login() {
             <label className="text-sm font-semibold text-gray-700">كلمة المرور</label>
             <input type="password" className="w-full border-[1.5px] border-gray-200 bg-gray-50 rounded-xl p-3 mt-1.5 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 focus:bg-white" placeholder="••••••" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
           </div>
-          <button type="submit" disabled={loading} className="w-full bg-gradient-to-l from-orange-500 to-orange-600 text-white py-3.5 rounded-xl font-bold hover:shadow-brand disabled:opacity-70 mt-2 shadow-brand/50">
+          <button type="submit" disabled={loading} className="w-full grad-brand text-white py-3.5 rounded-xl font-bold shadow-brand hover:-translate-y-0.5 disabled:opacity-70 mt-2">
             {loading ? 'جاري الدخول...' : 'دخول'}
           </button>
           <p className="text-center text-sm text-gray-500 mt-4">يتم إنشاء حسابات المطاعم عبر لوحة الإدارة</p>

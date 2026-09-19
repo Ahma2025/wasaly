@@ -6,7 +6,7 @@ import PageSkeleton from '../components/Skeleton';
 import toast from 'react-hot-toast';
 
 const StatCard = ({ icon, label, value, sub, color }) => (
-  <div className={`rounded-2xl p-4 text-white shadow-card hover:-translate-y-0.5 ${color}`}>
+  <div className={`rounded-2xl p-4 text-white shadow-card hover-lift ${color}`}>
     <div className="text-2xl mb-2">{icon}</div>
     <p className="text-white/80 text-xs">{label}</p>
     <p className="text-2xl font-black mt-0.5">{value ?? '-'}</p>
@@ -34,7 +34,7 @@ export default function Dashboard() {
       <h1 className="text-lg font-black text-gray-900">لوحة التحكم</h1>
 
       {/* KPI Grid */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3 stagger">
         <StatCard icon="👥" label="المستخدمون" value={data?.totalUsers} color="bg-gradient-to-br from-blue-500 to-blue-600" />
         <StatCard icon="🏪" label="المطاعم" value={data?.totalRestaurants} color="bg-gradient-to-br from-green-500 to-green-600" />
         <StatCard icon="📦" label="طلبات اليوم" value={data?.ordersToday} color="bg-gradient-to-br from-orange-500 to-orange-600" />

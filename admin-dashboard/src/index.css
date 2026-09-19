@@ -30,3 +30,16 @@ button:active { transform: scale(.97); }
 .sk { position: relative; overflow: hidden; background: #EEF0F4; }
 .sk::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.65), transparent); animation: shimmer 1.3s infinite; }
 @keyframes shimmer { 100% { transform: translateX(100%); } }
+
+/* ===== لمسات فخمة إضافية ===== */
+.grad-brand { background: linear-gradient(135deg, #FF8A00, #FF5E3A); }
+.grad-sunset { background: linear-gradient(135deg, #FF8A00 0%, #FF5E3A 55%, #F53B57 100%); }
+.grad-text { background: linear-gradient(135deg,#FF8A00,#F53B57); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hover-lift { transition: transform .22s cubic-bezier(.4,0,.2,1), box-shadow .22s ease; }
+.hover-lift:hover { transform: translateY(-4px); box-shadow: 0 16px 34px rgba(26,26,46,.12); }
+.glass { background: rgba(255,255,255,.14); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.2); }
+.stagger > * { animation: fadeUp .4s cubic-bezier(.4,0,.2,1) both; }
+.stagger > *:nth-child(1){animation-delay:.03s}.stagger > *:nth-child(2){animation-delay:.08s}
+.stagger > *:nth-child(3){animation-delay:.13s}.stagger > *:nth-child(4){animation-delay:.18s}
+.stagger > *:nth-child(5){animation-delay:.23s}.stagger > *:nth-child(6){animation-delay:.28s}
+.stagger > *:nth-child(7){animation-delay:.33s}.stagger > *:nth-child(8){animation-delay:.38s}
