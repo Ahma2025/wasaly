@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../utils/api';
+import GradientHeader from '../components/GradientHeader';
 
 const C = { primary: '#FF6B00', bg: '#F8F9FA', card: '#FFF', text: '#1A1A2E', gray: '#8E8E93', line: '#F0F0F0', border: '#E5E5EA', inputBg: '#F5F5F5' };
 
@@ -23,16 +24,7 @@ export default function SupportChatScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
-          <Ionicons name="arrow-back" size={24} color={C.text} />
-        </TouchableOpacity>
-        <View style={{ alignItems: 'center' }}>
-          <Text style={styles.title}>وصلي إدارة</Text>
-          <Text style={styles.sub}>الدعم الفني</Text>
-        </View>
-        <View style={{ width: 40 }} />
-      </View>
+      <GradientHeader title="وصلي إدارة" subtitle="الدعم الفني" />
 
       <FlatList
         ref={listRef}

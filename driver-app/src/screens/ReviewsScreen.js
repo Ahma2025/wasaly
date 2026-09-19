@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../utils/api';
+import GradientHeader from '../components/GradientHeader';
 import { readCache, writeCache } from '../utils/cache';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA', star: '#FFB800' };
@@ -27,13 +28,7 @@ export default function ReviewsScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-        </TouchableOpacity>
-        <Text style={styles.title}>تقييماتي</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <GradientHeader title="تقييماتي ⭐" />
 
       <View style={styles.summary}>
         <Text style={styles.avg}>{parseFloat(avg).toFixed(1)} ⭐</Text>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
+import GradientHeader from '../components/GradientHeader';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA', green: '#34C759' };
 
@@ -50,12 +51,12 @@ export default function OrdersHistoryScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}><Text style={styles.title}>سجل التوصيلات</Text></View>
+      <GradientHeader title="سجل التوصيلات 📋" showBack={false} />
       <FlatList
         data={orders}
         keyExtractor={i => String(i.id)}
         renderItem={renderItem}
-        contentContainerStyle={{ padding: 16, gap: 10 }}
+        contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 110 }}
         onEndReached={() => hasMore && setPage(p => p + 1)}
         onEndReachedThreshold={0.5}
         ListEmptyComponent={!loading && <View style={styles.empty}><Text style={styles.emptyIcon}>📦</Text><Text style={styles.emptyText}>لا توجد توصيلات بعد</Text></View>}

@@ -3,14 +3,17 @@ import { View, Text, StyleSheet, TouchableOpacity, Switch, Alert, Vibration, Scr
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { io } from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import SupportButton from '../components/SupportButton';
+import { GRADIENTS, SHADOW } from '../theme';
+import { FadeIn, PopIn, Press, Pulse } from '../components/Anim';
 
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', green: '#34C759', red: '#FF3B30', bg: '#F8F9FA' };
+const COLORS = { primary: '#FF6B00', text: '#14142B', gray: '#8A90A0', green: '#25C26E', red: '#FF3B30', bg: '#F4F5F9' };
 
 function calcDistance(lat1, lng1, lat2, lng2) {
   if (!lat1 || !lng1 || !lat2 || !lng2) return null;
@@ -232,9 +235,9 @@ export default function DriverHome() {
 
   return (
     <View style={{ flex: 1 }}>
-    <ScrollView style={styles.container} contentContainerStyle={{ flexGrow: 1 }}>
-      {/* Header */}
-      <View style={styles.header}>
+    <ScrollView style={styles.container} contentContainerStyle={{ flexGrow: 1, paddingBottom: 110 }} showsVerticalScrollIndicator={false}>
+      {/* Header فخم بتدرّج */}
+      <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
         <View>
           <Text style={styles.greeting}>مرحباً 👋</Text>
           <Text style={styles.driverName}>{user?.name || 'المندوب'}</Text>
@@ -244,7 +247,7 @@ export default function DriverHome() {
             <Text style={styles.avatarText}>{user?.name?.[0] || 'م'}</Text>
           </View>
         </TouchableOpacity>
-      </View>
+      </LinearGradient>
 
       {/* Online Toggle Card */}
       <View style={[styles.onlineCard, { borderColor: isOnline ? COLORS.green : '#E5E5EA' }]}>
@@ -265,26 +268,24 @@ export default function DriverHome() {
 
       {/* Stats Row */}
       <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Text style={styles.statIcon}>📦</Text>
-          <Text style={styles.statVal}>{todayStats.deliveries}</Text>
-          <Text style={styles.statLabel}>توصيلات اليوم</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statIcon}>💰</Text>
-          <Text style={styles.statVal}>{todayStats.earnings.toFixed(2)}₪</Text>
-          <Text style={styles.statLabel}>أرباح اليوم</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statIcon}>⭐</Text>
-          <Text style={styles.statVal}>{driverRating > 0 ? driverRating.toFixed(1) : '—'}</Text>
-          <Text style={styles.statLabel}>تقييمك</Text>
-        </View>
+        {[
+          { icon: '📦', val: todayStats.deliveries, label: 'توصيلات اليوم' },
+          { icon: '💰', val: `${todayStats.earnings.toFixed(2)}₪`, label: 'أرباح اليوم' },
+          { icon: '⭐', val: driverRating > 0 ? driverRating.toFixed(1) : '—', label: 'تقييمك' },
+        ].map((s, i) => (
+          <PopIn key={i} delay={i * 70} style={{ flex: 1 }}>
+            <View style={styles.statCard}>
+              <Text style={styles.statIcon}>{s.icon}</Text>
+              <Text style={styles.statVal}>{s.val}</Text>
+              <Text style={styles.statLabel}>{s.label}</Text>
+            </View>
+          </PopIn>
+        ))}
       </View>
 
       {/* Active Order */}
       {activeOrder && !pendingOrder && (
-        <View style={styles.activeCard}>
+        <LinearGradient colors={GRADIENTS.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.activeCard}>
           <View style={styles.activeHeader}>
             <Text style={styles.activeTitle}>📦 طلب نشط</Text>
             <View style={styles.activeBadge}><Text style={styles.activeBadgeText}>قيد التوصيل</Text></View>
@@ -302,7 +303,7 @@ export default function DriverHome() {
             <Ionicons name="navigate-outline" size={18} color={COLORS.primary} />
             <Text style={styles.navBtnText}>التنقل والتفاصيل</Text>
           </TouchableOpacity>
-        </View>
+        </LinearGradient>
       )}
 
       {/* Pending Order Alert */}
@@ -397,18 +398,18 @@ export default function DriverHome() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 50, backgroundColor: '#FFF' },
-  greeting: { fontSize: 13, color: COLORS.gray },
-  driverName: { fontSize: 20, fontWeight: '900', color: COLORS.text, marginTop: 2 },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FF6B0020', alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 20, fontWeight: '800', color: COLORS.primary },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 22, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, ...SHADOW.float },
+  greeting: { fontSize: 14, color: 'rgba(255,255,255,0.9)', fontWeight: '600' },
+  driverName: { fontSize: 22, fontWeight: '900', color: '#FFF', marginTop: 2 },
+  avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)' },
+  avatarText: { fontSize: 20, fontWeight: '900', color: '#FFF' },
   onlineCard: { margin: 16, backgroundColor: '#FFF', borderRadius: 20, padding: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 2, elevation: 2 },
   onlineLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   onlineDot: { width: 12, height: 12, borderRadius: 6 },
   onlineTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text },
   onlineSub: { fontSize: 12, color: COLORS.gray, marginTop: 2 },
   statsRow: { flexDirection: 'row', gap: 12, marginHorizontal: 16, marginBottom: 16 },
-  statCard: { flex: 1, backgroundColor: '#FFF', borderRadius: 18, padding: 16, alignItems: 'center', elevation: 3, shadowColor: '#1A1A2E', shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+  statCard: { backgroundColor: '#FFF', borderRadius: 20, padding: 16, alignItems: 'center', ...SHADOW.soft },
   statIcon: { fontSize: 24, marginBottom: 6 },
   statVal: { fontSize: 22, fontWeight: '900', color: COLORS.text },
   statLabel: { fontSize: 11, color: COLORS.gray, marginTop: 3 },

@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native';
-import PressableScale from '../components/PressableScale';
-import DismissKeyboard from '../components/DismissKeyboard';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert, ScrollView } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { PopIn } from '../components/Anim';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
+import { COLORS, GRADIENTS, SHADOW } from '../theme';
 
 export default function LoginScreen() {
   const [phone, setPhone] = useState('');
@@ -30,41 +29,49 @@ export default function LoginScreen() {
   };
 
   return (
-    <DismissKeyboard>
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.inner}>
-        <Text style={styles.emoji}>🏍️</Text>
-        <Text style={styles.title}>وصلّي</Text>
-        <Text style={styles.subtitle}>تطبيق المناديب</Text>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false}>
+        <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+          <PopIn>
+            <View style={styles.emoji}><Text style={{ fontSize: 52 }}>🏍️</Text></View>
+          </PopIn>
+          <Text style={styles.title}>وصلّي</Text>
+          <Text style={styles.subtitle}>تطبيق المناديب</Text>
+        </LinearGradient>
 
-        <Text style={styles.label}>رقم الهاتف</Text>
-        <TextInput style={styles.input} placeholder="05XXXXXXXX" keyboardType="phone-pad"
-          value={phone} onChangeText={setPhone} textAlign="right" />
+        <View style={styles.card}>
+          <Text style={styles.label}>رقم الهاتف</Text>
+          <TextInput style={styles.input} placeholder="05XXXXXXXX" placeholderTextColor={COLORS.gray} keyboardType="phone-pad"
+            value={phone} onChangeText={setPhone} textAlign="right" />
 
-        <Text style={styles.label}>كلمة المرور</Text>
-        <TextInput style={styles.input} placeholder="••••••" secureTextEntry
-          value={password} onChangeText={setPassword} textAlign="right" />
+          <Text style={styles.label}>كلمة المرور</Text>
+          <TextInput style={styles.input} placeholder="••••••" placeholderTextColor={COLORS.gray} secureTextEntry
+            value={password} onChangeText={setPassword} textAlign="right" />
 
-        <PressableScale style={[styles.btn, loading && { opacity: 0.7 }]} onPress={handleLogin} disabled={loading}>
-          <Text style={styles.btnText}>{loading ? 'جاري الدخول...' : 'دخول'}</Text>
-        </PressableScale>
+          <TouchableOpacity activeOpacity={0.9} onPress={handleLogin} disabled={loading} style={[styles.btn, loading && { opacity: 0.7 }]}>
+            <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btnGrad}>
+              <Text style={styles.btnText}>{loading ? 'جاري الدخول...' : 'دخول'}</Text>
+            </LinearGradient>
+          </TouchableOpacity>
 
-        <Text style={styles.note}>يتم إنشاء حسابات المناديب عبر لوحة الإدارة</Text>
-      </View>
+          <Text style={styles.note}>يتم إنشاء حسابات المناديب عبر لوحة الإدارة</Text>
+        </View>
+      </ScrollView>
     </KeyboardAvoidingView>
-    </DismissKeyboard>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  inner: { flex: 1, justifyContent: 'center', padding: 24 },
-  emoji: { fontSize: 56, textAlign: 'center', textAlignVertical: 'center', lineHeight: 100, width: 100, height: 100, borderRadius: 32, backgroundColor: '#FFF3EC', alignSelf: 'center', marginBottom: 12, overflow: 'hidden' },
-  title: { fontSize: 34, fontWeight: '900', textAlign: 'center', color: COLORS.primary, letterSpacing: 0.5 },
-  subtitle: { fontSize: 16, textAlign: 'center', color: COLORS.gray, marginBottom: 40 },
+  hero: { alignItems: 'center', paddingTop: 90, paddingBottom: 70, borderBottomLeftRadius: 40, borderBottomRightRadius: 40, ...SHADOW.float },
+  emoji: { width: 100, height: 100, borderRadius: 32, backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)' },
+  title: { fontSize: 40, fontWeight: '900', textAlign: 'center', color: '#FFF', letterSpacing: 0.5, marginTop: 16 },
+  subtitle: { fontSize: 15, textAlign: 'center', color: 'rgba(255,255,255,0.92)', marginTop: 4, fontWeight: '600' },
+  card: { backgroundColor: COLORS.card, marginHorizontal: 20, marginTop: -40, borderRadius: 26, padding: 22, ...SHADOW.card },
   label: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 8 },
-  input: { borderWidth: 1.5, borderColor: '#E5E5EA', borderRadius: 14, padding: 15, fontSize: 16, backgroundColor: '#FFF', marginBottom: 16 },
-  btn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 17, alignItems: 'center', marginTop: 8, elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
+  input: { borderWidth: 1.5, borderColor: COLORS.line, borderRadius: 16, padding: 15, fontSize: 16, backgroundColor: COLORS.inputBg, marginBottom: 16, color: COLORS.text },
+  btn: { borderRadius: 18, overflow: 'hidden', marginTop: 8, ...SHADOW.float },
+  btnGrad: { padding: 17, alignItems: 'center', borderRadius: 18 },
   btnText: { color: '#FFF', fontWeight: '900', fontSize: 16, letterSpacing: 0.3 },
   note: { textAlign: 'center', color: COLORS.gray, marginTop: 24, fontSize: 13 },
 });

@@ -41,20 +41,16 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import DeliveryScreen from './src/screens/DeliveryScreen';
 import ReviewsScreen from './src/screens/ReviewsScreen';
 import SupportChatScreen from './src/screens/SupportChatScreen';
+import FloatingTabBar from './src/components/FloatingTabBar';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
 function MainTabs() {
   return (
-    <Tab.Navigator screenOptions={({ route }) => ({
-      tabBarIcon: ({ focused, color, size }) => {
-        const icons = { الرئيسية: focused ? 'home' : 'home-outline', الأرباح: focused ? 'wallet' : 'wallet-outline', الطلبات: focused ? 'list' : 'list-outline', حسابي: focused ? 'person' : 'person-outline' };
-        return <Ionicons name={icons[route.name]} size={size} color={color} />;
-      },
-      tabBarActiveTintColor: '#FF6B00', tabBarInactiveTintColor: '#8E8E93',
-      headerShown: false, tabBarStyle: { paddingBottom: 5, height: 60 }
-    })}>
+    <Tab.Navigator
+      tabBar={(props) => <FloatingTabBar {...props} />}
+      screenOptions={{ headerShown: false, tabBarHideOnKeyboard: true }}>
       <Tab.Screen name="الرئيسية" component={HomeScreen} />
       <Tab.Screen name="الأرباح" component={EarningsScreen} />
       <Tab.Screen name="الطلبات" component={OrdersHistoryScreen} />
@@ -67,7 +63,7 @@ function AppNavigator() {
   const { user, loading } = useAuth();
   if (loading) return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" color="#FF6B00" /></View>;
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right', animationDuration: 260, gestureEnabled: true }}>
       {user ? (
         <>
           <Stack.Screen name="Main" component={MainTabs} />

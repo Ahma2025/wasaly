@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { useAuth } from '../context/AuthContext';
+import { GRADIENTS, SHADOW } from '../theme';
+import { FadeIn, PopIn } from '../components/Anim';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA' };
 
@@ -43,17 +46,17 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const tier = profile?.loyalty_tier || 'bronze';
-  const tierColors = { bronze: '#CD7F32', silver: '#C0C0C0', gold: '#FFD700', platinum: '#E5E4E2' };
+  const tierGrad = { bronze: ['#E8A15C', '#B5651D'], silver: ['#D9DDE3', '#9AA0AE'], gold: ['#FFCF33', '#FF9A00'], platinum: ['#7B79F0', '#4B49C9'] };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
-      <View style={styles.header}>
-        <View style={[styles.avatar, { backgroundColor: tierColors[tier] }]}>
+    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 110 }} showsVerticalScrollIndicator={false}>
+      <LinearGradient colors={tierGrad[tier] || tierGrad.bronze} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
+        <View style={styles.avatar}>
           <Text style={styles.avatarText}>{profile?.name?.[0] || '?'}</Text>
         </View>
         <Text style={styles.name}>{profile?.name}</Text>
         <Text style={styles.phone}>{profile?.phone}</Text>
-      </View>
+      </LinearGradient>
 
       {/* Stats */}
       <View style={styles.statsRow}>
@@ -111,11 +114,11 @@ export default function ProfileScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { alignItems: 'center', paddingVertical: 24, backgroundColor: '#FFF', borderRadius: 20, marginBottom: 16, elevation: 2 },
-  avatar: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
-  avatarText: { fontSize: 32, fontWeight: '900', color: '#FFF' },
-  name: { fontSize: 20, fontWeight: '800', color: COLORS.text },
-  phone: { fontSize: 14, color: COLORS.gray, marginTop: 4 },
+  header: { alignItems: 'center', paddingVertical: 28, borderRadius: 24, marginBottom: 16, ...SHADOW.card },
+  avatar: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center', marginBottom: 10, backgroundColor: 'rgba(255,255,255,0.28)', borderWidth: 2, borderColor: 'rgba(255,255,255,0.5)' },
+  avatarText: { fontSize: 34, fontWeight: '900', color: '#FFF' },
+  name: { fontSize: 21, fontWeight: '900', color: '#FFF' },
+  phone: { fontSize: 14, color: 'rgba(255,255,255,0.9)', marginTop: 4, fontWeight: '600' },
   statsRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
   statCard: { flex: 1, backgroundColor: '#FFF', borderRadius: 16, padding: 12, alignItems: 'center', elevation: 2 },
   statIcon: { fontSize: 20, marginBottom: 4 },

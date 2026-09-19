@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Linking, Alert, ScrollView } 
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import GradientHeader from '../components/GradientHeader';
 import { io } from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../utils/api';
@@ -296,13 +297,7 @@ export default function DeliveryScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color={COLORS.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>توصيل #{orderData?.id || orderId}</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <GradientHeader title={`توصيل #${orderData?.id || orderId}`} />
 
       {/* MAP — outside ScrollView for free pan/zoom */}
       <View style={styles.mapWrap}>
