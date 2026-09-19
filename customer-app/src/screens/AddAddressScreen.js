@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import api from '../utils/api';
 import { useTheme } from '../context/ThemeContext';
+import GradientHeader from '../components/GradientHeader';
 
 const LABELS = [{ k: 'المنزل', e: '🏠' }, { k: 'العمل', e: '💼' }, { k: 'أخرى', e: '📍' }];
 
@@ -48,16 +49,9 @@ export default function AddAddressScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color={COLORS.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>إضافة عنوان</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <GradientHeader title="إضافة عنوان" />
 
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <TouchableOpacity style={styles.locBtn} onPress={useMyLocation} disabled={locating}>
           <Ionicons name="locate-outline" size={22} color={COLORS.primary} />
           <View style={{ flex: 1 }}>

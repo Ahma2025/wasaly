@@ -6,6 +6,7 @@ import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import api from '../utils/api';
 import { Skeleton } from '../components/Skeleton';
+import GradientHeader from '../components/GradientHeader';
 import { useCart } from '../context/CartContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -109,13 +110,7 @@ export default function GroupOrderScreen() {
   if (!code) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color={COLORS.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>طلب جماعي 👥</Text>
-          <View style={{ width: 40 }} />
-        </View>
+        <GradientHeader title="طلب جماعي 👥" />
         <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center' }}>
           <Text style={{ fontSize: 64, marginTop: 20 }}>🧑‍🤝‍🧑</Text>
           <Text style={styles.bigTitle}>اطلبوا سوا — كسر الحساب</Text>
@@ -162,13 +157,7 @@ export default function GroupOrderScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color={COLORS.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{group.restaurant_name || 'طلب جماعي'}</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <GradientHeader title={group.restaurant_name || 'طلب جماعي'} />
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
         {/* كود المشاركة */}

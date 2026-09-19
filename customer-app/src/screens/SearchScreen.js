@@ -1,9 +1,11 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
 import { useTheme } from '../context/ThemeContext';
+import { FadeIn } from '../components/Anim';
 
 const POPULAR = ['برجر', 'بيتزا', 'شاورما', 'سوشي', 'دجاج', 'فلافل', 'مشاوي', 'حلويات'];
 
@@ -60,13 +62,14 @@ export default function SearchScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
+        <Text style={styles.headerTitle}>وش نفسك تاكل؟ 🍴</Text>
         <View style={styles.searchBox}>
-          <Ionicons name="search" size={18} color={COLORS.gray} />
+          <Ionicons name="search" size={18} color={COLORS.primary} />
           <TextInput style={styles.input} placeholder="ابحث عن مطعم أو طعام..." placeholderTextColor={COLORS.gray} value={query} onChangeText={onChangeText} autoFocus returnKeyType="search" />
           {query ? <TouchableOpacity onPress={() => { setQuery(''); setResults(null); }}><Ionicons name="close-circle" size={18} color={COLORS.gray} /></TouchableOpacity> : null}
         </View>
-      </View>
+      </LinearGradient>
 
       {loading && <ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 40 }} />}
 
@@ -74,10 +77,12 @@ export default function SearchScreen() {
         <View style={styles.popularSection}>
           <Text style={styles.sectionTitle}>عمليات بحث شائعة</Text>
           <View style={styles.tagsWrap}>
-            {POPULAR.map(p => (
-              <TouchableOpacity key={p} style={styles.tag} onPress={() => { setQuery(p); search(p); }}>
-                <Text style={styles.tagText}>{p}</Text>
-              </TouchableOpacity>
+            {POPULAR.map((p, i) => (
+              <FadeIn key={p} delay={i * 40} from={8}>
+                <TouchableOpacity style={styles.tag} onPress={() => { setQuery(p); search(p); }} activeOpacity={0.7}>
+                  <Text style={styles.tagText}>{p}</Text>
+                </TouchableOpacity>
+              </FadeIn>
             ))}
           </View>
         </View>
@@ -108,16 +113,17 @@ export default function SearchScreen() {
 
 const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { backgroundColor: COLORS.card, paddingTop: 50, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.inputBg, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
+  header: { paddingTop: 54, paddingHorizontal: 16, paddingBottom: 18, borderBottomLeftRadius: 26, borderBottomRightRadius: 26, ...COLORS.shadow.float },
+  headerTitle: { fontSize: 20, fontWeight: '900', color: '#FFF', marginBottom: 12 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FFF', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, ...COLORS.shadow.soft },
   input: { flex: 1, fontSize: 15, color: COLORS.text },
   popularSection: { padding: 16 },
   sectionTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text, marginVertical: 12 },
   tagsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  tag: { backgroundColor: COLORS.card, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: COLORS.border },
-  tagText: { fontSize: 13, color: COLORS.text, fontWeight: '600' },
-  card: { flexDirection: 'row', gap: 12, backgroundColor: COLORS.card, borderRadius: 16, padding: 12, marginBottom: 10, elevation: 2 },
-  logo: { width: 56, height: 56, borderRadius: 12, backgroundColor: COLORS.tint, alignItems: 'center', justifyContent: 'center' },
+  tag: { backgroundColor: COLORS.sec, borderRadius: 20, paddingHorizontal: 15, paddingVertical: 9, borderWidth: 1, borderColor: COLORS.tint },
+  tagText: { fontSize: 13, color: COLORS.primary, fontWeight: '700' },
+  card: { flexDirection: 'row', gap: 12, backgroundColor: COLORS.card, borderRadius: 18, padding: 12, marginBottom: 12, ...COLORS.shadow.soft },
+  logo: { width: 56, height: 56, borderRadius: 14, backgroundColor: COLORS.tint, alignItems: 'center', justifyContent: 'center' },
   cardInfo: { flex: 1 },
   cardName: { fontSize: 15, fontWeight: '800', color: COLORS.text },
   cardSub: { fontSize: 12, color: COLORS.gray, marginTop: 2 },

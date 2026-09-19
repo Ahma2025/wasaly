@@ -7,6 +7,7 @@ import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import api from '../utils/api';
 import { Skeleton } from '../components/Skeleton';
+import GradientHeader from '../components/GradientHeader';
 
 import { useTheme } from '../context/ThemeContext';
 
@@ -274,14 +275,7 @@ export default function OrderTrackingScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.navigate('Main', { screen: 'الرئيسية' })} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color={COLORS.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>تتبع الطلب #{order.order_number || id}</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <GradientHeader title={`تتبع الطلب #${order.order_number || id}`} onBack={() => navigation.navigate('Main', { screen: 'الرئيسية' })} />
 
       {/* MAP — outside ScrollView so gestures work freely */}
       {showMap && mapHtml ? (

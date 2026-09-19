@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert, ScrollView } from 'react-native';
-import PressableScale from '../components/PressableScale';
-import DismissKeyboard from '../components/DismissKeyboard';
+import { LinearGradient } from 'expo-linear-gradient';
+import { PopIn, GradientButton } from '../components/Anim';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
@@ -30,7 +30,7 @@ export default function LoginScreen() {
       const res = await api.post('/auth/login-password', { phone: normalizedPhone, password });
       await login(res.token, res.user);
     } catch (e) {
-      Alert.alert('خطأ تسجيل الدخول', `الرقم المُرسَل: "${normalizedPhone}"\nالباسورد: "${password}"\n\nالخطأ: ${e.message || JSON.stringify(e)}`);
+      Alert.alert('خطأ تسجيل الدخول', 'رقم الهاتف أو كلمة المرور غير صحيحة. حاول مرة أخرى.');
     } finally { setLoading(false); }
   };
 
@@ -48,60 +48,66 @@ export default function LoginScreen() {
   };
 
   return (
-    <DismissKeyboard>
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <View style={styles.logoArea}>
-          <Text style={styles.logo}>🍕</Text>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false}>
+        {/* Hero متدرّج */}
+        <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+          <PopIn>
+            <View style={styles.logo}><Text style={{ fontSize: 52 }}>🍕</Text></View>
+          </PopIn>
           <Text style={styles.appName}>وصلّي</Text>
           <Text style={styles.tagline}>توصيل سريع لأشهى المطاعم</Text>
-        </View>
+        </LinearGradient>
 
-        <View style={styles.tabs}>
-          <TouchableOpacity style={[styles.tab, tab === 'login' && styles.tabActive]} onPress={() => setTab('login')}>
-            <Text style={[styles.tabText, tab === 'login' && styles.tabTextActive]}>تسجيل الدخول</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.tab, tab === 'register' && styles.tabActive]} onPress={() => setTab('register')}>
-            <Text style={[styles.tabText, tab === 'register' && styles.tabTextActive]}>حساب جديد</Text>
-          </TouchableOpacity>
-        </View>
+        {/* بطاقة النموذج */}
+        <View style={styles.card}>
+          <View style={styles.tabs}>
+            <TouchableOpacity style={[styles.tab, tab === 'login' && styles.tabActive]} onPress={() => setTab('login')}>
+              <Text style={[styles.tabText, tab === 'login' && styles.tabTextActive]}>تسجيل الدخول</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.tab, tab === 'register' && styles.tabActive]} onPress={() => setTab('register')}>
+              <Text style={[styles.tabText, tab === 'register' && styles.tabTextActive]}>حساب جديد</Text>
+            </TouchableOpacity>
+          </View>
 
-        <View style={styles.form}>
-          {tab === 'register' && (
-            <>
-              <TextInput style={styles.input} placeholder="الاسم الكامل" value={name} onChangeText={setName} />
-              <TextInput style={styles.input} placeholder="المدينة" value={city} onChangeText={setCity} />
-              <TextInput style={styles.input} placeholder="كود دعوة (اختياري) — 10₪ هدية 🎁" value={referralCode} onChangeText={setReferralCode} autoCapitalize="characters" />
-            </>
-          )}
-          <TextInput style={styles.input} placeholder="رقم الهاتف" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
-          <TextInput style={styles.input} placeholder="كلمة المرور" secureTextEntry value={password} onChangeText={setPassword} />
+          <View style={styles.form}>
+            {tab === 'register' && (
+              <>
+                <TextInput style={styles.input} placeholder="الاسم الكامل" placeholderTextColor={COLORS.gray} value={name} onChangeText={setName} />
+                <TextInput style={styles.input} placeholder="المدينة" placeholderTextColor={COLORS.gray} value={city} onChangeText={setCity} />
+                <TextInput style={styles.input} placeholder="كود دعوة (اختياري) — 10₪ هدية 🎁" placeholderTextColor={COLORS.gray} value={referralCode} onChangeText={setReferralCode} autoCapitalize="characters" />
+              </>
+            )}
+            <TextInput style={styles.input} placeholder="رقم الهاتف" placeholderTextColor={COLORS.gray} keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
+            <TextInput style={styles.input} placeholder="كلمة المرور" placeholderTextColor={COLORS.gray} secureTextEntry value={password} onChangeText={setPassword} />
 
-          <PressableScale style={[styles.btn, loading && { opacity: 0.7 }]}
-            onPress={tab === 'login' ? handleLogin : handleRegister} disabled={loading}>
-            <Text style={styles.btnText}>{loading ? 'جاري التحميل...' : tab === 'login' ? 'دخول' : 'إنشاء الحساب'}</Text>
-          </PressableScale>
+            <GradientButton
+              title={loading ? 'جاري التحميل...' : tab === 'login' ? 'دخول' : 'إنشاء الحساب'}
+              onPress={tab === 'login' ? handleLogin : handleRegister}
+              disabled={loading}
+              height={54}
+              style={{ marginTop: 6 }}
+            />
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
-    </DismissKeyboard>
   );
 }
 
 const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  content: { flexGrow: 1, paddingHorizontal: 24, justifyContent: 'center', paddingVertical: 40 },
-  logoArea: { alignItems: 'center', marginBottom: 36 },
-  logo: { fontSize: 54, width: 96, height: 96, borderRadius: 30, backgroundColor: COLORS.tint, textAlign: 'center', textAlignVertical: 'center', lineHeight: 96, overflow: 'hidden' },
-  appName: { fontSize: 38, fontWeight: '900', color: COLORS.primary, marginTop: 14, letterSpacing: 0.5 },
-  tagline: { fontSize: 14, color: COLORS.gray, marginTop: 4 },
-  tabs: { flexDirection: 'row', backgroundColor: COLORS.inputBg, borderRadius: 14, padding: 5, marginBottom: 24 },
-  tab: { flex: 1, paddingVertical: 11, alignItems: 'center', borderRadius: 11 },
-  tabActive: { backgroundColor: COLORS.primary, elevation: 3, shadowColor: COLORS.primary, shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } },
+  content: { flexGrow: 1, paddingBottom: 40 },
+  hero: { alignItems: 'center', paddingTop: 90, paddingBottom: 70, borderBottomLeftRadius: 40, borderBottomRightRadius: 40, ...COLORS.shadow.float },
+  logo: { width: 100, height: 100, borderRadius: 32, backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)' },
+  appName: { fontSize: 40, fontWeight: '900', color: '#FFF', marginTop: 16, letterSpacing: 0.5 },
+  tagline: { fontSize: 14, color: 'rgba(255,255,255,0.92)', marginTop: 4, fontWeight: '600' },
+  card: { backgroundColor: COLORS.card, marginHorizontal: 20, marginTop: -40, borderRadius: 26, padding: 20, ...COLORS.shadow.card },
+  tabs: { flexDirection: 'row', backgroundColor: COLORS.inputBg, borderRadius: 16, padding: 5, marginBottom: 22 },
+  tab: { flex: 1, paddingVertical: 11, alignItems: 'center', borderRadius: 12 },
+  tabActive: { backgroundColor: COLORS.primary, ...COLORS.shadow.soft },
   tabText: { fontWeight: '700', color: COLORS.gray },
   tabTextActive: { color: '#FFF' },
   form: { gap: 14 },
-  input: { borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 14, padding: 15, fontSize: 16, color: COLORS.text, backgroundColor: COLORS.inputBg },
-  btn: { backgroundColor: COLORS.primary, borderRadius: 14, paddingVertical: 17, alignItems: 'center', marginTop: 6, elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
-  btnText: { color: '#FFF', fontWeight: '800', fontSize: 16, letterSpacing: 0.3 },
+  input: { borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 16, padding: 15, fontSize: 16, color: COLORS.text, backgroundColor: COLORS.inputBg },
 });

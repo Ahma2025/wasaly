@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { useTheme } from '../context/ThemeContext';
+import GradientHeader from '../components/GradientHeader';
+import { FadeIn } from '../components/Anim';
 
 const TYPE_ICONS = { order: '📦', promo: '🎁', system: '🔔', driver: '🏍️', payment: '💳' };
 
@@ -36,7 +39,8 @@ export default function NotificationsScreen() {
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
-  const renderItem = ({ item }) => (
+  const renderItem = ({ item, index }) => (
+    <FadeIn delay={Math.min(index, 8) * 45}>
     <TouchableOpacity style={[styles.card, !item.is_read && styles.cardUnread]} onPress={() => !item.is_read && markRead(item.id)}>
       <View style={styles.iconBox}><Text style={{ fontSize: 22 }}>{TYPE_ICONS[item.type] || '🔔'}</Text></View>
       <View style={styles.content}>
@@ -46,14 +50,15 @@ export default function NotificationsScreen() {
       </View>
       {!item.is_read && <View style={styles.unreadDot} />}
     </TouchableOpacity>
+    </FadeIn>
   );
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>الإشعارات {unreadCount > 0 ? `(${unreadCount})` : ''}</Text>
-        {unreadCount > 0 && <TouchableOpacity onPress={markAllRead}><Text style={styles.markAll}>قراءة الكل</Text></TouchableOpacity>}
-      </View>
+      <GradientHeader
+        title={`الإشعارات ${unreadCount > 0 ? `(${unreadCount})` : ''}`}
+        right={unreadCount > 0 ? <TouchableOpacity onPress={markAllRead}><Ionicons name="checkmark-done" size={22} color="#FFF" /></TouchableOpacity> : null}
+      />
 
       <FlatList
         data={notifications}

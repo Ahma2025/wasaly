@@ -1,14 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Switch, Share, Linking, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { pickImage } from '../utils/pickImage';
+import { FadeIn } from '../components/Anim';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
-const TIER_META = { bronze: { color: '#CD7F32', emoji: '🥉', label: 'برونز' }, silver: { color: '#C0C0C0', emoji: '🥈', label: 'فضي' }, gold: { color: '#FFD700', emoji: '🥇', label: 'ذهبي' }, platinum: { color: '#5856D6', emoji: '💎', label: 'بلاتيني' } };
+const TIER_META = {
+  bronze:   { color: '#CD7F32', grad: ['#E8A15C', '#B5651D'], emoji: '🥉', label: 'برونز' },
+  silver:   { color: '#C0C0C0', grad: ['#D9DDE3', '#9AA0AE'], emoji: '🥈', label: 'فضي' },
+  gold:     { color: '#FFD700', grad: ['#FFCF33', '#FF9A00'], emoji: '🥇', label: 'ذهبي' },
+  platinum: { color: '#5856D6', grad: ['#7B79F0', '#4B49C9'], emoji: '💎', label: 'بلاتيني' },
+};
 
 export default function ProfileScreen({ navigation }) {
   const { user, logout } = useAuth();
@@ -62,8 +69,8 @@ export default function ProfileScreen({ navigation }) {
 
   return (
     <ScrollView style={styles.container}>
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: tierMeta.color }]}>
+      {/* Header فخم بتدرّج حسب المستوى */}
+      <LinearGradient colors={tierMeta.grad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
         <TouchableOpacity style={styles.avatar} onPress={pickAvatar} activeOpacity={0.8}>
           {profile?.avatar
             ? <Image source={{ uri: profile.avatar }} style={styles.avatarImg} />
@@ -72,9 +79,10 @@ export default function ProfileScreen({ navigation }) {
         </TouchableOpacity>
         <Text style={styles.headerName}>{profile?.name}</Text>
         <Text style={styles.headerPhone}>{profile?.phone}</Text>
-      </View>
+      </LinearGradient>
 
       {/* Loyalty Card */}
+      <FadeIn delay={60}>
       <View style={styles.loyaltyCard}>
         <View style={styles.loyaltyLeft}>
           <Text style={styles.tierEmoji}>{tierMeta.emoji}</Text>
@@ -89,19 +97,24 @@ export default function ProfileScreen({ navigation }) {
           <Text style={styles.walletBalance}>{parseFloat(profile?.wallet_balance || 0).toFixed(2)}₪</Text>
         </View>
       </View>
+      </FadeIn>
 
       {/* دعوة الأصدقاء */}
       {!!profile?.referral_code && (
+        <FadeIn delay={120}>
         <TouchableOpacity
-          style={styles.referCard}
+          activeOpacity={0.9}
           onPress={() => Share.share({ message: `حمّل تطبيق وصلّي واستخدم كود الدعوة "${profile.referral_code}" لتحصل على 10₪ هدية! 🎁🛵` })}
         >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.referTitle}>🎁 ادعُ أصدقاءك واربح</Text>
-            <Text style={styles.referSub}>كودك: <Text style={styles.referCode}>{profile.referral_code}</Text> — أنت وصديقك تاخذوا 10₪</Text>
-          </View>
-          <Ionicons name="share-social" size={22} color="#FFF" />
+          <LinearGradient colors={COLORS.gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.referCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.referTitle}>🎁 ادعُ أصدقاءك واربح</Text>
+              <Text style={styles.referSub}>كودك: <Text style={styles.referCode}>{profile.referral_code}</Text> — أنت وصديقك تاخذوا 10₪</Text>
+            </View>
+            <Ionicons name="share-social" size={22} color="#FFF" />
+          </LinearGradient>
         </TouchableOpacity>
+        </FadeIn>
       )}
 
       {/* Edit Name */}
@@ -191,7 +204,7 @@ export default function ProfileScreen({ navigation }) {
         <Text style={styles.deleteAccText}>حذف الحساب نهائياً</Text>
       </TouchableOpacity>
 
-      <View style={{ height: 40 }} />
+      <View style={{ height: 100 }} />
     </ScrollView>
   );
 }

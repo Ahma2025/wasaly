@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, Keyboard } from 'react-native';
-import DismissKeyboard from '../components/DismissKeyboard';
 import PressableScale from '../components/PressableScale';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -215,7 +214,6 @@ export default function CartScreen() {
   }
 
   return (
-    <DismissKeyboard>
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={24} color={COLORS.text} /></TouchableOpacity>
@@ -223,7 +221,11 @@ export default function CartScreen() {
         <TouchableOpacity onPress={clearCart}><Text style={{ color: COLORS.red, fontWeight: '600' }}>إفراغ</Text></TouchableOpacity>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        contentContainerStyle={{ paddingBottom: 20 }}>
         {/* Items */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🧾 طلباتك</Text>
@@ -500,7 +502,6 @@ export default function CartScreen() {
 
         <View style={{ height: 110 }} />
       </ScrollView>
-
       <PressableScale style={[styles.orderBtn, loading && { opacity: 0.7 }]} onPress={placeOrder} disabled={loading}>
         <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.orderBtnGrad}>
           {loading
@@ -510,7 +511,6 @@ export default function CartScreen() {
         </LinearGradient>
       </PressableScale>
     </View>
-    </DismissKeyboard>
   );
 }
 

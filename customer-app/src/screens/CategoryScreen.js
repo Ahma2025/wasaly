@@ -5,6 +5,8 @@ import api from '../utils/api';
 import { readCache } from '../utils/cache';
 import { GridSkeleton } from '../components/Skeleton';
 import RestaurantCard from '../components/RestaurantCard';
+import GradientHeader from '../components/GradientHeader';
+import { FadeIn } from '../components/Anim';
 import { useTheme } from '../context/ThemeContext';
 
 export default function CategoryScreen({ route, navigation }) {
@@ -27,13 +29,7 @@ export default function CategoryScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{categoryName || 'المطاعم'}</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <GradientHeader title={categoryName || 'المطاعم'} />
 
       {loading ? (
         <View style={{ paddingTop: 12 }}><GridSkeleton count={6} /></View>
@@ -48,8 +44,10 @@ export default function CategoryScreen({ route, navigation }) {
           keyExtractor={r => String(r.id)}
           contentContainerStyle={{ padding: 16, paddingBottom: 30 }}
           ListHeaderComponent={<Text style={styles.count}>{list.length} مطعم</Text>}
-          renderItem={({ item }) => (
-            <RestaurantCard restaurant={item} onPress={() => navigation.navigate('Restaurant', { restaurantId: item.id })} />
+          renderItem={({ item, index }) => (
+            <FadeIn delay={Math.min(index, 8) * 50}>
+              <RestaurantCard restaurant={item} onPress={() => navigation.navigate('Restaurant', { restaurantId: item.id })} />
+            </FadeIn>
           )}
           showsVerticalScrollIndicator={false}
         />

@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Image, Scro
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { pickImage } from '../utils/pickImage';
+import GradientHeader from '../components/GradientHeader';
 import api from '../utils/api';
 import { useTheme } from '../context/ThemeContext';
 
@@ -55,7 +56,7 @@ export default function RatingScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}><Text style={styles.headerTitle}>قيّم تجربتك</Text></View>
+      <GradientHeader title="قيّم تجربتك" />
 
       <View style={styles.content}>
         <Text style={styles.emoji}>⭐</Text>

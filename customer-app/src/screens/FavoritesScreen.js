@@ -6,6 +6,8 @@ import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { useTheme } from '../context/ThemeContext';
 import { CardRowSkeleton } from '../components/Skeleton';
+import { FadeIn } from '../components/Anim';
+import GradientHeader from '../components/GradientHeader';
 
 export default function FavoritesScreen() {
   const navigation = useNavigation();
@@ -40,22 +42,14 @@ export default function FavoritesScreen() {
 
   if (loading) return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={24} color={COLORS.text} /></TouchableOpacity>
-        <Text style={styles.headerTitle}>مطاعمي المفضلة ❤️</Text>
-        <View style={{ width: 24 }} />
-      </View>
+      <GradientHeader title="مطاعمي المفضلة ❤️" />
       <View style={{ padding: 8 }}>{[0,1,2,3,4].map(i => <CardRowSkeleton key={i} />)}</View>
     </View>
   );
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={24} color={COLORS.text} /></TouchableOpacity>
-        <Text style={styles.headerTitle}>مطاعمي المفضلة ❤️</Text>
-        <View style={{ width: 24 }} />
-      </View>
+      <GradientHeader title="مطاعمي المفضلة ❤️" />
 
       {favs.length === 0 ? (
         <View style={styles.center}>
@@ -68,8 +62,9 @@ export default function FavoritesScreen() {
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchFavs(); }} tintColor={COLORS.primary} />}>
-          {favs.map(r => (
-            <TouchableOpacity key={r.id} style={styles.card} onPress={() => navigation.navigate('Restaurant', { restaurantId: r.id })} activeOpacity={0.85}>
+          {favs.map((r, i) => (
+            <FadeIn key={r.id} delay={Math.min(i, 8) * 55}>
+            <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Restaurant', { restaurantId: r.id })} activeOpacity={0.85}>
               <Image source={{ uri: r.logo || r.cover_image }} style={styles.logo} />
               <View style={{ flex: 1, marginHorizontal: 12 }}>
                 <Text style={styles.name}>{r.name_ar}</Text>
@@ -84,6 +79,7 @@ export default function FavoritesScreen() {
                 <Ionicons name="heart" size={22} color="#FF3B30" />
               </TouchableOpacity>
             </TouchableOpacity>
+            </FadeIn>
           ))}
         </ScrollView>
       )}
@@ -99,8 +95,8 @@ const makeStyles = (COLORS) => StyleSheet.create({
   emptyText: { fontSize: 15, color: COLORS.gray, fontWeight: '600' },
   browseBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 24, paddingVertical: 11, borderRadius: 14 },
   browseText: { color: '#FFF', fontWeight: '800' },
-  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 16, padding: 12, marginBottom: 10, elevation: 2 },
-  logo: { width: 60, height: 60, borderRadius: 12, backgroundColor: COLORS.inputBg },
+  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 20, padding: 12, marginBottom: 12, ...COLORS.shadow.soft },
+  logo: { width: 62, height: 62, borderRadius: 16, backgroundColor: COLORS.inputBg },
   name: { fontSize: 15, fontWeight: '800', color: COLORS.text },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   meta: { fontSize: 12, color: COLORS.gray, fontWeight: '600' },
