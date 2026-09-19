@@ -1,13 +1,15 @@
 import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Press } from './Anim';
 import { useTheme } from '../context/ThemeContext';
 
 export default function ItemCard({ item, onAdd, onPress }) {
   const { colors: COLORS } = useTheme();
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
+    <Press style={styles.card} onPress={onPress} scaleTo={0.97} haptic={false}>
       <View style={styles.info}>
         <View style={styles.badges}>
           {(!!item.is_popular || !!item.is_bestseller) && <View style={[styles.badge, styles.badgeHot]}><Text style={styles.badgeHotText}>🔥 الأكثر طلباً</Text></View>}
@@ -36,16 +38,18 @@ export default function ItemCard({ item, onAdd, onPress }) {
             <Text style={styles.discountText}>-{Math.round((1 - parseFloat(item.discount_price) / parseFloat(item.price)) * 100)}%</Text>
           </View>
         )}
-        <TouchableOpacity style={styles.addBtn} onPress={onAdd}>
-          <Ionicons name="add" size={20} color="#FFF" />
+        <TouchableOpacity style={styles.addBtn} onPress={onAdd} activeOpacity={0.85}>
+          <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.addBtnGrad}>
+            <Ionicons name="add" size={20} color="#FFF" />
+          </LinearGradient>
         </TouchableOpacity>
       </View>
-    </TouchableOpacity>
+    </Press>
   );
 }
 
 const makeStyles = (COLORS) => StyleSheet.create({
-  card: { flexDirection: 'row', backgroundColor: COLORS.card, borderRadius: 16, marginBottom: 12, padding: 12, borderWidth: 1, borderColor: COLORS.line, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+  card: { flexDirection: 'row', backgroundColor: COLORS.card, borderRadius: 20, marginBottom: 12, padding: 12, ...COLORS.shadow.soft },
   info: { flex: 1, paddingRight: 12 },
   badges: { flexDirection: 'row', gap: 4, marginBottom: 4 },
   badge: { backgroundColor: '#E8F5E9', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 },
@@ -61,6 +65,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
   price: { fontSize: 16, fontWeight: '900', color: COLORS.primary },
   originalPrice: { fontSize: 12, color: COLORS.gray, textDecorationLine: 'line-through' },
   imageWrap: { position: 'relative' },
-  image: { width: 92, height: 92, borderRadius: 14 },
-  addBtn: { position: 'absolute', bottom: -8, right: -8, backgroundColor: COLORS.primary, borderRadius: 16, width: 32, height: 32, justifyContent: 'center', alignItems: 'center', elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.5, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, borderWidth: 2, borderColor: COLORS.card }
+  image: { width: 94, height: 94, borderRadius: 16 },
+  addBtn: { position: 'absolute', bottom: -8, right: -8, borderRadius: 17, borderWidth: 2, borderColor: COLORS.card, ...COLORS.shadow.float },
+  addBtnGrad: { width: 34, height: 34, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },
 });

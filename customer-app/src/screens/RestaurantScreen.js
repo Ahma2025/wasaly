@@ -11,6 +11,7 @@ import ItemCard from '../components/ItemCard';
 import PressableScale from '../components/PressableScale';
 import { Skeleton, GridSkeleton } from '../components/Skeleton';
 import CartBar from '../components/CartBar';
+import { FadeIn, Press } from '../components/Anim';
 import { useTheme } from '../context/ThemeContext';
 
 export default function RestaurantScreen() {
@@ -142,6 +143,8 @@ export default function RestaurantScreen() {
   };
 
   const headerHeight = scrollY.interpolate({ inputRange: [0, 200], outputRange: [220, 0], extrapolate: 'clamp' });
+  // بارالاكس: الصورة تتكبّر لطيف عند السحب للأسفل
+  const coverScale = scrollY.interpolate({ inputRange: [-120, 0], outputRange: [1.35, 1], extrapolate: 'clamp' });
 
   if (loading && !restaurant) return (
     <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
@@ -159,7 +162,7 @@ export default function RestaurantScreen() {
     <View style={styles.container}>
       <Animated.View style={[styles.cover, { height: headerHeight }]}>
         {restaurant.cover_image ? (
-          <Image source={{ uri: restaurant.cover_image }} style={styles.coverImg} resizeMode="cover" />
+          <Animated.Image source={{ uri: restaurant.cover_image }} style={[styles.coverImg, { transform: [{ scale: coverScale }] }]} resizeMode="cover" />
         ) : restaurant.logo ? (
           <View style={styles.logoBg}>
             <Image source={{ uri: restaurant.logo }} style={styles.coverImg} resizeMode="cover" />
@@ -171,6 +174,7 @@ export default function RestaurantScreen() {
             <Text style={{ fontSize: 64 }}>🏪</Text>
           </View>
         )}
+        <LinearGradient colors={['rgba(0,0,0,0.35)', 'transparent', 'rgba(0,0,0,0.45)']} locations={[0, 0.4, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={22} color="#FFF" />
         </TouchableOpacity>
@@ -186,6 +190,7 @@ export default function RestaurantScreen() {
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
         scrollEventThrottle={16}
       >
+        <FadeIn>
         <View style={styles.infoCard}>
           <Image source={{ uri: restaurant.logo }} style={styles.logo} />
           <View style={{ flex: 1, marginLeft: 12 }}>
@@ -199,6 +204,7 @@ export default function RestaurantScreen() {
             <Text style={styles.minOrder}>الحد الأدنى: {restaurant.min_order}₪</Text>
           </View>
         </View>
+        </FadeIn>
 
         {!restaurant.is_open && (
           <View style={styles.closedBanner}>
@@ -225,11 +231,20 @@ export default function RestaurantScreen() {
         )}
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryTabs}>
-          {menu.map((cat, idx) => (
-            <TouchableOpacity key={cat.id} style={[styles.catTab, activeCategory === idx && styles.catTabActive]} onPress={() => setActiveCategory(idx)}>
-              <Text style={[styles.catTabText, activeCategory === idx && styles.catTabTextActive]}>{cat.name_ar}</Text>
-            </TouchableOpacity>
-          ))}
+          {menu.map((cat, idx) => {
+            const on = activeCategory === idx;
+            return (
+              <TouchableOpacity key={cat.id} activeOpacity={0.85} onPress={() => setActiveCategory(idx)} style={{ marginRight: 8 }}>
+                {on ? (
+                  <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.catTab, styles.catTabActive]}>
+                    <Text style={[styles.catTabText, styles.catTabTextActive]}>{cat.name_ar}</Text>
+                  </LinearGradient>
+                ) : (
+                  <View style={styles.catTab}><Text style={styles.catTabText}>{cat.name_ar}</Text></View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, marginBottom: 4 }}>
@@ -254,8 +269,10 @@ export default function RestaurantScreen() {
                 || (dietFilter === 'spicy' && item.is_spicy)
                 || (dietFilter === 'veg' && item.is_vegetarian)
                 || (dietFilter === 'offers' && item.discount_price))
-              .map(item => (
-                <ItemCard key={item.id} item={item} onAdd={() => openItem(item)} onPress={() => openItem(item)} />
+              .map((item, i) => (
+                <FadeIn key={item.id} delay={Math.min(i, 8) * 50}>
+                  <ItemCard item={item} onAdd={() => openItem(item)} onPress={() => openItem(item)} />
+                </FadeIn>
               ))}
           </View>
         )}
@@ -354,7 +371,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
   groupReturnBar: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.primary, paddingVertical: 16, paddingBottom: 24 },
   groupReturnTxt: { color: '#FFF', fontWeight: '900', fontSize: 16 },
   categoryTabs: { paddingHorizontal: 16, marginBottom: 8 },
-  catTab: { paddingHorizontal: 16, paddingVertical: 9, marginRight: 8, borderRadius: 22, backgroundColor: COLORS.card, borderWidth: 1.5, borderColor: COLORS.border },
+  catTab: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 22, backgroundColor: COLORS.card, borderWidth: 1.5, borderColor: COLORS.border },
   catTabActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary, elevation: 3, shadowColor: COLORS.primary, shadowOpacity: 0.35, shadowRadius: 7, shadowOffset: { width: 0, height: 3 } },
   catTabText: { fontSize: 13, color: COLORS.text },
   catTabTextActive: { color: '#FFF', fontWeight: '700' },
