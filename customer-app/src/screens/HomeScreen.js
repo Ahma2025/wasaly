@@ -4,13 +4,16 @@ import {
   Image, RefreshControl, Dimensions, StatusBar, Animated, Pressable, LayoutAnimation, Platform, UIManager, ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import * as Location from 'expo-location';
 import BannerSlider from '../components/BannerSlider';
 import SkeletonCard from '../components/SkeletonCard';
+import { Skeleton, GridSkeleton } from '../components/Skeleton';
 import SupportButton from '../components/SupportButton';
+import { FadeIn, PopIn, Press } from '../components/Anim';
 import { useTheme } from '../context/ThemeContext';
 
 // تفعيل LayoutAnimation على Android
@@ -94,6 +97,7 @@ function RCard({ r, onPress }) {
     <AnimCard style={rc.wrap} onPress={onPress}>
       <View style={rc.imgBox}>
         <Image source={{ uri: r.cover_image || r.logo }} style={rc.img} resizeMode="cover" />
+        <LinearGradient colors={['transparent', 'rgba(10,10,20,0.55)']} style={rc.scrim} />
         {(r.discount_percent > 0 || r.discount > 0) && (
           <View style={rc.badge}><Text style={rc.badgeTxt}>خصم {r.discount_percent || r.discount}%</Text></View>
         )}
@@ -143,7 +147,11 @@ function SectionGrid({ list, onPress, limit = 4 }) {
   return (
     <>
       <View style={s.grid}>
-        {shown.map(r => <RCard key={r.id} r={r} onPress={() => onPress(r.id)} />)}
+        {shown.map((r, i) => (
+          <PopIn key={r.id} delay={Math.min(i, 8) * 55}>
+            <RCard r={r} onPress={() => onPress(r.id)} />
+          </PopIn>
+        ))}
       </View>
       {list.length > limit && (
         <TouchableOpacity style={s.moreBtn} onPress={() => {
@@ -281,9 +289,15 @@ export default function HomeScreen() {
   }, [suggested.length]);
 
   if (loading) return (
-    <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: 60, paddingHorizontal: 16 }}>
-      <View style={{ height: 200, backgroundColor: C.border, borderRadius: 18, marginBottom: 16 }} />
-      {[1, 2, 3].map(i => <SkeletonCard key={i} />)}
+    <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: 56 }}>
+      <View style={{ paddingHorizontal: 16 }}>
+        <Skeleton w={'50%'} h={16} style={{ alignSelf: 'center', marginBottom: 16 }} />
+        <Skeleton w={'100%'} h={190} r={22} style={{ marginBottom: 16 }} />
+        <View style={{ flexDirection: 'row-reverse', gap: 14, marginBottom: 18 }}>
+          {[0,1,2,3].map(i => <View key={i} style={{ alignItems: 'center', gap: 6 }}><Skeleton w={64} h={64} r={32} /><Skeleton w={44} h={9} /></View>)}
+        </View>
+      </View>
+      <GridSkeleton count={6} />
     </View>
   );
 
@@ -291,20 +305,20 @@ export default function HomeScreen() {
     <View style={s.container}>
       <StatusBar barStyle={C.mode === 'dark' ? 'light-content' : 'dark-content'} backgroundColor={C.white} />
 
-      {/* Header */}
-      <View style={s.header}>
+      {/* Header فخم بتدرّج لوني */}
+      <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
         <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={s.iconBtn}>
-          <Ionicons name="notifications-outline" size={24} color={C.text} />
+          <Ionicons name="notifications-outline" size={23} color="#FFF" />
         </TouchableOpacity>
-        <TouchableOpacity style={s.locBtn} onPress={() => navigation.navigate('AddAddress')}>
-          <Ionicons name="chevron-down" size={16} color={C.gray} />
+        <TouchableOpacity style={s.locBtn} onPress={() => navigation.navigate('AddAddress')} activeOpacity={0.85}>
+          <Ionicons name="chevron-down" size={15} color="rgba(255,255,255,0.85)" />
           <Text style={s.locTxt} numberOfLines={1}>حدد موقعك</Text>
-          <Ionicons name="location" size={18} color={C.primary} />
+          <Ionicons name="location" size={17} color="#FFF" />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('بحث')} style={s.iconBtn}>
-          <Ionicons name="search-outline" size={24} color={C.text} />
+          <Ionicons name="search-outline" size={23} color="#FFF" />
         </TouchableOpacity>
-      </View>
+      </LinearGradient>
 
       <ScrollView showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}>
@@ -316,27 +330,30 @@ export default function HomeScreen() {
         <View style={{ backgroundColor: C.white, paddingVertical: 16 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 12 }}>
-            {categories.map(cat => (
-              <TouchableOpacity key={cat.id} style={s.quickCat} onPress={() => navigation.navigate('Category', { categoryId: cat.id, categoryName: cat.name_ar })}>
-                <View style={s.quickCircle}>
-                  <Text style={{ fontSize: 28 }}>{cat.icon || '🍽️'}</Text>
-                </View>
-                <Text style={s.quickLbl}>{cat.name_ar}</Text>
-              </TouchableOpacity>
+            {categories.map((cat, i) => (
+              <FadeIn key={cat.id} delay={i * 45} from={10}>
+                <Press style={s.quickCat} onPress={() => navigation.navigate('Category', { categoryId: cat.id, categoryName: cat.name_ar })}>
+                  <View style={s.quickCircle}>
+                    <Text style={{ fontSize: 28 }}>{cat.icon || '🍽️'}</Text>
+                  </View>
+                  <Text style={s.quickLbl}>{cat.name_ar}</Text>
+                </Press>
+              </FadeIn>
             ))}
           </ScrollView>
         </View>
 
         {/* 👥 طلب جماعي */}
-        <TouchableOpacity
-          onPress={() => navigation.navigate('GroupOrder')}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.primary, marginHorizontal: 16, marginBottom: 12, borderRadius: 16, padding: 14 }}>
-          <Text style={{ fontSize: 24 }}>🧑‍🤝‍🧑</Text>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 15 }}>اطلبوا سوا — كسر الحساب</Text>
-            <Text style={{ color: '#FFF', opacity: 0.85, fontSize: 11, marginTop: 2 }}>عندك كود مجموعة؟ انضم واطلبوا مع بعض</Text>
-          </View>
-          <Ionicons name="chevron-back" size={20} color="#FFF" />
+        <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate('GroupOrder')} style={{ marginHorizontal: 16, marginBottom: 12 }}>
+          <LinearGradient colors={C.gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 18, padding: 15, ...C.shadow.float }}>
+            <Text style={{ fontSize: 24 }}>🧑‍🤝‍🧑</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 15 }}>اطلبوا سوا — كسر الحساب</Text>
+              <Text style={{ color: '#FFF', opacity: 0.9, fontSize: 11, marginTop: 2 }}>عندك كود مجموعة؟ انضم واطلبوا مع بعض</Text>
+            </View>
+            <Ionicons name="chevron-back" size={20} color="#FFF" />
+          </LinearGradient>
         </TouchableOpacity>
 
         <View style={s.divider} />
@@ -423,7 +440,7 @@ export default function HomeScreen() {
             <Text style={{ color: C.gray, marginTop: 12, fontSize: 17, fontWeight: '600' }}>لا توجد مطاعم حالياً</Text>
           </View>
         )}
-        <View style={{ height: 30 }} />
+        <View style={{ height: 110 }} />
       </ScrollView>
 
       <SupportButton />
@@ -444,6 +461,7 @@ const makeRc = (C) => StyleSheet.create({
   wrap: { width: CARD_W, backgroundColor: C.white, borderRadius: 20, overflow: 'hidden', elevation: 5, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 } },
   imgBox: { width: '100%', height: 118, position: 'relative' },
   img: { width: '100%', height: '100%' },
+  scrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 50 },
   badge: { position: 'absolute', top: 8, right: 8, backgroundColor: C.primary, borderRadius: 9, paddingHorizontal: 8, paddingVertical: 3, elevation: 3, shadowColor: C.primary, shadowOpacity: 0.4, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
   badgeTxt: { color: '#FFF', fontSize: 11, fontWeight: '800' },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(20,20,35,0.5)', justifyContent: 'center', alignItems: 'center' },
@@ -470,10 +488,10 @@ const makeHc = (C) => StyleSheet.create({
 
 const makeS = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 52, paddingBottom: 14, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.line },
-  iconBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.inputBg, alignItems: 'center', justifyContent: 'center' },
-  locBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, marginHorizontal: 8, backgroundColor: C.sec, borderRadius: 22, paddingVertical: 9, paddingHorizontal: 12, borderWidth: 1, borderColor: '#FFE4D3' },
-  locTxt: { fontSize: 15, fontWeight: '800', color: C.text },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 54, paddingBottom: 18, borderBottomLeftRadius: 26, borderBottomRightRadius: 26, ...C.shadow.float },
+  iconBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center' },
+  locBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, marginHorizontal: 8, backgroundColor: 'rgba(255,255,255,0.20)', borderRadius: 22, paddingVertical: 9, paddingHorizontal: 12 },
+  locTxt: { fontSize: 15, fontWeight: '800', color: '#FFF' },
   divider: { height: 8, backgroundColor: C.divider },
   quickCat: { alignItems: 'center', gap: 7 },
   quickCircle: { width: 68, height: 68, borderRadius: 24, backgroundColor: C.sec, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#FFEBDD', elevation: 2, shadowColor: '#FF6B00', shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } },

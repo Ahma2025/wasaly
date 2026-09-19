@@ -3,6 +3,7 @@ import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator }
 import { Ionicons } from '@expo/vector-icons';
 import api from '../utils/api';
 import { readCache } from '../utils/cache';
+import { GridSkeleton } from '../components/Skeleton';
 import RestaurantCard from '../components/RestaurantCard';
 import { useTheme } from '../context/ThemeContext';
 
@@ -35,7 +36,7 @@ export default function CategoryScreen({ route, navigation }) {
       </View>
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator size="large" color={COLORS.primary} /></View>
+        <View style={{ paddingTop: 12 }}><GridSkeleton count={6} /></View>
       ) : list.length === 0 ? (
         <View style={styles.center}>
           <Text style={{ fontSize: 52 }}>🍽️</Text>

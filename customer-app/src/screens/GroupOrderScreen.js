@@ -5,6 +5,7 @@ import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/nativ
 import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import api from '../utils/api';
+import { Skeleton } from '../components/Skeleton';
 import { useCart } from '../context/CartContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -146,7 +147,11 @@ export default function GroupOrderScreen() {
   }
 
   if (loading) return (
-    <View style={styles.loadingWrap}><ActivityIndicator size="large" color={COLORS.primary} /><Text style={styles.sub}>جاري التحميل...</Text></View>
+    <View style={{ flex: 1, backgroundColor: COLORS.bg, paddingTop: 50, paddingHorizontal: 16, gap: 12 }}>
+      <Skeleton w={'50%'} h={18} />
+      <Skeleton w={'100%'} h={80} r={16} />
+      {[0,1,2].map(i => <Skeleton key={i} w={'100%'} h={60} r={14} />)}
+    </View>
   );
   if (!group) return null;
 

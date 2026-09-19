@@ -154,8 +154,8 @@ export default function Banners() {
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-10">
-            <div className="animate-spin h-8 w-8 rounded-full border-b-2 border-orange-500" />
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 py-2">
+            {[...Array(6)].map((_, i) => <div key={i} className="sk" style={{ width: '100%', height: 120, borderRadius: 16 }} />)}
           </div>
         ) : banners.length === 0 ? (
           <div className="text-center py-12 text-gray-400">

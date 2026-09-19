@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
+import { Skeleton } from '../components/Skeleton';
+import { FadeIn } from '../components/Anim';
 import { useCart } from '../context/CartContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -76,8 +78,15 @@ export default function OrdersHistoryScreen() {
   const history = orders.filter(o => !ACTIVE.includes(o.status));
 
   if (loading) return (
-    <View style={styles.loadingWrap}>
-      <ActivityIndicator size="large" color={COLORS.primary} />
+    <View style={styles.container}>
+      <View style={styles.header}><Text style={styles.headerTitle}>طلباتي 📦</Text></View>
+      <View style={{ padding: 12 }}>{[0,1,2,3].map(i => (
+        <View key={i} style={{ backgroundColor: '#FFF', borderRadius: 16, padding: 14, marginBottom: 10 }}>
+          <Skeleton w={'55%'} h={14} />
+          <Skeleton w={'35%'} h={11} style={{ marginTop: 8 }} />
+          <Skeleton w={'25%'} h={16} style={{ marginTop: 10, alignSelf: 'flex-end' }} />
+        </View>
+      ))}</View>
     </View>
   );
 
@@ -102,7 +111,7 @@ export default function OrdersHistoryScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            active.map(o => <OrderCard key={o.id} order={o} navigation={navigation} isActive />)
+            active.map((o, i) => <FadeIn key={o.id} delay={i * 60}><OrderCard order={o} navigation={navigation} isActive /></FadeIn>)
           )}
         </View>
 
@@ -110,7 +119,7 @@ export default function OrdersHistoryScreen() {
         {history.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>الطلبات السابقة</Text>
-            {history.map(o => <OrderCard key={o.id} order={o} navigation={navigation} onReorder={handleReorder} reordering={reordering === o.id} />)}
+            {history.map((o, i) => <FadeIn key={o.id} delay={Math.min(i, 8) * 50}><OrderCard order={o} navigation={navigation} onReorder={handleReorder} reordering={reordering === o.id} /></FadeIn>)}
           </View>
         )}
         <View style={{ height: 20 }} />

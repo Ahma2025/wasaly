@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
+import PageSkeleton from '../components/Skeleton';
 import toast from 'react-hot-toast';
 
 const StatCard = ({ icon, label, value, sub, color }) => (
@@ -24,7 +25,7 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="flex justify-center items-center h-64"><div className="animate-spin h-8 w-8 rounded-full border-b-2 border-orange-500" /></div>;
+  if (loading) return <PageSkeleton cards={4} rows={6} />;
 
   const statusLabels = { pending: 'قيد الانتظار', confirmed: 'مقبول', preparing: 'يُحضَّر', on_the_way: 'في الطريق', delivered: 'تم التوصيل', cancelled: 'ملغي' };
 

@@ -6,6 +6,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import api from '../utils/api';
+import { Skeleton } from '../components/Skeleton';
 
 import { useTheme } from '../context/ThemeContext';
 
@@ -245,9 +246,17 @@ export default function OrderTrackingScreen() {
   );
 
   if (loading) return (
-    <View style={styles.loadingWrap}>
-      <ActivityIndicator size="large" color={COLORS.primary} />
-      <Text style={styles.loadingText}>جاري تحميل طلبك...</Text>
+    <View style={{ flex: 1, backgroundColor: COLORS.bg, paddingTop: 50 }}>
+      <Skeleton w={'100%'} h={260} r={0} />
+      <View style={{ padding: 16, gap: 14 }}>
+        <Skeleton w={'40%'} h={16} />
+        {[0,1,2,3].map(i => (
+          <View key={i} style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 12 }}>
+            <Skeleton w={40} h={40} r={20} />
+            <View style={{ flex: 1, gap: 6 }}><Skeleton w={'50%'} h={13} /><Skeleton w={'70%'} h={10} /></View>
+          </View>
+        ))}
+      </View>
     </View>
   );
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, RefreshControl, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { PopIn } from '../components/Anim';
 import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
@@ -117,8 +118,10 @@ export default function MarketScreen() {
         <Text style={s.listTitle}>{TYPES.find(t => t.id === selected)?.label || 'المتاجر'} المتاحة</Text>
 
         <View style={s.grid}>
-          {displayList.map(r => (
-            <StoreCard key={r.id} r={r} onPress={() => navigation.navigate('Restaurant', { restaurantId: r.id })} />
+          {displayList.map((r, i) => (
+            <PopIn key={r.id} delay={Math.min(i, 8) * 55}>
+              <StoreCard r={r} onPress={() => navigation.navigate('Restaurant', { restaurantId: r.id })} />
+            </PopIn>
           ))}
         </View>
 

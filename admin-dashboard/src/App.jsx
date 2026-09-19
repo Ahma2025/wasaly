@@ -2,6 +2,7 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import Login from './pages/Login';
+import PageSkeleton from './components/Skeleton';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Users = lazy(() => import('./pages/Users'));
@@ -77,7 +78,7 @@ function AppLayout() {
         </div>
       </header>
       <main className="pb-20">
-        <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="animate-spin h-8 w-8 rounded-full border-b-2 border-orange-500" /></div>}>
+        <Suspense fallback={<div className="p-4"><PageSkeleton cards={4} rows={6} /></div>}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/users" element={<Users />} />
@@ -121,7 +122,7 @@ export default function App() {
 
   if (checking) return (
     <div className="flex items-center justify-center h-screen bg-gray-50">
-      <div className="animate-spin h-10 w-10 rounded-full border-b-2 border-orange-500" />
+      <div className="text-3xl font-black text-orange-500 animate-pulse">وصلّي</div>
     </div>
   );
 

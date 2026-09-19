@@ -5,15 +5,15 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { View, ActivityIndicator, Text, TextInput, StyleSheet } from 'react-native';
-import { useFonts, Cairo_400Regular, Cairo_500Medium, Cairo_600SemiBold, Cairo_700Bold, Cairo_800ExtraBold } from '@expo-google-fonts/cairo';
+import { useFonts, Tajawal_400Regular, Tajawal_500Medium, Tajawal_700Bold, Tajawal_800ExtraBold, Tajawal_900Black } from '@expo-google-fonts/tajawal';
 import SplashScreen from './src/components/SplashScreen';
 import './src/tasks/locationTask'; // يُعرّف مهمة تتبّع الموقع في الخلفية
 
 const WEIGHT_MAP = {
-  '400': 'Cairo_400Regular', 'normal': 'Cairo_400Regular',
-  '500': 'Cairo_500Medium', '600': 'Cairo_600SemiBold',
-  '700': 'Cairo_700Bold', 'bold': 'Cairo_700Bold',
-  '800': 'Cairo_800ExtraBold', '900': 'Cairo_800ExtraBold',
+  '400': 'Tajawal_400Regular', 'normal': 'Tajawal_400Regular',
+  '500': 'Tajawal_500Medium', '600': 'Tajawal_500Medium',
+  '700': 'Tajawal_700Bold', 'bold': 'Tajawal_700Bold',
+  '800': 'Tajawal_800ExtraBold', '900': 'Tajawal_900Black',
 };
 let _fontPatched = false;
 function applyGlobalFont() {
@@ -26,7 +26,7 @@ function applyGlobalFont() {
       if (!el || !el.props) return el;
       const flat = StyleSheet.flatten(el.props.style) || {};
       const w = flat.fontWeight ? String(flat.fontWeight) : '400';
-      const fam = flat.fontFamily || WEIGHT_MAP[w] || 'Cairo_400Regular';
+      const fam = flat.fontFamily || WEIGHT_MAP[w] || 'Tajawal_400Regular';
       return React.cloneElement(el, { style: [{ fontFamily: fam }, el.props.style, { fontWeight: undefined }] });
     };
   };
@@ -84,7 +84,7 @@ function AppNavigator() {
 
 export default function App() {
   const [splashDone, setSplashDone] = useState(false);
-  const [fontsLoaded] = useFonts({ Cairo_400Regular, Cairo_500Medium, Cairo_600SemiBold, Cairo_700Bold, Cairo_800ExtraBold });
+  const [fontsLoaded] = useFonts({ Tajawal_400Regular, Tajawal_500Medium, Tajawal_700Bold, Tajawal_800ExtraBold, Tajawal_900Black });
   if (fontsLoaded) applyGlobalFont();
 
   if (!splashDone) {

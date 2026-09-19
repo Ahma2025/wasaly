@@ -5,6 +5,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { useTheme } from '../context/ThemeContext';
+import { CardRowSkeleton } from '../components/Skeleton';
 
 export default function FavoritesScreen() {
   const navigation = useNavigation();
@@ -37,7 +38,16 @@ export default function FavoritesScreen() {
     try { await api.delete(`/users/favorites/${id}`); } catch {}
   };
 
-  if (loading) return <View style={styles.center}><ActivityIndicator size="large" color={COLORS.primary} /></View>;
+  if (loading) return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={24} color={COLORS.text} /></TouchableOpacity>
+        <Text style={styles.headerTitle}>مطاعمي المفضلة ❤️</Text>
+        <View style={{ width: 24 }} />
+      </View>
+      <View style={{ padding: 8 }}>{[0,1,2,3,4].map(i => <CardRowSkeleton key={i} />)}</View>
+    </View>
+  );
 
   return (
     <View style={styles.container}>

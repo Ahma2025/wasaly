@@ -111,7 +111,7 @@ export default function Drivers() {
 
       {/* Drivers List */}
       {loading ? (
-        <div className="flex justify-center py-12"><div className="animate-spin h-8 w-8 rounded-full border-b-2 border-orange-500" /></div>
+        <div className="space-y-3 py-2">{[...Array(6)].map((_,i)=>(<div key={i} className="flex items-center gap-3 bg-white rounded-2xl p-4 shadow-soft"><div className="sk" style={{width:44,height:44,borderRadius:12}}/><div className="flex-1 space-y-2"><div className="sk" style={{width:"45%",height:14,borderRadius:8}}/><div className="sk" style={{width:"25%",height:11,borderRadius:8}}/></div></div>))}</div>
       ) : drivers.length === 0 ? (
         <div className="text-center py-12 text-gray-400">
           <p className="text-4xl mb-2">🛵</p>
@@ -188,7 +188,7 @@ function DriverStats({ driverId }) {
     api.get(`/admin/driver-stats/${driverId}`).then(r => setStats(r.data)).catch(() => {});
   }, [driverId]);
 
-  if (!stats) return <div className="mt-3 text-center py-2"><div className="animate-spin h-5 w-5 rounded-full border-b-2 border-orange-500 mx-auto" /></div>;
+  if (!stats) return <div className="mt-3 flex gap-2"><div className="sk flex-1" style={{ height: 40, borderRadius: 10 }} /><div className="sk flex-1" style={{ height: 40, borderRadius: 10 }} /></div>;
 
   return (
     <div className="mt-3 pt-3 border-t border-orange-100 bg-orange-50 rounded-xl p-3 space-y-2">

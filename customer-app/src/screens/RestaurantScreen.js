@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Animated, Alert, Modal, Pressable, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
@@ -8,6 +9,7 @@ import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import ItemCard from '../components/ItemCard';
 import PressableScale from '../components/PressableScale';
+import { Skeleton, GridSkeleton } from '../components/Skeleton';
 import CartBar from '../components/CartBar';
 import { useTheme } from '../context/ThemeContext';
 
@@ -141,7 +143,16 @@ export default function RestaurantScreen() {
 
   const headerHeight = scrollY.interpolate({ inputRange: [0, 200], outputRange: [220, 0], extrapolate: 'clamp' });
 
-  if (loading) return <View style={styles.loading}><Text>جاري التحميل...</Text></View>;
+  if (loading && !restaurant) return (
+    <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
+      <Skeleton w={'100%'} h={220} r={0} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 }}>
+        <Skeleton w={70} h={70} r={16} />
+        <View style={{ flex: 1, gap: 8 }}><Skeleton w={'60%'} h={16} /><Skeleton w={'40%'} h={12} /></View>
+      </View>
+      <View style={{ paddingTop: 8 }}><GridSkeleton count={6} /></View>
+    </View>
+  );
   if (!restaurant) return null;
 
   return (
@@ -302,8 +313,10 @@ export default function RestaurantScreen() {
 
           <View style={styles.sheetFooter}>
             <PressableScale style={styles.addBtn} onPress={confirmAddItem}>
-              <Text style={styles.addBtnText}>إضافة للسلة</Text>
-              <Text style={styles.addBtnPrice}>{(parseFloat(selectedItem?.price || 0) + getAddonPrice()).toFixed(2)}₪</Text>
+              <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.addBtnGrad}>
+                <Text style={styles.addBtnText}>إضافة للسلة</Text>
+                <Text style={styles.addBtnPrice}>{(parseFloat(selectedItem?.price || 0) + getAddonPrice()).toFixed(2)}₪</Text>
+              </LinearGradient>
             </PressableScale>
           </View>
         </View>
@@ -369,7 +382,8 @@ const makeStyles = (COLORS) => StyleSheet.create({
   addonName: { flex: 1, fontSize: 14, color: COLORS.text, fontWeight: '500' },
   addonPrice: { fontSize: 13, color: COLORS.primary, fontWeight: '700' },
   sheetFooter: { padding: 16, borderTopWidth: 1, borderTopColor: COLORS.line },
-  addBtn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', elevation: 6, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
+  addBtn: { borderRadius: 18, overflow: 'hidden', elevation: 8, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 14, shadowOffset: { width: 0, height: 8 } },
+  addBtnGrad: { padding: 16, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   addBtnText: { color: '#FFF', fontSize: 16, fontWeight: '800' },
   addBtnPrice: { color: '#FFF', fontSize: 16, fontWeight: '700' },
 });

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, Keyboard } from 'react-native';
 import DismissKeyboard from '../components/DismissKeyboard';
 import PressableScale from '../components/PressableScale';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
@@ -501,10 +502,12 @@ export default function CartScreen() {
       </ScrollView>
 
       <PressableScale style={[styles.orderBtn, loading && { opacity: 0.7 }]} onPress={placeOrder} disabled={loading}>
-        {loading
-          ? <ActivityIndicator color="#FFF" />
-          : <Text style={styles.orderBtnText}>تأكيد الطلب • {finalTotal.toFixed(2)}₪</Text>
-        }
+        <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.orderBtnGrad}>
+          {loading
+            ? <ActivityIndicator color="#FFF" />
+            : <Text style={styles.orderBtnText}>تأكيد الطلب • {finalTotal.toFixed(2)}₪</Text>
+          }
+        </LinearGradient>
       </PressableScale>
     </View>
     </DismissKeyboard>
@@ -574,6 +577,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   summaryLabel: { fontSize: 14, color: COLORS.gray },
   summaryVal: { fontSize: 14, fontWeight: '600', color: COLORS.text },
-  orderBtn: { position: 'absolute', bottom: 20, left: 16, right: 16, backgroundColor: COLORS.primary, borderRadius: 18, padding: 18, alignItems: 'center', elevation: 10, shadowColor: COLORS.primary, shadowOpacity: 0.45, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
+  orderBtn: { position: 'absolute', bottom: 24, left: 16, right: 16, borderRadius: 20, overflow: 'hidden', elevation: 12, shadowColor: COLORS.primary, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 10 } },
+  orderBtnGrad: { padding: 18, alignItems: 'center', borderRadius: 20 },
   orderBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16, letterSpacing: 0.3 },
 });

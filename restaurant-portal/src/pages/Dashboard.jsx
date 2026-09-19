@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
+import PageSkeleton from '../components/Skeleton';
 import toast from 'react-hot-toast';
 
 export default function Dashboard() {
@@ -42,11 +43,7 @@ export default function Dashboard() {
   const topItems = stats?.topItems || [];
   const maxSold = topItems[0]?.sold || 1;
 
-  if (loading) return (
-    <div className="flex justify-center items-center h-64">
-      <div className="animate-spin h-8 w-8 rounded-full border-b-2 border-orange-500" />
-    </div>
-  );
+  if (loading) return <PageSkeleton cards={4} rows={5} />;
 
   return (
     <div className="p-4 space-y-4 animate-fade-up" dir="rtl">

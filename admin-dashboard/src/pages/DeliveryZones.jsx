@@ -162,7 +162,7 @@ export default function DeliveryZones() {
 
       {/* Zones List */}
       {loading ? (
-        <div className="flex justify-center py-12"><div className="animate-spin h-8 w-8 rounded-full border-b-2 border-orange-500" /></div>
+        <div className="space-y-3 py-2">{[...Array(6)].map((_,i)=>(<div key={i} className="flex items-center gap-3 bg-white rounded-2xl p-4 shadow-soft"><div className="sk" style={{width:44,height:44,borderRadius:12}}/><div className="flex-1 space-y-2"><div className="sk" style={{width:"45%",height:14,borderRadius:8}}/><div className="sk" style={{width:"25%",height:11,borderRadius:8}}/></div></div>))}</div>
       ) : zones.length === 0 ? (
         <div className="text-center py-12 text-gray-400">
           <p className="text-4xl mb-2">📍</p>

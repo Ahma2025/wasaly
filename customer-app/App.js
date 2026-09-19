@@ -6,15 +6,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { View, ActivityIndicator, Text, TextInput, ScrollView, Keyboard, Platform, TouchableOpacity, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Notifications from 'expo-notifications';
-import { useFonts, Cairo_400Regular, Cairo_500Medium, Cairo_600SemiBold, Cairo_700Bold, Cairo_800ExtraBold } from '@expo-google-fonts/cairo';
+import { useFonts, Tajawal_400Regular, Tajawal_500Medium, Tajawal_700Bold, Tajawal_800ExtraBold, Tajawal_900Black } from '@expo-google-fonts/tajawal';
 import SplashScreen from './src/components/SplashScreen';
+import api from './src/utils/api';
+import { writeCache } from './src/utils/cache';
 
-// خريطة الأوزان → عائلة Cairo المناسبة (عشان الخط يبان صح مع كل fontWeight)
+// خريطة الأوزان → عائلة Tajawal المناسبة (عشان الخط يبان صح مع كل fontWeight)
 const WEIGHT_MAP = {
-  '400': 'Cairo_400Regular', 'normal': 'Cairo_400Regular',
-  '500': 'Cairo_500Medium', '600': 'Cairo_600SemiBold',
-  '700': 'Cairo_700Bold', 'bold': 'Cairo_700Bold',
-  '800': 'Cairo_800ExtraBold', '900': 'Cairo_800ExtraBold',
+  '400': 'Tajawal_400Regular', 'normal': 'Tajawal_400Regular',
+  '500': 'Tajawal_500Medium', '600': 'Tajawal_500Medium',
+  '700': 'Tajawal_700Bold', 'bold': 'Tajawal_700Bold',
+  '800': 'Tajawal_800ExtraBold', '900': 'Tajawal_900Black',
 };
 let _fontPatched = false;
 function applyGlobalFont() {
@@ -27,7 +29,7 @@ function applyGlobalFont() {
       if (!el || !el.props) return el;
       const flat = StyleSheet.flatten(el.props.style) || {};
       const w = flat.fontWeight ? String(flat.fontWeight) : '400';
-      const fam = flat.fontFamily || WEIGHT_MAP[w] || 'Cairo_400Regular';
+      const fam = flat.fontFamily || WEIGHT_MAP[w] || 'Tajawal_400Regular';
       return React.cloneElement(el, { style: [{ fontFamily: fam }, el.props.style, { fontWeight: undefined }] });
     };
   };
@@ -71,30 +73,17 @@ import PaymentWebViewScreen from './src/screens/PaymentWebViewScreen';
 import CategoryScreen from './src/screens/CategoryScreen';
 import SupportChatScreen from './src/screens/SupportChatScreen';
 import GroupOrderScreen from './src/screens/GroupOrderScreen';
+import FloatingTabBar from './src/components/FloatingTabBar';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
 function MainTabs() {
-  const { colors } = useTheme();
   return (
-    <Tab.Navigator initialRouteName="الرئيسية" screenOptions={({ route }) => ({
-      tabBarIcon: ({ focused, color, size }) => {
-        const icons = {
-          'حسابي':    focused ? 'person'       : 'person-outline',
-          'طلباتي':   focused ? 'receipt'      : 'receipt-outline',
-          'ماركت':    focused ? 'cart'         : 'cart-outline',
-          'سلتي':     focused ? 'bag'          : 'bag-outline',
-          'بحث':      focused ? 'search'       : 'search-outline',
-          'الرئيسية': focused ? 'home'         : 'home-outline',
-        };
-        return <Ionicons name={icons[route.name]} size={size} color={color} />;
-      },
-      tabBarActiveTintColor: colors.primary,
-      tabBarInactiveTintColor: colors.faint,
-      headerShown: false,
-      tabBarStyle: { paddingBottom: 5, height: 60, backgroundColor: colors.card, borderTopColor: colors.border },
-    })}>
+    <Tab.Navigator
+      initialRouteName="الرئيسية"
+      tabBar={(props) => <FloatingTabBar {...props} />}
+      screenOptions={{ headerShown: false, tabBarHideOnKeyboard: true, sceneContainerStyle: { paddingBottom: 92 } }}>
       {/* الترتيب من اليسار لليمين: حسابي ← طلباتي ← ماركت ← سلتي ← بحث ← الرئيسية */}
       <Tab.Screen name="حسابي"    component={ProfileScreen} />
       <Tab.Screen name="طلباتي"   component={OrdersHistoryScreen} />
@@ -108,12 +97,39 @@ function MainTabs() {
 
 function AppNavigator() {
   const { user, loading } = useAuth();
+
+  // تجهيز مسبق لبيانات كل الصفحات لحظة الدخول — عشان تفتح فورية بدون تحميل
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const [r, c, b] = await Promise.allSettled([
+          api.get('/restaurants?limit=60'), api.get('/categories'), api.get('/banners'),
+        ]);
+        const rests = r.status === 'fulfilled' ? (r.value?.data || []) : [];
+        const cats = c.status === 'fulfilled' ? (c.value?.data || []) : [];
+        const bans = b.status === 'fulfilled' ? (b.value?.data || []) : [];
+        let recent = [];
+        try {
+          const my = await api.get('/orders/my'); const orders = my?.data || [];
+          writeCache('orders_my', orders);
+          const seen = new Set();
+          for (const o of orders) { if (o.restaurant_id && !seen.has(o.restaurant_id)) { seen.add(o.restaurant_id); const rr = rests.find(x => x.id === o.restaurant_id); if (rr) recent.push(rr); } if (recent.length >= 8) break; }
+        } catch {}
+        if (rests.length || cats.length || bans.length) writeCache('home', { restaurants: rests, categories: cats, banners: bans, recentRests: recent });
+        api.get('/restaurants?limit=60&store_type=market').then(m => writeCache('market', m.data || [])).catch(() => {});
+        api.get('/users/profile').then(p => writeCache('profile', p.data)).catch(() => {});
+        api.get('/users/favorites').then(f => writeCache('favorites', f.data || [])).catch(() => {});
+      } catch {}
+    })();
+  }, [user]);
+
   if (loading) return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" color="#FF6B00" /></View>;
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right', animationDuration: 260, gestureEnabled: true }}>
       {user ? (
         <>
-          <Stack.Screen name="Main" component={MainTabs} />
+          <Stack.Screen name="Main" component={MainTabs} options={{ animation: 'fade' }} />
           <Stack.Screen name="Restaurant" component={RestaurantScreen} />
           <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
           <Stack.Screen name="OrdersHistory" component={OrdersHistoryScreen} />
@@ -201,7 +217,7 @@ function MainApp() {
 export default function App() {
   const [splashDone, setSplashDone] = useState(false);
   const [fontsLoaded] = useFonts({
-    Cairo_400Regular, Cairo_500Medium, Cairo_600SemiBold, Cairo_700Bold, Cairo_800ExtraBold,
+    Tajawal_400Regular, Tajawal_500Medium, Tajawal_700Bold, Tajawal_800ExtraBold, Tajawal_900Black,
   });
   if (fontsLoaded) applyGlobalFont();
 
