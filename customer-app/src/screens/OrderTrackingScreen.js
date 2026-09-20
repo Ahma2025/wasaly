@@ -44,6 +44,10 @@ function buildMapHTML({ restLat, restLng, custLat, custLng, driverLat, driverLng
   .leaflet-control-zoom a{font-size:18px!important;width:36px!important;height:36px!important;line-height:36px!important}
   .custom-popup .leaflet-popup-content-wrapper{border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,0.18)}
   .custom-popup .leaflet-popup-content{font-family:system-ui;font-size:13px;font-weight:600;direction:rtl;text-align:right}
+  @keyframes pulseRing{0%{transform:scale(.55);opacity:.75}80%,100%{transform:scale(2.3);opacity:0}}
+  .drv-wrap{position:relative;width:44px;height:44px}
+  .drv-ring{position:absolute;inset:0;border-radius:50%;background:rgba(255,107,0,.45);animation:pulseRing 1.6s ease-out infinite}
+  .drv-badge{position:absolute;inset:0;background:#FF6B00;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;border:3px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.35)}
 </style>
 </head>
 <body>
@@ -75,12 +79,20 @@ function mkIcon(emoji,size,bg){
     iconSize:[size,size],iconAnchor:[size/2,size/2],popupAnchor:[0,-(size/2)],className:''
   });
 }
+// أيقونة السائق مع حلقة نبض "لايف"
+function mkDriverIcon(){
+  return L.divIcon({
+    html:'<div class="drv-wrap"><div class="drv-ring"></div><div class="drv-badge">🛵</div></div>',
+    iconSize:[44,44],iconAnchor:[22,22],popupAnchor:[0,-22],className:''
+  });
+}
 
 var pts=[];
 var driverMarker=null;
 var curPos=null;              // الموقع المرسوم حالياً للسائق
 var animFrame=null, startPos=null, endPos=null, animStart=0;
-var ANIM_MS=5200;             // مدة انزلاق الدبوس بين نقطتين (أطول قليلاً من فترة الإرسال ليبقى متحركاً دائماً)
+var ANIM_MS=5000;             // مدة انزلاق الدبوس — تُضبط ديناميكياً حسب الفاصل الحقيقي بين التحديثات
+var lastMoveAt=0;             // وقت آخر تحديث موقع (لحساب سرعة الانزلاق الواقعية)
 var followDriver=true;        // الكاميرا تتبع السائق مثل وضع الملاحة
 
 ${safeRestLat && safeRestLng ? `
@@ -96,7 +108,7 @@ pts.push([${safeCustLat},${safeCustLng}]);
 ` : ''}
 
 ${safeDriverLat && safeDriverLng ? `
-driverMarker=L.marker([${safeDriverLat},${safeDriverLng}],{icon:mkIcon('🛵',44,'#FF6B00')}).addTo(map)
+driverMarker=L.marker([${safeDriverLat},${safeDriverLng}],{icon:mkDriverIcon()}).addTo(map)
   .bindPopup('<div style="direction:rtl;font-weight:700;color:#FF6B00">🛵 السائق</div>',{className:'custom-popup'});
 curPos=[${safeDriverLat},${safeDriverLng}];
 pts.push([${safeDriverLat},${safeDriverLng}]);
@@ -131,12 +143,18 @@ function moveDriver(lat,lng){
   var ll=[lat,lng];
   if(isNaN(lat)||isNaN(lng)) return;
   if(!driverMarker){
-    driverMarker=L.marker(ll,{icon:mkIcon('🛵',44,'#FF6B00')}).addTo(map)
+    driverMarker=L.marker(ll,{icon:mkDriverIcon()}).addTo(map)
       .bindPopup('<div style="direction:rtl;font-weight:700;color:#FF6B00">🛵 السائق</div>',{className:'custom-popup'});
     curPos=ll;
+    lastMoveAt=Date.now();
     if(followDriver) map.setView(ll,16,{animate:true});
     return;
   }
+  // مدة الانزلاق = الفاصل الحقيقي بين التحديثات (شوي أطول) ليمشي متواصل بدون توقّف
+  var nowT=Date.now();
+  var interval = lastMoveAt ? (nowT-lastMoveAt) : 5000;
+  lastMoveAt=nowT;
+  ANIM_MS = Math.max(1500, Math.min(interval*1.2, 14000));
   startPos=curPos ? [curPos[0],curPos[1]] : [lat,lng];
   endPos=[lat,lng];
   animStart=Date.now();

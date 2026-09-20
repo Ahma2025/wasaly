@@ -99,11 +99,11 @@ export default function DriverHome() {
     locationInterval.current && clearInterval(locationInterval.current);
     locationInterval.current = setInterval(async () => {
       try {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
         setLocation(loc.coords);
         await api.patch('/drivers/location', { lat: loc.coords.latitude, lng: loc.coords.longitude });
       } catch {}
-    }, 10000);
+    }, 5000); // كل ٥ ثواني — مسار أنعم وأدق للزبون
   };
 
   // Refresh active order whenever screen comes into focus (e.g. returning from DeliveryScreen)
