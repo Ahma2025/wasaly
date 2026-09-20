@@ -32,7 +32,8 @@ export default function Reviews() {
       <h1 className="text-lg font-black text-gray-900">التقييمات ⭐</h1>
 
       {/* ملخص */}
-      <div className="bg-gradient-to-r from-orange-500 to-orange-600 rounded-3xl p-5 text-white shadow-brand flex items-center justify-between">
+      <div className="grad-sunset rounded-3xl p-5 text-white shadow-brand flex items-center justify-between relative overflow-hidden">
+        <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-white/10 blur-xl" />
         <div>
           <p className="text-white/80 text-xs font-semibold mb-1">متوسط تقييم المطعم</p>
           <p className="text-4xl font-black">{avg} <span className="text-2xl">★</span></p>
@@ -52,9 +53,9 @@ export default function Reviews() {
           <p className="text-sm mt-1">ستظهر تقييمات الزبائن هنا</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 stagger">
           {reviews.map(r => (
-            <div key={r.id} className="bg-white rounded-2xl p-4 shadow-soft border border-gray-100">
+            <div key={r.id} className="bg-white rounded-2xl p-4 shadow-soft hover-lift">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
                   <div className="w-9 h-9 rounded-full bg-orange-100 flex items-center justify-center text-sm font-black text-orange-600">
