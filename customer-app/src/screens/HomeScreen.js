@@ -15,6 +15,15 @@ import { Skeleton, GridSkeleton } from '../components/Skeleton';
 import SupportButton from '../components/SupportButton';
 import { FadeIn, PopIn, Press } from '../components/Anim';
 import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '../context/AuthContext';
+
+// تحية حسب الوقت
+const greetingText = () => {
+  const h = new Date().getHours();
+  if (h < 12) return 'صباح الخير';
+  if (h < 17) return 'مساء الخير';
+  return 'مساء الخير';
+};
 
 // تفعيل LayoutAnimation على Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -168,6 +177,7 @@ function SectionGrid({ list, onPress, limit = 4 }) {
 export default function HomeScreen() {
   const navigation = useNavigation();
   const { colors: C } = useTheme();
+  const { user } = useAuth();
   const s = React.useMemo(() => makeS(C), [C]);
   const [banners, setBanners]       = useState([]);
   const [categories, setCategories] = useState([]);
@@ -307,17 +317,24 @@ export default function HomeScreen() {
 
       {/* Header فخم بتدرّج لوني */}
       <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={s.iconBtn}>
-          <Ionicons name="notifications-outline" size={23} color="#FFF" />
-        </TouchableOpacity>
-        <TouchableOpacity style={s.locBtn} onPress={() => navigation.navigate('AddAddress')} activeOpacity={0.85}>
-          <Ionicons name="chevron-down" size={15} color="rgba(255,255,255,0.85)" />
-          <Text style={s.locTxt} numberOfLines={1}>حدد موقعك</Text>
-          <Ionicons name="location" size={17} color="#FFF" />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('بحث')} style={s.iconBtn}>
-          <Ionicons name="search-outline" size={23} color="#FFF" />
-        </TouchableOpacity>
+        <View style={s.headerRow}>
+          <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={s.iconBtn}>
+            <Ionicons name="notifications-outline" size={23} color="#FFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={s.locBtn} onPress={() => navigation.navigate('AddAddress')} activeOpacity={0.85}>
+            <Ionicons name="chevron-down" size={15} color="rgba(255,255,255,0.85)" />
+            <Text style={s.locTxt} numberOfLines={1}>حدد موقعك</Text>
+            <Ionicons name="location" size={17} color="#FFF" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('بحث')} style={s.iconBtn}>
+            <Ionicons name="search-outline" size={23} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+        {/* تحية شخصية */}
+        <View style={s.greetWrap}>
+          <Text style={s.greetHi}>{greetingText()}{user?.name ? ` ${String(user.name).split(' ')[0]}` : ''} 👋</Text>
+          <Text style={s.greetSub}>شو نفسك تاكل اليوم؟</Text>
+        </View>
       </LinearGradient>
 
       <ScrollView showsVerticalScrollIndicator={false}
@@ -488,7 +505,11 @@ const makeHc = (C) => StyleSheet.create({
 
 const makeS = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 54, paddingBottom: 18, borderBottomLeftRadius: 26, borderBottomRightRadius: 26, ...C.shadow.float },
+  header: { paddingHorizontal: 16, paddingTop: 54, paddingBottom: 20, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, ...C.shadow.float },
+  headerRow: { flexDirection: 'row', alignItems: 'center' },
+  greetWrap: { marginTop: 14, paddingHorizontal: 2 },
+  greetHi: { color: '#FFF', fontSize: 22, fontWeight: '900' },
+  greetSub: { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '600', marginTop: 2 },
   iconBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center' },
   locBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, marginHorizontal: 8, backgroundColor: 'rgba(255,255,255,0.20)', borderRadius: 22, paddingVertical: 9, paddingHorizontal: 12 },
   locTxt: { fontSize: 15, fontWeight: '800', color: '#FFF' },

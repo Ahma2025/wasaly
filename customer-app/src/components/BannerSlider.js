@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, Dimensions, TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const W = Dimensions.get('window').width;
 
@@ -66,6 +67,7 @@ export default function BannerSlider({ banners }) {
             </View>
           ) : (
             <View key={item.id || i} style={[s.slide, { backgroundColor: item.bg || '#FF6B00' }]}>
+              <LinearGradient colors={['rgba(255,255,255,0.14)', 'transparent', 'rgba(0,0,0,0.25)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
               <View style={[s.circle1, { backgroundColor: item.circle || 'rgba(255,255,255,0.12)' }]} />
               <View style={[s.circle2, { backgroundColor: item.circle || 'rgba(255,255,255,0.08)' }]} />
               <View style={[s.circle3, { backgroundColor: item.circle || 'rgba(255,255,255,0.06)' }]} />
