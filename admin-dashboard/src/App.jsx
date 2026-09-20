@@ -51,7 +51,7 @@ function BottomNav() {
           return (
             <button key={item.to} onClick={() => navigate(item.to)}
               className={`flex-shrink-0 flex flex-col items-center py-2 px-3 gap-0.5 min-w-[60px] ${active ? 'text-orange-500' : 'text-gray-400'}`}>
-              <span className={`text-lg w-10 h-7 flex items-center justify-center rounded-full ${active ? 'bg-orange-50' : ''}`}>{item.icon}</span>
+              <span className={`text-lg w-10 h-7 flex items-center justify-center rounded-full transition-all ${active ? 'grad-brand shadow-brand -translate-y-0.5' : ''}`}>{item.icon}</span>
               <span className="text-[9px] font-bold whitespace-nowrap">{item.label}</span>
             </button>
           );
