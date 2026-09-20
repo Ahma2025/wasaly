@@ -46,8 +46,8 @@ export default function AdminOrders() {
       <div className="space-y-3">
         {loading ? [...Array(6)].map((_, i) => <div key={i} className="h-24 bg-white rounded-2xl border animate-pulse" />)
           : orders.length === 0 ? <div className="text-center py-12 text-gray-400">لا توجد طلبات</div>
-          : orders.map(o => (
-          <div key={o.id} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer active:bg-gray-50"
+          : <div className="space-y-3 stagger">{orders.map(o => (
+          <div key={o.id} className="bg-white rounded-2xl shadow-soft hover-lift p-4 cursor-pointer"
             onClick={() => setSelected(selected?.id === o.id ? null : o)}>
             <div className="flex justify-between items-start mb-2">
               <div>
@@ -66,7 +66,7 @@ export default function AdminOrders() {
               <span className="text-xs text-gray-400">{o.payment_method === 'cash' ? 'نقداً' : 'بطاقة'}</span>
             </div>
           </div>
-        ))}
+        ))}</div>}
       </div>
 
       {/* Detail Modal */}

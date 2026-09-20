@@ -160,9 +160,9 @@ export default function Restaurants() {
       ) : restaurants.length === 0 ? (
         <div className="text-center py-12 text-gray-400"><p className="text-4xl mb-2">🏪</p><p>لا توجد مطاعم</p></div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 stagger">
           {restaurants.map(r => (
-            <div key={r.id} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+            <div key={r.id} className="bg-white rounded-2xl p-4 shadow-soft hover-lift">
               <div className="flex gap-3">
                 {r.logo
                   ? <img src={r.logo} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" alt="" />

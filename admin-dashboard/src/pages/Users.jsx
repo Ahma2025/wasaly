@@ -109,8 +109,8 @@ export default function Users() {
           [...Array(5)].map((_, i) => <div key={i} className="h-20 bg-white rounded-2xl border animate-pulse" />)
         ) : users.length === 0 ? (
           <div className="text-center py-12 text-gray-400">لا يوجد مستخدمون</div>
-        ) : users.map(user => (
-          <div key={user.id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between gap-3">
+        ) : <div className="space-y-2 stagger">{users.map(user => (
+          <div key={user.id} className="bg-white rounded-2xl shadow-soft hover-lift p-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 flex-1 min-w-0">
               <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center font-bold text-orange-600 text-lg flex-shrink-0">
                 {user.name?.[0] || '?'}
@@ -133,7 +133,7 @@ export default function Users() {
               {user.is_blocked ? 'رفع الحظر' : 'حظر'}
             </button>
           </div>
-        ))}
+        ))}</div>}
       </div>
     </div>
   );
