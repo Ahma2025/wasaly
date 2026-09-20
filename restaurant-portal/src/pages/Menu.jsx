@@ -98,7 +98,7 @@ export default function Menu() {
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-black text-gray-900">المنيو</h1>
         <button onClick={() => setShowAddCat(!showAddCat)}
-          className="bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-bold">
+          className="grad-brand text-white shadow-brand px-4 py-2 rounded-xl text-sm font-bold">
           ➕ فئة جديدة
         </button>
       </div>
@@ -108,7 +108,7 @@ export default function Menu() {
           <input className="flex-1 border border-gray-200 rounded-xl p-3 text-sm" placeholder="اسم الفئة (مثال: البرجر، الشاورما...)"
             value={newCatName} onChange={e => setNewCatName(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && addCategory()} autoFocus />
-          <button onClick={addCategory} className="bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-bold">إضافة</button>
+          <button onClick={addCategory} className="grad-brand text-white shadow-brand px-4 py-2 rounded-xl text-sm font-bold">إضافة</button>
           <button onClick={() => setShowAddCat(false)} className="bg-gray-100 text-gray-600 px-3 py-2 rounded-xl text-sm">إلغاء</button>
         </div>
       )}
@@ -122,9 +122,9 @@ export default function Menu() {
           <p className="text-sm mt-1">أضف فئة لتبدأ ببناء المنيو</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 stagger">
           {categories.map(cat => (
-            <div key={cat.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div key={cat.id} className="bg-white rounded-2xl shadow-card overflow-hidden hover-lift">
               {/* Category Header */}
               <div className="flex items-center gap-3 p-4 cursor-pointer"
                 onClick={() => setExpandedCat(expandedCat === cat.id ? null : cat.id)}>
@@ -306,7 +306,7 @@ function ItemForm({ catId, initial, onSave, onCancel }) {
         </div>
       )}
       <div className="flex gap-2">
-        <button onClick={() => onSave(catId, form)} className="flex-1 bg-orange-500 text-white py-2.5 rounded-xl font-bold text-sm">
+        <button onClick={() => onSave(catId, form)} className="flex-1 grad-brand text-white shadow-brand py-2.5 rounded-xl font-bold text-sm">
           {initial ? 'حفظ التعديلات' : 'إضافة الصنف'}
         </button>
         <button onClick={onCancel} className="flex-1 bg-white text-gray-600 border border-gray-200 py-2.5 rounded-xl font-bold text-sm">

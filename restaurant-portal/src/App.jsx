@@ -31,7 +31,7 @@ function BottomNav() {
         return (
           <button key={item.to} onClick={() => navigate(item.to)}
             className={`flex-1 flex flex-col items-center py-2 gap-0.5 ${active ? 'text-orange-500' : 'text-gray-400'}`}>
-            <span className={`text-xl w-11 h-8 flex items-center justify-center rounded-full ${active ? 'bg-orange-50' : ''}`}>{item.icon}</span>
+            <span className={`text-xl w-11 h-8 flex items-center justify-center rounded-full transition-all ${active ? 'grad-brand shadow-brand -translate-y-0.5' : ''}`}>{item.icon}</span>
             <span className="text-[10px] font-bold">{item.label}</span>
           </button>
         );
@@ -55,15 +55,15 @@ function Layout() {
   return (
     <div className="min-h-screen bg-gray-50" dir="rtl">
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-gray-100 px-4 flex items-center gap-3 shadow-soft"
-        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)', paddingBottom: '16px' }}>
-        <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center text-lg ring-2 ring-white shadow-soft overflow-hidden">
-          {restaurant.logo ? <img src={restaurant.logo} className="w-10 h-10 rounded-xl object-cover" /> : '🏪'}
+      <header className="sticky top-0 z-40 grad-sunset px-4 flex items-center gap-3 shadow-brand rounded-b-3xl"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 18px)', paddingBottom: '20px' }}>
+        <div className="w-11 h-11 rounded-2xl glass flex items-center justify-center text-lg overflow-hidden">
+          {restaurant.logo ? <img src={restaurant.logo} className="w-11 h-11 rounded-2xl object-cover" /> : '🏪'}
         </div>
-        <div>
-          <p className="font-bold text-gray-900 leading-none text-sm">{restaurant.name_ar || 'المطعم'}</p>
-          <span className={`text-[10px] font-semibold ${restaurant.is_open ? 'text-green-600' : 'text-red-500'}`}>
-            {restaurant.is_open ? '● مفتوح' : '● مغلق'}
+        <div className="flex-1">
+          <p className="font-black text-white leading-none text-base">{restaurant.name_ar || 'المطعم'}</p>
+          <span className="text-[11px] font-semibold text-white/90">
+            {restaurant.is_open ? '● مفتوح الآن' : '● مغلق'}
           </span>
         </div>
       </header>

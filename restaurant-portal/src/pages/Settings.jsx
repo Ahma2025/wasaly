@@ -356,7 +356,7 @@ export default function Settings() {
       </div>
 
       <button onClick={save} disabled={saving}
-        className="w-full bg-orange-500 text-white py-4 rounded-2xl font-black text-base disabled:opacity-60 shadow-lg shadow-orange-200">
+        className="w-full grad-brand text-white shadow-brand py-4 rounded-2xl font-black text-base disabled:opacity-60 shadow-lg shadow-orange-200">
         {saving ? 'جاري الحفظ...' : '💾 حفظ الإعدادات'}
       </button>
     </div>

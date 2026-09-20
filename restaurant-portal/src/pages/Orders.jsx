@@ -143,7 +143,7 @@ export default function Orders() {
       <div className="flex gap-2">
         {FILTERS.map(f => (
           <button key={f.key} onClick={() => { setFilter(f.key); setLoading(true); }}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${filter === f.key ? 'bg-orange-500 text-white' : 'bg-white text-gray-500 border border-gray-200'}`}>
+            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${filter === f.key ? 'grad-brand text-white shadow-brand' : 'bg-white text-gray-500 border border-gray-200'}`}>
             {f.label}
           </button>
         ))}
@@ -157,7 +157,7 @@ export default function Orders() {
           <p className="font-semibold">لا توجد طلبات</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 stagger">
           {orders.map(order => (
             <OrderCard
               key={order.id}
@@ -197,7 +197,7 @@ function OrderCard({ order, token, isExpanded, onToggle, onAccept, onUpdateStatu
   const getActions = () => {
     if (order.status === 'pending') return [{
       label: '✅ قبول الطلب وبدء التحضير',
-      color: 'bg-orange-500 text-white',
+      color: 'grad-brand text-white shadow-brand',
       onClick: () => onAccept(order.id)
     }];
     if (order.status === 'confirmed') {

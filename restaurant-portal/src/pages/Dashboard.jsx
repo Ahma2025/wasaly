@@ -55,7 +55,8 @@ export default function Dashboard() {
       </div>
 
       {/* Today Highlight */}
-      <div className="bg-gradient-to-r from-orange-500 to-orange-600 rounded-3xl p-5 text-white shadow-brand">
+      <div className="grad-sunset rounded-3xl p-5 text-white shadow-brand relative overflow-hidden">
+        <div className="absolute -top-10 -left-10 w-40 h-40 rounded-full bg-white/10 blur-xl" />
         <p className="text-white/80 text-xs font-semibold mb-2">اليوم</p>
         <div className="flex justify-between items-end">
           <div>
@@ -71,20 +72,20 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-soft hover:shadow-card hover:-translate-y-0.5">
+      <div className="grid grid-cols-2 gap-3 stagger">
+        <div className="bg-white rounded-2xl p-4 shadow-soft hover-lift">
           <p className="text-gray-400 text-xs">إيرادات الشهر</p>
           <p className="text-xl font-black text-gray-900 mt-1">{totalRevenue.toFixed(0)}₪</p>
         </div>
-        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-soft hover:shadow-card hover:-translate-y-0.5">
+        <div className="bg-white rounded-2xl p-4 shadow-soft hover-lift">
           <p className="text-gray-400 text-xs">طلبات الشهر</p>
           <p className="text-xl font-black text-gray-900 mt-1">{totalOrders}</p>
         </div>
-        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-soft hover:shadow-card hover:-translate-y-0.5">
+        <div className="bg-white rounded-2xl p-4 shadow-soft hover-lift">
           <p className="text-gray-400 text-xs">متوسط الطلب</p>
           <p className="text-xl font-black text-gray-900 mt-1">{avgOrder}₪</p>
         </div>
-        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-soft hover:shadow-card hover:-translate-y-0.5">
+        <div className="bg-white rounded-2xl p-4 shadow-soft hover-lift">
           <p className="text-gray-400 text-xs">تم التوصيل</p>
           <p className="text-xl font-black text-green-600 mt-1">{deliveredCount}</p>
         </div>
@@ -97,11 +98,11 @@ export default function Dashboard() {
             <h2 className="font-bold text-gray-900">الإيرادات</h2>
             <div className="flex gap-1">
               <button onClick={() => setView('week')}
-                className={`text-xs px-3 py-1 rounded-lg font-bold ${view === 'week' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                className={`text-xs px-3 py-1 rounded-lg font-bold transition-all ${view === 'week' ? 'grad-brand text-white shadow-brand' : 'bg-gray-100 text-gray-500'}`}>
                 أسبوع
               </button>
               <button onClick={() => setView('month')}
-                className={`text-xs px-3 py-1 rounded-lg font-bold ${view === 'month' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                className={`text-xs px-3 py-1 rounded-lg font-bold transition-all ${view === 'month' ? 'grad-brand text-white shadow-brand' : 'bg-gray-100 text-gray-500'}`}>
                 شهر
               </button>
             </div>
