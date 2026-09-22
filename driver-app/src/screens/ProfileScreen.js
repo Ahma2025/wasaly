@@ -65,11 +65,13 @@ export default function ProfileScreen({ navigation }) {
           { label: 'التقييم', value: parseFloat(profile?.rating || 0).toFixed(1), icon: '⭐' },
           { label: 'التوصيلات', value: profile?.total_deliveries || 0, icon: '📦' },
         ].map((s, i) => (
-          <View key={i} style={styles.statCard}>
-            <Text style={styles.statIcon}>{s.icon}</Text>
-            <Text style={styles.statValue}>{s.value}</Text>
-            <Text style={styles.statLabel}>{s.label}</Text>
-          </View>
+          <PopIn key={i} delay={i * 70} style={{ flex: 1 }}>
+            <View style={styles.statCard}>
+              <Text style={styles.statIcon}>{s.icon}</Text>
+              <Text style={styles.statValue}>{s.value}</Text>
+              <Text style={styles.statLabel}>{s.label}</Text>
+            </View>
+          </PopIn>
         ))}
       </View>
 
@@ -120,7 +122,7 @@ const styles = StyleSheet.create({
   name: { fontSize: 21, fontWeight: '900', color: '#FFF' },
   phone: { fontSize: 14, color: 'rgba(255,255,255,0.9)', marginTop: 4, fontWeight: '600' },
   statsRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  statCard: { flex: 1, backgroundColor: '#FFF', borderRadius: 16, padding: 12, alignItems: 'center', elevation: 2 },
+  statCard: { backgroundColor: '#FFF', borderRadius: 18, padding: 14, alignItems: 'center', ...SHADOW.soft },
   statIcon: { fontSize: 20, marginBottom: 4 },
   statValue: { fontSize: 17, fontWeight: '900', color: COLORS.text },
   statLabel: { fontSize: 10, color: COLORS.gray, marginTop: 2 },
