@@ -204,10 +204,13 @@ export default function CartScreen() {
   if (items.length === 0) {
     return (
       <View style={styles.empty}>
-        <Text style={{ fontSize: 60 }}>🛒</Text>
-        <Text style={styles.emptyTitle}>السلة فارغة</Text>
-        <TouchableOpacity style={styles.shopBtn} onPress={() => navigation.navigate('Main', { screen: 'الرئيسية' })}>
-          <Text style={styles.shopBtnText}>تصفح المطاعم</Text>
+        <View style={styles.emptyIconWrap}><Text style={{ fontSize: 58 }}>🛒</Text></View>
+        <Text style={styles.emptyTitle}>سلّتك فاضية</Text>
+        <Text style={styles.emptySub}>استكشف أشهى المطاعم وابدأ طلبك الآن</Text>
+        <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate('Main', { screen: 'الرئيسية' })} style={styles.shopBtn}>
+          <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.shopBtnGrad}>
+            <Text style={styles.shopBtnText}>تصفّح المطاعم</Text>
+          </LinearGradient>
         </TouchableOpacity>
       </View>
     );
@@ -520,9 +523,12 @@ const makeStyles = (COLORS) => StyleSheet.create({
   headerBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 18, fontWeight: '900', color: '#FFF' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16, backgroundColor: COLORS.bg },
-  emptyTitle: { fontSize: 20, fontWeight: '700', color: COLORS.text },
-  shopBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 5 } },
-  shopBtnText: { color: '#FFF', fontWeight: '800', fontSize: 15 },
+  emptyIconWrap: { width: 120, height: 120, borderRadius: 40, backgroundColor: COLORS.tint, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  emptyTitle: { fontSize: 22, fontWeight: '900', color: COLORS.text },
+  emptySub: { fontSize: 14, color: COLORS.gray, fontWeight: '600', marginTop: -6, textAlign: 'center', paddingHorizontal: 40 },
+  shopBtn: { borderRadius: 18, overflow: 'hidden', marginTop: 6, ...COLORS.shadow.float },
+  shopBtnGrad: { paddingHorizontal: 30, paddingVertical: 15, borderRadius: 18 },
+  shopBtnText: { color: '#FFF', fontWeight: '900', fontSize: 15 },
   card: { backgroundColor: COLORS.card, margin: 12, marginBottom: 0, borderRadius: 20, padding: 16, ...COLORS.shadow.soft },
   cardTitle: { fontSize: 14, fontWeight: '800', color: COLORS.text, marginBottom: 12 },
   itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.line, gap: 12 },
