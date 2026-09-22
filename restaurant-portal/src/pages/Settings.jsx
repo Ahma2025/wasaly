@@ -200,7 +200,7 @@ export default function Settings() {
       </div>
 
       {/* Logo & Basic Info */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-4">
+      <div className="bg-white rounded-2xl p-4 shadow-soft space-y-4">
         <h2 className="font-bold text-gray-900">معلومات المطعم</h2>
         <div className="flex items-center gap-4">
           <div
@@ -266,7 +266,7 @@ export default function Settings() {
       </div>
 
       {/* Location */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3">
+      <div className="bg-white rounded-2xl p-4 shadow-soft space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-bold text-gray-900">📍 موقع المطعم</h2>
           <button onClick={detectLocation}
@@ -298,7 +298,7 @@ export default function Settings() {
       </div>
 
       {/* Delivery Settings */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-4">
+      <div className="bg-white rounded-2xl p-4 shadow-soft space-y-4">
         <h2 className="font-bold text-gray-900">إعدادات التوصيل والأوقات</h2>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -335,7 +335,7 @@ export default function Settings() {
       </div>
 
       {/* Account Info */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+      <div className="bg-white rounded-2xl p-4 shadow-soft">
         <h2 className="font-bold text-gray-900 mb-3">معلومات الحساب</h2>
         <div className="space-y-2">
           <div className="flex justify-between text-sm">

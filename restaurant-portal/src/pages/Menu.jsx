@@ -104,7 +104,7 @@ export default function Menu() {
       </div>
 
       {showAddCat && (
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex gap-2">
+        <div className="bg-white rounded-2xl p-4 shadow-soft flex gap-2">
           <input className="flex-1 border border-gray-200 rounded-xl p-3 text-sm" placeholder="اسم الفئة (مثال: البرجر، الشاورما...)"
             value={newCatName} onChange={e => setNewCatName(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && addCategory()} autoFocus />

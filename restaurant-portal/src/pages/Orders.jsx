@@ -230,9 +230,9 @@ function OrderCard({ order, token, isExpanded, onToggle, onAccept, onUpdateStatu
   const actions = getActions();
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    <div className="bg-white rounded-2xl shadow-soft overflow-hidden">
       {/* Card Header */}
-      <div className="p-4 cursor-pointer" onClick={onToggle}>
+      <div className="p-4 cursor-pointer active:bg-gray-50 transition-colors" onClick={onToggle}>
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1">
             <div className="flex items-center gap-2 flex-wrap">
