@@ -128,8 +128,8 @@ export default function LiveOps() {
       <div className="space-y-2">
         {data.orders.length === 0 ? (
           <div className="text-center py-10 text-gray-400"><p className="text-4xl mb-2">✅</p><p className="font-semibold">لا توجد طلبات نشطة الآن</p></div>
-        ) : data.orders.map(o => (
-          <div key={o.id} className="bg-white rounded-2xl p-3 shadow-soft border border-gray-100 flex items-center justify-between">
+        ) : <div className="space-y-2 stagger">{data.orders.map(o => (
+          <div key={o.id} className="bg-white rounded-2xl p-3 shadow-soft hover-lift flex items-center justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <p className="font-black text-gray-900 text-sm">#{o.order_number || o.id}</p>
@@ -140,7 +140,7 @@ export default function LiveOps() {
             </div>
             <p className="font-black text-orange-500 text-sm flex-shrink-0">{parseFloat(o.total || 0).toFixed(0)}₪</p>
           </div>
-        ))}
+        ))}</div>}
       </div>
     </div>
   );

@@ -118,9 +118,9 @@ export default function Drivers() {
           <p>لا يوجد سائقون</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 stagger">
           {drivers.map(d => (
-            <div key={d.id} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+            <div key={d.id} className="bg-white rounded-2xl p-4 shadow-soft hover-lift">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-black text-lg flex-shrink-0">
                   {d.name?.[0] || '🛵'}

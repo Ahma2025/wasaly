@@ -63,8 +63,8 @@ export default function Accounting() {
           <h2 className="font-black text-gray-900 mt-2">المطاعم 🏪</h2>
           {data.restaurants.length === 0 ? (
             <p className="text-center text-gray-400 py-6 text-sm">لا توجد مبيعات مسلّمة بعد</p>
-          ) : data.restaurants.map(r => (
-            <div key={r.id} className="bg-white rounded-2xl p-4 shadow-soft border border-gray-100">
+          ) : <div className="space-y-3 stagger">{data.restaurants.map(r => (
+            <div key={r.id} className="bg-white rounded-2xl p-4 shadow-soft hover-lift">
               <div className="flex items-center justify-between mb-2">
                 <p className="font-bold text-gray-900 text-sm">{r.name}</p>
                 <span className="text-xs text-gray-400">{r.orders} طلب</span>
@@ -79,10 +79,10 @@ export default function Accounting() {
                 <input type="number" min="0" max="100" step="0.5"
                   className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm text-center"
                   value={rates[r.id] ?? ''} onChange={e => setRates(p => ({ ...p, [r.id]: e.target.value }))} />
-                <button onClick={() => saveRate(r.id)} className="bg-orange-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg">حفظ</button>
+                <button onClick={() => saveRate(r.id)} className="grad-brand text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-brand">حفظ</button>
               </div>
             </div>
-          ))}
+          ))}</div>}
 
           {/* السائقون */}
           <h2 className="font-black text-gray-900 mt-2">السائقون 🛵</h2>

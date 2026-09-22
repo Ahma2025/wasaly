@@ -170,9 +170,9 @@ export default function DeliveryZones() {
           <p className="text-xs mt-1">أنشئ حتى 3 براكيتات للمسافة</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 stagger">
           {zones.map(zone => (
-            <div key={zone.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div key={zone.id} className="bg-white rounded-2xl shadow-soft hover-lift overflow-hidden">
               {editing?.id === zone.id ? (
                 <div className="p-4 space-y-3">
                   <input className="w-full border border-gray-200 rounded-xl p-3 text-sm font-bold" value={editing.name}

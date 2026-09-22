@@ -90,9 +90,9 @@ export default function Coupons() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 stagger">
         {loading ? [...Array(4)].map((_, i) => <div key={i} className="bg-white rounded-2xl p-4 animate-pulse h-32 border" />) : coupons.map(c => (
-          <div key={c.id} className="bg-white rounded-2xl border p-4 shadow-sm">
+          <div key={c.id} className="bg-white rounded-2xl p-4 shadow-soft hover-lift">
             <div className="flex items-start justify-between mb-2">
               <div>
                 <span className="font-mono font-black text-orange-600 text-lg">{c.code}</span>
