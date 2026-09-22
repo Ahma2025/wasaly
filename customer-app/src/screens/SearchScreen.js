@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -37,8 +37,10 @@ export default function SearchScreen() {
   };
 
   const RestaurantItem = ({ item }) => (
-    <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Restaurant', { restaurantId: item.id })}>
-      <View style={styles.logo}><Text style={{ fontSize: 28 }}>🏪</Text></View>
+    <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Restaurant', { restaurantId: item.id })} activeOpacity={0.85}>
+      {item.logo || item.cover_image
+        ? <Image source={{ uri: item.logo || item.cover_image }} style={styles.logo} />
+        : <View style={styles.logo}><Text style={{ fontSize: 28 }}>🏪</Text></View>}
       <View style={styles.cardInfo}>
         <Text style={styles.cardName}>{item.name_ar || item.name}</Text>
         <Text style={styles.cardSub}>{item.delivery_time_min}-{item.delivery_time_max} دقيقة</Text>
