@@ -14,6 +14,7 @@ import SkeletonCard from '../components/SkeletonCard';
 import { Skeleton, GridSkeleton } from '../components/Skeleton';
 import SupportButton from '../components/SupportButton';
 import { FadeIn, PopIn, Press } from '../components/Anim';
+import EmptyState from '../components/EmptyState';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 
@@ -452,9 +453,8 @@ export default function HomeScreen() {
         })}
 
         {restaurants.length === 0 && (
-          <View style={{ alignItems: 'center', paddingVertical: 60 }}>
-            <Text style={{ fontSize: 52 }}>🍽️</Text>
-            <Text style={{ color: C.gray, marginTop: 12, fontSize: 17, fontWeight: '600' }}>لا توجد مطاعم حالياً</Text>
+          <View style={{ paddingVertical: 40 }}>
+            <EmptyState emoji="🍽️" title="ما في مطاعم حاليًا" subtitle="جرّب تسحب للتحديث بعد شوي" />
           </View>
         )}
         <View style={{ height: 110 }} />

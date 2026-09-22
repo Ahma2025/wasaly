@@ -8,6 +8,7 @@ import { useTheme } from '../context/ThemeContext';
 import { CardRowSkeleton } from '../components/Skeleton';
 import { FadeIn } from '../components/Anim';
 import GradientHeader from '../components/GradientHeader';
+import EmptyState from '../components/EmptyState';
 
 export default function FavoritesScreen() {
   const navigation = useNavigation();
@@ -52,13 +53,13 @@ export default function FavoritesScreen() {
       <GradientHeader title="مطاعمي المفضلة ❤️" />
 
       {favs.length === 0 ? (
-        <View style={styles.center}>
-          <Text style={{ fontSize: 52 }}>💔</Text>
-          <Text style={styles.emptyText}>لا يوجد مطاعم مفضلة بعد</Text>
-          <TouchableOpacity style={styles.browseBtn} onPress={() => navigation.navigate('Main', { screen: 'الرئيسية' })}>
-            <Text style={styles.browseText}>تصفّح المطاعم</Text>
-          </TouchableOpacity>
-        </View>
+        <EmptyState
+          emoji="💔"
+          title="ما في مفضّلة بعد"
+          subtitle="اضغط ❤️ على أي مطعم بتحبه ليظهر هون"
+          ctaLabel="تصفّح المطاعم"
+          onCta={() => navigation.navigate('Main', { screen: 'الرئيسية' })}
+        />
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchFavs(); }} tintColor={COLORS.primary} />}>

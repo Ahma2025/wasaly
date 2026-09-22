@@ -7,6 +7,7 @@ import { GridSkeleton } from '../components/Skeleton';
 import RestaurantCard from '../components/RestaurantCard';
 import GradientHeader from '../components/GradientHeader';
 import { FadeIn } from '../components/Anim';
+import EmptyState from '../components/EmptyState';
 import { useTheme } from '../context/ThemeContext';
 
 export default function CategoryScreen({ route, navigation }) {
@@ -34,10 +35,7 @@ export default function CategoryScreen({ route, navigation }) {
       {loading ? (
         <View style={{ paddingTop: 12 }}><GridSkeleton count={6} /></View>
       ) : list.length === 0 ? (
-        <View style={styles.center}>
-          <Text style={{ fontSize: 52 }}>🍽️</Text>
-          <Text style={styles.empty}>لا توجد مطاعم في «{categoryName}» حالياً</Text>
-        </View>
+        <EmptyState emoji="🍽️" title="ما في مطاعم هون" subtitle={`لا توجد مطاعم في «${categoryName}» حالياً`} />
       ) : (
         <FlatList
           data={list}

@@ -6,6 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
 import { useTheme } from '../context/ThemeContext';
 import { FadeIn } from '../components/Anim';
+import EmptyState from '../components/EmptyState';
 
 const POPULAR = ['برجر', 'بيتزا', 'شاورما', 'سوشي', 'دجاج', 'فلافل', 'مشاوي', 'حلويات'];
 
@@ -104,7 +105,7 @@ export default function SearchScreen() {
             return null;
           }}
           contentContainerStyle={{ padding: 16 }}
-          ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyIcon}>🔍</Text><Text style={styles.emptyText}>لا نتائج لـ "{query}"</Text></View>}
+          ListEmptyComponent={<View style={{ paddingTop: 40 }}><EmptyState emoji="🔍" title="ما في نتائج" subtitle={`ما لقينا شي لـ "${query}" — جرّب كلمة ثانية`} /></View>}
         />
       )}
     </View>

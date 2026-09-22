@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, RefreshControl, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { PopIn } from '../components/Anim';
+import EmptyState from '../components/EmptyState';
 import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
@@ -127,9 +128,8 @@ export default function MarketScreen() {
         </View>
 
         {displayList.length === 0 && (
-          <View style={{ alignItems: 'center', paddingVertical: 60 }}>
-            <Text style={{ fontSize: 48 }}>🏪</Text>
-            <Text style={{ color: C.gray, marginTop: 12, fontSize: 16, fontWeight: '600' }}>لا توجد متاجر متاحة حالياً</Text>
+          <View style={{ paddingVertical: 40 }}>
+            <EmptyState emoji="🏪" title="ما في متاجر حاليًا" subtitle="رجّع بعدين، عم نضيف متاجر جديدة" />
           </View>
         )}
         <View style={{ height: 30 }} />
