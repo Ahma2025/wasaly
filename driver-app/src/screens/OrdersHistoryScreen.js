@@ -3,6 +3,8 @@ import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import GradientHeader from '../components/GradientHeader';
+import { FadeIn } from '../components/Anim';
+import { SHADOW } from '../theme';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA', green: '#34C759' };
 
@@ -32,7 +34,8 @@ export default function OrdersHistoryScreen() {
     } catch {} finally { setLoading(false); }
   };
 
-  const renderItem = ({ item: o }) => (
+  const renderItem = ({ item: o, index }) => (
+    <FadeIn delay={Math.min(index, 8) * 45}>
     <View style={styles.card}>
       <View style={styles.cardTop}>
         <View>
@@ -47,6 +50,7 @@ export default function OrdersHistoryScreen() {
       </View>
       <Text style={styles.time}>{new Date(o.created_at).toLocaleDateString('ar-SA', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</Text>
     </View>
+    </FadeIn>
   );
 
   return (
@@ -69,7 +73,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   header: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E5E5EA' },
   title: { fontSize: 20, fontWeight: '800', color: COLORS.text },
-  card: { backgroundColor: '#FFF', borderRadius: 16, padding: 16, elevation: 2 },
+  card: { backgroundColor: '#FFF', borderRadius: 18, padding: 16, ...SHADOW.soft },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
   restaurantName: { fontSize: 15, fontWeight: '800', color: COLORS.text },
   customerName: { fontSize: 13, color: COLORS.gray, marginTop: 2 },

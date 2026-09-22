@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import api from '../utils/api';
 import GradientHeader from '../components/GradientHeader';
 import { readCache, writeCache } from '../utils/cache';
+import { FadeIn } from '../components/Anim';
+import { SHADOW } from '../theme';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA', star: '#FFB800' };
 
@@ -47,7 +49,8 @@ export default function ReviewsScreen({ navigation }) {
           data={list}
           keyExtractor={r => String(r.id)}
           contentContainerStyle={{ padding: 16 }}
-          renderItem={({ item }) => (
+          renderItem={({ item, index }) => (
+            <FadeIn delay={Math.min(index, 8) * 45}>
             <View style={styles.card}>
               <View style={styles.rowB}>
                 <Text style={styles.name}>{item.customer_name || 'زبون'}</Text>
@@ -56,6 +59,7 @@ export default function ReviewsScreen({ navigation }) {
               <Text style={styles.rest}>{[item.restaurant_name, new Date(item.created_at).toLocaleDateString('ar')].filter(Boolean).join(' · ')}</Text>
               {!!item.comment && <Text style={styles.comment}>{item.comment}</Text>}
             </View>
+            </FadeIn>
           )}
         />
       )}
@@ -73,7 +77,7 @@ const styles = StyleSheet.create({
   count: { color: 'rgba(255,255,255,0.85)', fontSize: 14, marginTop: 4 },
   empty: { alignItems: 'center', marginTop: 40, gap: 10 },
   emptyText: { color: COLORS.gray, fontSize: 15, fontWeight: '600' },
-  card: { backgroundColor: '#FFF', borderRadius: 16, padding: 14, marginBottom: 10, elevation: 1, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },
+  card: { backgroundColor: '#FFF', borderRadius: 18, padding: 14, marginBottom: 10, ...SHADOW.soft },
   rowB: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   name: { fontSize: 15, fontWeight: '800', color: COLORS.text },
   stars: { fontSize: 15, color: COLORS.star },
