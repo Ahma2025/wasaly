@@ -138,9 +138,9 @@ export default function ProfileScreen({ navigation }) {
       {/* Menu Items */}
       <View style={styles.section}>
         {MENU.map((item, i) => (
-          <TouchableOpacity key={i} style={styles.menuItem} onPress={item.onPress}>
+          <TouchableOpacity key={i} style={styles.menuItem} onPress={item.onPress} activeOpacity={0.7}>
             <View style={styles.menuLeft}>
-              <Ionicons name={item.icon} size={22} color={COLORS.primary} />
+              <View style={styles.menuIcon}><Ionicons name={item.icon} size={19} color={COLORS.primary} /></View>
               <Text style={styles.menuLabel}>{item.label}</Text>
             </View>
             <Ionicons name="chevron-back" size={16} color={COLORS.gray} />
@@ -168,7 +168,7 @@ export default function ProfileScreen({ navigation }) {
       <View style={styles.section}>
         <View style={styles.menuItem}>
           <View style={styles.menuLeft}>
-            <Ionicons name="notifications" size={22} color={COLORS.primary} />
+            <View style={styles.menuIcon}><Ionicons name="notifications" size={19} color={COLORS.primary} /></View>
             <Text style={styles.menuLabel}>الإشعارات</Text>
           </View>
           <Switch value={notifs} onValueChange={setNotifs} trackColor={{ true: COLORS.primary }} />
@@ -238,8 +238,9 @@ const makeStyles = (COLORS) => StyleSheet.create({
   fieldLabel: { fontSize: 12, color: COLORS.gray, marginBottom: 3 },
   fieldValue: { fontSize: 15, fontWeight: '600', color: COLORS.text },
   fieldInput: { fontSize: 15, color: COLORS.text, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8, padding: 8, backgroundColor: COLORS.inputBg },
-  menuItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  menuLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  menuItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: COLORS.line },
+  menuLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  menuIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: COLORS.tint, alignItems: 'center', justifyContent: 'center' },
   menuLabel: { fontSize: 15, fontWeight: '600', color: COLORS.text },
   themeRow: { flexDirection: 'row', gap: 8 },
   themeChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.inputBg },
