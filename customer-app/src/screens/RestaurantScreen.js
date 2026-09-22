@@ -230,52 +230,67 @@ export default function RestaurantScreen() {
           </TouchableOpacity>
         )}
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryTabs}>
-          {menu.map((cat, idx) => {
-            const on = activeCategory === idx;
-            return (
-              <TouchableOpacity key={cat.id} activeOpacity={0.85} onPress={() => setActiveCategory(idx)} style={{ marginRight: 8 }}>
-                {on ? (
-                  <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.catTab, styles.catTabActive]}>
-                    <Text style={[styles.catTabText, styles.catTabTextActive]}>{cat.name_ar}</Text>
-                  </LinearGradient>
-                ) : (
-                  <View style={styles.catTab}><Text style={styles.catTabText}>{cat.name_ar}</Text></View>
-                )}
+        {/* شريط التنقّل بالمنيو */}
+        <View style={styles.menuNav}>
+          <Text style={styles.menuNavLabel}>الأقسام</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 8 }}>
+            {menu.map((cat, idx) => {
+              const on = activeCategory === idx;
+              return (
+                <TouchableOpacity key={cat.id} activeOpacity={0.85} onPress={() => setActiveCategory(idx)}>
+                  {on ? (
+                    <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.catTab, styles.catTabActive]}>
+                      <Text style={[styles.catTabText, styles.catTabTextActive]}>{cat.name_ar}</Text>
+                    </LinearGradient>
+                  ) : (
+                    <View style={styles.catTab}><Text style={styles.catTabText}>{cat.name_ar}</Text></View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 8, marginTop: 12 }}>
+            {[
+              { k: 'all', l: 'الكل' },
+              { k: 'spicy', l: '🌶️ حار' },
+              { k: 'veg', l: '🌿 نباتي' },
+              { k: 'offers', l: '🏷️ عروض' },
+            ].map(f => (
+              <TouchableOpacity key={f.k} activeOpacity={0.8} onPress={() => setDietFilter(f.k)}
+                style={[styles.dietChip, dietFilter === f.k && styles.dietChipOn]}>
+                <Text style={[styles.dietChipTxt, dietFilter === f.k && { color: '#FFF' }]}>{f.l}</Text>
               </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+            ))}
+          </ScrollView>
+        </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, marginBottom: 4 }}>
-          {[
-            { k: 'all', l: 'الكل' },
-            { k: 'spicy', l: 'حار 🌶️' },
-            { k: 'veg', l: 'نباتي 🌿' },
-            { k: 'offers', l: 'عروض 🏷️' },
-          ].map(f => (
-            <TouchableOpacity key={f.k} onPress={() => setDietFilter(f.k)}
-              style={[styles.dietChip, dietFilter === f.k && styles.dietChipOn]}>
-              <Text style={[styles.dietChipTxt, dietFilter === f.k && { color: '#FFF' }]}>{f.l}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {menu[activeCategory] && (
+        {menu[activeCategory] && (() => {
+          const shown = (menu[activeCategory].items || []).filter(item => dietFilter === 'all'
+            || (dietFilter === 'spicy' && item.is_spicy)
+            || (dietFilter === 'veg' && item.is_vegetarian)
+            || (dietFilter === 'offers' && item.discount_price));
+          return (
           <View style={styles.menuSection}>
-            <Text style={styles.catTitle}>{menu[activeCategory].name_ar}</Text>
-            {(menu[activeCategory].items || [])
-              .filter(item => dietFilter === 'all'
-                || (dietFilter === 'spicy' && item.is_spicy)
-                || (dietFilter === 'veg' && item.is_vegetarian)
-                || (dietFilter === 'offers' && item.discount_price))
-              .map((item, i) => (
-                <FadeIn key={item.id} delay={Math.min(i, 8) * 50}>
-                  <ItemCard item={item} onAdd={() => openItem(item)} onPress={() => openItem(item)} />
-                </FadeIn>
-              ))}
+            <View style={styles.catTitleRow}>
+              <Text style={styles.catTitle}>{menu[activeCategory].name_ar}</Text>
+              <View style={styles.catCountPill}><Text style={styles.catCountTxt}>{shown.length}</Text></View>
+            </View>
+            {shown.length === 0 ? (
+              <View style={styles.noItems}>
+                <Text style={{ fontSize: 40 }}>🍽️</Text>
+                <Text style={styles.noItemsTxt}>ما في أصناف بهالفلتر</Text>
+              </View>
+            ) : shown.map((item, i) => (
+              <FadeIn key={item.id} delay={Math.min(i, 8) * 50}>
+                <ItemCard item={item} onAdd={() => openItem(item)} onPress={() => openItem(item)} />
+              </FadeIn>
+            ))}
           </View>
-        )}
+          );
+        })()}
         <View style={{ height: 100 }} />
       </ScrollView>
 
@@ -370,16 +385,22 @@ const makeStyles = (COLORS) => StyleSheet.create({
   groupModeTxt: { color: '#FFF', fontWeight: '800', fontSize: 13 },
   groupReturnBar: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.primary, paddingVertical: 16, paddingBottom: 24 },
   groupReturnTxt: { color: '#FFF', fontWeight: '900', fontSize: 16 },
-  categoryTabs: { paddingHorizontal: 16, marginBottom: 8 },
-  catTab: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 22, backgroundColor: COLORS.card, borderWidth: 1.5, borderColor: COLORS.border },
-  catTabActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary, elevation: 3, shadowColor: COLORS.primary, shadowOpacity: 0.35, shadowRadius: 7, shadowOffset: { width: 0, height: 3 } },
-  catTabText: { fontSize: 13, color: COLORS.text },
-  catTabTextActive: { color: '#FFF', fontWeight: '700' },
-  menuSection: { paddingHorizontal: 16 },
-  catTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text, marginBottom: 12 },
-  dietChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, marginRight: 8, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border },
+  menuNav: { backgroundColor: COLORS.card, paddingTop: 16, paddingBottom: 16, marginTop: 8, borderTopWidth: 1, borderBottomWidth: 1, borderColor: COLORS.line },
+  menuNavLabel: { fontSize: 12, fontWeight: '800', color: COLORS.gray, textAlign: 'right', paddingHorizontal: 16, marginBottom: 10 },
+  catTab: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 16, backgroundColor: COLORS.inputBg },
+  catTabActive: { ...COLORS.shadow.soft, shadowColor: COLORS.primary },
+  catTabText: { fontSize: 13.5, color: COLORS.sub, fontWeight: '700' },
+  catTabTextActive: { color: '#FFF', fontWeight: '800' },
+  menuSection: { paddingHorizontal: 16, paddingTop: 16 },
+  catTitleRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginBottom: 14 },
+  catTitle: { fontSize: 18, fontWeight: '900', color: COLORS.text },
+  catCountPill: { backgroundColor: COLORS.tint, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 2 },
+  catCountTxt: { fontSize: 12, fontWeight: '800', color: COLORS.primary },
+  noItems: { alignItems: 'center', paddingVertical: 36, gap: 8 },
+  noItemsTxt: { fontSize: 14, color: COLORS.gray, fontWeight: '700' },
+  dietChip: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 14, backgroundColor: COLORS.sec, borderWidth: 1, borderColor: COLORS.tint },
   dietChipOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  dietChipTxt: { fontSize: 13, fontWeight: '700', color: COLORS.text },
+  dietChipTxt: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet: { backgroundColor: COLORS.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%', paddingBottom: 34 },
   sheetHandle: { width: 40, height: 4, backgroundColor: COLORS.border, borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
