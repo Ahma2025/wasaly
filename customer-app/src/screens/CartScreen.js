@@ -275,7 +275,7 @@ export default function CartScreen() {
               <>
                 <Text style={styles.freeDelivText}>أضف <Text style={{ fontWeight: '900', color: COLORS.primary }}>{(50 - total).toFixed(2)}₪</Text> واحصل على توصيل مجاني 🚚</Text>
                 <View style={styles.freeDelivBar}>
-                  <View style={[styles.freeDelivFill, { width: `${Math.min(100, (total / 50) * 100)}%` }]} />
+                  <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.freeDelivFill, { width: `${Math.min(100, (total / 50) * 100)}%` }]} />
                 </View>
               </>
             )}
@@ -523,7 +523,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
   emptyTitle: { fontSize: 20, fontWeight: '700', color: COLORS.text },
   shopBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, elevation: 5, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 5 } },
   shopBtnText: { color: '#FFF', fontWeight: '800', fontSize: 15 },
-  card: { backgroundColor: COLORS.card, margin: 12, marginBottom: 0, borderRadius: 18, padding: 16, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+  card: { backgroundColor: COLORS.card, margin: 12, marginBottom: 0, borderRadius: 20, padding: 16, ...COLORS.shadow.soft },
   cardTitle: { fontSize: 14, fontWeight: '800', color: COLORS.text, marginBottom: 12 },
   itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.line, gap: 12 },
   qtyControl: { flexDirection: 'row', alignItems: 'center', gap: 8 },
