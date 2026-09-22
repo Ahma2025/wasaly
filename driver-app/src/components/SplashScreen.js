@@ -50,7 +50,7 @@ export default function SplashScreen({ onFinish }) {
         </View>
 
         <Animated.Text style={[styles.name, { transform: [{ translateY: logoRise }] }]}>وصلّي</Animated.Text>
-        <Text style={styles.tag}>تطبيق المناديب 🛵</Text>
+        <Text style={styles.tag}>تطبيق السائقين 🛵</Text>
 
         <View style={styles.barTrack}>
           <Animated.View style={{ width: barWidth, height: '100%' }}>
@@ -73,8 +73,8 @@ const styles = StyleSheet.create({
   ring: { position: 'absolute', width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(255,255,255,0.35)' },
   logoBadge: { width: 104, height: 104, borderRadius: 34, backgroundColor: 'rgba(255,255,255,0.22)', borderWidth: 2, borderColor: 'rgba(255,255,255,0.45)', alignItems: 'center', justifyContent: 'center' },
   logoEmoji: { fontSize: 54 },
-  name: { fontSize: 60, fontWeight: '900', color: '#FFFFFF', letterSpacing: 2, marginBottom: 8, textShadowColor: 'rgba(0,0,0,0.18)', textShadowOffset: { width: 0, height: 4 }, textShadowRadius: 12 },
-  tag: { fontSize: 18, color: 'rgba(255,255,255,0.92)', fontWeight: '600', marginBottom: 56, letterSpacing: 0.5 },
+  name: { fontSize: 60, fontWeight: '900', color: '#FFFFFF', marginBottom: 8, textShadowColor: 'rgba(0,0,0,0.18)', textShadowOffset: { width: 0, height: 4 }, textShadowRadius: 12 },
+  tag: { fontSize: 18, color: 'rgba(255,255,255,0.92)', fontWeight: '600', marginBottom: 56 },
   barTrack: { width: width * 0.6, height: 6, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 3, overflow: 'hidden' },
   barFill: { height: '100%', borderRadius: 3 },
   bottom: { fontSize: 11, color: 'rgba(255,255,255,0.55)', letterSpacing: 4, position: 'absolute', bottom: -120, fontWeight: '700' },

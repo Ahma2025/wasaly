@@ -51,7 +51,7 @@ async function main() {
   const msgPayload = {
     message: {
       token: target.fcm_token,
-      notification: { title: 'اختبار وصالي 🔔', body: 'إشعار تجريبي للمطعم - وصل بنجاح!' },
+      notification: { title: 'اختبار وصلّي 🔔', body: 'إشعار تجريبي للمطعم - وصل بنجاح!' },
       data: { type: 'test', order_id: '0' },
       android: {
         priority: 'HIGH',

@@ -53,7 +53,7 @@ async function setupFirebaseWebPush() {
     // Handle foreground messages
     onMessage(messaging, (payload) => {
       if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification(payload.notification?.title || 'وصالي', {
+        new Notification(payload.notification?.title || 'وصلّي', {
           body: payload.notification?.body || '',
           icon: '/logo.png',
           requireInteraction: true,

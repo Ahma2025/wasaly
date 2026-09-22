@@ -100,7 +100,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
   content: { flexGrow: 1, paddingBottom: 40 },
   hero: { alignItems: 'center', paddingTop: 90, paddingBottom: 70, borderBottomLeftRadius: 40, borderBottomRightRadius: 40, ...COLORS.shadow.float },
   logo: { width: 100, height: 100, borderRadius: 32, backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)' },
-  appName: { fontSize: 40, fontWeight: '900', color: '#FFF', marginTop: 16, letterSpacing: 0.5 },
+  appName: { fontSize: 40, fontWeight: '900', color: '#FFF', marginTop: 16 },
   tagline: { fontSize: 14, color: 'rgba(255,255,255,0.92)', marginTop: 4, fontWeight: '600' },
   card: { backgroundColor: COLORS.card, marginHorizontal: 20, marginTop: -40, borderRadius: 26, padding: 20, ...COLORS.shadow.card },
   tabs: { flexDirection: 'row', backgroundColor: COLORS.inputBg, borderRadius: 16, padding: 5, marginBottom: 22 },

@@ -47,7 +47,7 @@ export default function Notifications() {
                 <label className="text-sm text-gray-500 mb-1 block">الدور</label>
                 <select className="border rounded-xl px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-orange-400" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
                   <option value="customer">الزبائن</option>
-                  <option value="driver">المناديب</option>
+                  <option value="driver">السائقين</option>
                   <option value="restaurant">المطاعم</option>
                 </select>
               </div>

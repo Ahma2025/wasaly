@@ -11,7 +11,7 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
-  self.registration.showNotification(payload.notification?.title || 'وصالي', {
+  self.registration.showNotification(payload.notification?.title || 'وصلّي', {
     body: payload.notification?.body || '',
     icon: '/logo.png',
     requireInteraction: true,

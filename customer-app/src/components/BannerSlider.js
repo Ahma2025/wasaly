@@ -129,7 +129,6 @@ const s = StyleSheet.create({
     fontSize: 20,
     fontWeight: '800',
     textAlign: 'right',
-    letterSpacing: 0.6,
     textShadowColor: 'rgba(0,0,0,0.9)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 6,

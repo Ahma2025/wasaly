@@ -36,7 +36,7 @@ export default function LoginScreen() {
             <View style={styles.emoji}><Text style={{ fontSize: 52 }}>🏍️</Text></View>
           </PopIn>
           <Text style={styles.title}>وصلّي</Text>
-          <Text style={styles.subtitle}>تطبيق المناديب</Text>
+          <Text style={styles.subtitle}>تطبيق السائقين</Text>
         </LinearGradient>
 
         <View style={styles.card}>
@@ -54,7 +54,7 @@ export default function LoginScreen() {
             </LinearGradient>
           </TouchableOpacity>
 
-          <Text style={styles.note}>يتم إنشاء حسابات المناديب عبر لوحة الإدارة</Text>
+          <Text style={styles.note}>يتم إنشاء حسابات السائقين عبر لوحة الإدارة</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -65,13 +65,13 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   hero: { alignItems: 'center', paddingTop: 90, paddingBottom: 70, borderBottomLeftRadius: 40, borderBottomRightRadius: 40, ...SHADOW.float },
   emoji: { width: 100, height: 100, borderRadius: 32, backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)' },
-  title: { fontSize: 40, fontWeight: '900', textAlign: 'center', color: '#FFF', letterSpacing: 0.5, marginTop: 16 },
+  title: { fontSize: 40, fontWeight: '900', textAlign: 'center', color: '#FFF', marginTop: 16 },
   subtitle: { fontSize: 15, textAlign: 'center', color: 'rgba(255,255,255,0.92)', marginTop: 4, fontWeight: '600' },
   card: { backgroundColor: COLORS.card, marginHorizontal: 20, marginTop: -40, borderRadius: 26, padding: 22, ...SHADOW.card },
   label: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 8 },
   input: { borderWidth: 1.5, borderColor: COLORS.line, borderRadius: 16, padding: 15, fontSize: 16, backgroundColor: COLORS.inputBg, marginBottom: 16, color: COLORS.text },
   btn: { borderRadius: 18, overflow: 'hidden', marginTop: 8, ...SHADOW.float },
   btnGrad: { padding: 17, alignItems: 'center', borderRadius: 18 },
-  btnText: { color: '#FFF', fontWeight: '900', fontSize: 16, letterSpacing: 0.3 },
+  btnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
   note: { textAlign: 'center', color: COLORS.gray, marginTop: 24, fontSize: 13 },
 });
