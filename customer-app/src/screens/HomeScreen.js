@@ -345,16 +345,22 @@ export default function HomeScreen() {
         <BannerSlider banners={banners} />
 
         {/* تصنيفات */}
-        <View style={{ backgroundColor: C.white, paddingVertical: 16 }}>
+        <View style={{ backgroundColor: C.white, paddingTop: 18, paddingBottom: 18 }}>
+          <View style={s.catHeader}>
+            <Text style={s.catTitle}>اطلب حسب التصنيف</Text>
+            <Text style={s.catEmoji}>🍴</Text>
+          </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 12 }}>
+            contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 16 }}>
             {categories.map((cat, i) => (
               <FadeIn key={cat.id} delay={i * 45} from={10}>
                 <Press style={s.quickCat} onPress={() => navigation.navigate('Category', { categoryId: cat.id, categoryName: cat.name_ar })}>
-                  <View style={s.quickCircle}>
-                    <Text style={{ fontSize: 28 }}>{cat.icon || '🍽️'}</Text>
-                  </View>
-                  <Text style={s.quickLbl}>{cat.name_ar}</Text>
+                  <LinearGradient colors={[C.sec, C.tint]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.quickCircle}>
+                    <View style={s.quickInner}>
+                      <Text style={{ fontSize: 30 }}>{cat.icon || '🍽️'}</Text>
+                    </View>
+                  </LinearGradient>
+                  <Text style={s.quickLbl} numberOfLines={1}>{cat.name_ar}</Text>
                 </Press>
               </FadeIn>
             ))}
@@ -514,9 +520,13 @@ const makeS = (C) => StyleSheet.create({
   locBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, marginHorizontal: 8, backgroundColor: 'rgba(255,255,255,0.20)', borderRadius: 22, paddingVertical: 9, paddingHorizontal: 12 },
   locTxt: { fontSize: 15, fontWeight: '800', color: '#FFF' },
   divider: { height: 8, backgroundColor: C.divider },
-  quickCat: { alignItems: 'center', gap: 7 },
-  quickCircle: { width: 68, height: 68, borderRadius: 24, backgroundColor: C.sec, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#FFEBDD', elevation: 2, shadowColor: '#FF6B00', shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } },
-  quickLbl: { fontSize: 13, fontWeight: '700', color: C.text },
+  catHeader: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, paddingHorizontal: 16, marginBottom: 14 },
+  catTitle: { fontSize: 17, fontWeight: '900', color: C.text },
+  catEmoji: { fontSize: 16 },
+  quickCat: { alignItems: 'center', gap: 8, width: 74 },
+  quickCircle: { width: 70, height: 70, borderRadius: 26, alignItems: 'center', justifyContent: 'center', ...C.shadow.soft, shadowColor: '#FF6B00' },
+  quickInner: { width: 58, height: 58, borderRadius: 20, backgroundColor: C.card, alignItems: 'center', justifyContent: 'center' },
+  quickLbl: { fontSize: 12.5, fontWeight: '800', color: C.text, textAlign: 'center' },
   grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16 },
   moreBtn: { marginTop: 14, marginHorizontal: 16, borderWidth: 1.5, borderColor: C.primary, borderRadius: 14, paddingVertical: 11, alignItems: 'center', backgroundColor: C.sec },
   moreTxt: { color: C.primary, fontWeight: '800', fontSize: 15 },
