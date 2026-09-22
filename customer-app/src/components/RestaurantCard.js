@@ -1,16 +1,25 @@
 import React from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, Image, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Press } from './Anim';
 import { useTheme } from '../context/ThemeContext';
 
 export default function RestaurantCard({ restaurant: r, onPress }) {
   const { colors: COLORS } = useTheme();
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
-      <Image source={{ uri: r.cover_image || r.logo }} style={styles.image} />
+    <Press style={styles.card} onPress={onPress} scaleTo={0.97} haptic={false}>
+      <View style={styles.imgBox}>
+        <Image source={{ uri: r.cover_image || r.logo }} style={styles.image} />
+        <LinearGradient colors={['transparent', 'rgba(10,10,20,0.5)']} style={styles.scrim} />
+      </View>
       {!r.is_open && <View style={styles.closedOverlay}><Text style={styles.closedText}>مغلق</Text></View>}
-      {!!r.is_featured && <View style={styles.featuredBadge}><Text style={styles.featuredText}>⭐ مميز</Text></View>}
+      {!!r.is_featured && (
+        <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.featuredBadge}>
+          <Text style={styles.featuredText}>⭐ مميز</Text>
+        </LinearGradient>
+      )}
 
       <View style={styles.info}>
         <View style={styles.row}>
@@ -39,16 +48,18 @@ export default function RestaurantCard({ restaurant: r, onPress }) {
           )}
         </View>
       </View>
-    </TouchableOpacity>
+    </Press>
   );
 }
 
 const makeStyles = (COLORS) => StyleSheet.create({
-  card: { backgroundColor: COLORS.card, borderRadius: 20, marginBottom: 18, overflow: 'hidden', elevation: 5, shadowColor: '#000', shadowOpacity: 0.10, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
+  card: { backgroundColor: COLORS.card, borderRadius: 22, marginBottom: 18, overflow: 'hidden', ...COLORS.shadow.card },
+  imgBox: { width: '100%', height: 158, position: 'relative' },
   image: { width: '100%', height: 158, resizeMode: 'cover' },
-  closedOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(20,20,35,0.55)', height: 158, justifyContent: 'center', alignItems: 'center' },
+  scrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 60 },
+  closedOverlay: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: 'rgba(20,20,35,0.55)', height: 158, justifyContent: 'center', alignItems: 'center' },
   closedText: { color: '#FFF', fontSize: 18, fontWeight: '800', letterSpacing: 0.5 },
-  featuredBadge: { position: 'absolute', top: 12, left: 12, backgroundColor: COLORS.primary, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, elevation: 4, shadowColor: COLORS.primary, shadowOpacity: 0.5, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },
+  featuredBadge: { position: 'absolute', top: 12, left: 12, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, ...COLORS.shadow.float },
   featuredText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
   info: { padding: 14 },
   row: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
