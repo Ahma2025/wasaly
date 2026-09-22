@@ -24,6 +24,12 @@ const STATUS_COLORS = {
   cancelled:  'bg-red-100 text-red-600 border-red-200'
 };
 
+// شريط لون جانبي حسب الحالة — للتمييز السريع
+const STATUS_ACCENT = {
+  pending: '#EAB308', confirmed: '#3B82F6', preparing: '#FF6B00',
+  on_the_way: '#A855F7', delivered: '#22C55E', cancelled: '#EF4444'
+};
+
 // نغمة تنبيه لطلب جديد (Web Audio — بدون ملف صوت)
 function playNewOrderChime() {
   try {
@@ -230,37 +236,34 @@ function OrderCard({ order, token, isExpanded, onToggle, onAccept, onUpdateStatu
   const actions = getActions();
 
   return (
-    <div className="bg-white rounded-2xl shadow-soft overflow-hidden">
+    <div className="bg-white rounded-2xl shadow-soft overflow-hidden flex">
+      {/* شريط لون الحالة */}
+      <div className="w-1.5 flex-shrink-0" style={{ background: STATUS_ACCENT[order.status] || '#CBD5E1' }} />
+      <div className="flex-1 min-w-0">
       {/* Card Header */}
       <div className="p-4 cursor-pointer active:bg-gray-50 transition-colors" onClick={onToggle}>
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <p className="font-black text-gray-900">#{order.id}</p>
-              <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${STATUS_COLORS[order.status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
-                {STATUS_LABELS[order.status] || order.status}
-              </span>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${isDelivery ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600'}`}>
-                {isDelivery ? '🛵 توصيل' : '🏃 استلام'}
-              </span>
-            </div>
-            <p className="text-sm font-semibold text-gray-700 mt-1">{order.customer_name || 'زبون'}</p>
-            {order.customer_phone && (
-              <a href={`tel:${order.customer_phone}`} className="text-xs text-blue-500 font-semibold block" onClick={e => e.stopPropagation()}>
-                📞 {order.customer_phone}
-              </a>
-            )}
-            <button
-              onClick={e => { e.stopPropagation(); makeVip(); }}
-              disabled={vip || vipBusy}
-              className={`mt-1.5 text-xs px-2.5 py-1 rounded-lg font-bold disabled:opacity-90 ${vip ? 'bg-orange-100 text-orange-600' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
-              {vipBusy ? '...' : vip ? '⭐ زبون مميز' : '☆ اجعله زبوناً مميزاً'}
-            </button>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="font-black text-gray-900 text-base">#{order.id}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${isDelivery ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600'}`}>
+              {isDelivery ? '🛵 توصيل' : '🏃 استلام'}
+            </span>
           </div>
-          <div className="text-left flex-shrink-0">
-            <p className="font-black text-orange-500 text-lg">{parseFloat(order.total || 0).toFixed(0)}₪</p>
-            <p className="text-xs text-gray-400">{new Date(order.created_at).toLocaleTimeString('ar', { hour: '2-digit', minute: '2-digit' })}</p>
-            <p className="text-lg mt-1">{isExpanded ? '▲' : '▼'}</p>
+          <span className={`text-xs px-2.5 py-1 rounded-full border font-bold ${STATUS_COLORS[order.status] || 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+            {STATUS_LABELS[order.status] || order.status}
+          </span>
+        </div>
+        <div className="flex items-end justify-between gap-2 mt-2.5">
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-gray-800 truncate">👤 {order.customer_name || 'زبون'}</p>
+            <p className="text-xs text-gray-400 mt-0.5">🕐 {new Date(order.created_at).toLocaleTimeString('ar', { hour: '2-digit', minute: '2-digit' })}</p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="text-left">
+              <p className="text-[10px] text-gray-400 leading-none mb-0.5">الإجمالي</p>
+              <p className="font-black text-orange-500 text-xl leading-none">{parseFloat(order.total || 0).toFixed(0)}₪</p>
+            </div>
+            <span className={`w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 text-xs transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
           </div>
         </div>
       </div>
@@ -291,6 +294,12 @@ function OrderCard({ order, token, isExpanded, onToggle, onAccept, onUpdateStatu
               <p className="text-xs text-gray-600">📍 {order.delivery_address}</p>
             )}
             <p className="text-xs text-gray-500">{order.payment_method === 'cash' ? '💵 دفع نقداً' : '💳 دفع بطاقة'}</p>
+            <button
+              onClick={makeVip}
+              disabled={vip || vipBusy}
+              className={`mt-1 w-full text-xs px-2.5 py-2 rounded-xl font-bold disabled:opacity-90 ${vip ? 'bg-orange-100 text-orange-600' : 'bg-white border border-orange-200 text-orange-600 hover:bg-orange-50'}`}>
+              {vipBusy ? '...' : vip ? '⭐ زبون مميز' : '☆ اجعله زبوناً مميزاً'}
+            </button>
           </div>
 
           {/* Order Items */}
@@ -333,6 +342,7 @@ function OrderCard({ order, token, isExpanded, onToggle, onAccept, onUpdateStatu
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
