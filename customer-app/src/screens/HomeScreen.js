@@ -88,10 +88,10 @@ function CollapsibleSection({ title, icon, bg, children, defaultOpen = true }) {
         <Animated.View style={{ transform: [{ rotate: arrowRotate }] }}>
           <Ionicons name="chevron-down" size={20} color={C.primary} />
         </Animated.View>
-        {/* يمين: عنوان + أيقونة */}
+        {/* يمين: عنوان + أيقونة بشارة */}
         <View style={cs.titleRow}>
           <Text style={cs.title}>{title}</Text>
-          {icon ? <Ionicons name={icon} size={20} color={C.primary} style={{ marginLeft: 6 }} /> : null}
+          {icon ? <View style={cs.iconBadge}><Ionicons name={icon} size={16} color={C.primary} /></View> : null}
         </View>
       </TouchableOpacity>
       {open && <View style={cs.body}>{children}</View>}
@@ -137,13 +137,18 @@ function HCard({ r, onPress }) {
   const hc = React.useMemo(() => makeHc(C), [C]);
   return (
     <AnimCard style={hc.wrap} onPress={onPress}>
-      <Image source={{ uri: r.logo || r.cover_image }} style={hc.img} resizeMode="cover" />
-      {!r.is_open && <View style={hc.closed}><Text style={hc.closedTxt}>مغلق</Text></View>}
-      <Text style={hc.name} numberOfLines={2}>{r.name_ar}</Text>
-      <View style={hc.row}>
-        <Ionicons name="star" size={12} color="#FFB800" />
-        <Text style={hc.rating}>{parseFloat(r.rating || 0).toFixed(1)}</Text>
+      <View style={hc.imgBox}>
+        <Image source={{ uri: r.cover_image || r.logo }} style={hc.img} resizeMode="cover" />
+        <LinearGradient colors={['transparent', 'rgba(10,10,20,0.5)']} style={hc.scrim} />
+        {!r.is_open && <View style={hc.closed}><Text style={hc.closedTxt}>مغلق</Text></View>}
+        <View style={hc.ratePill}>
+          <Ionicons name="star" size={10} color="#FFB800" />
+          <Text style={hc.rateTxt}>{parseFloat(r.rating || 0).toFixed(1)}</Text>
+        </View>
+        <View style={hc.logoDot}><Image source={{ uri: r.logo }} style={hc.logoImg} /></View>
       </View>
+      <Text style={hc.name} numberOfLines={1}>{r.name_ar}</Text>
+      <Text style={hc.time} numberOfLines={1}>{r.delivery_time_min}-{r.delivery_time_max} دقيقة</Text>
     </AnimCard>
   );
 }
@@ -475,8 +480,9 @@ export default function HomeScreen() {
 const makeCs = (C) => StyleSheet.create({
   wrap: { width: '100%' },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 16 },
-  titleRow: { flexDirection: 'row', alignItems: 'center' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { fontSize: 18, fontWeight: '900', color: C.text },
+  iconBadge: { width: 30, height: 30, borderRadius: 10, backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center' },
   body: { paddingBottom: 16 },
 });
 
@@ -500,13 +506,18 @@ const makeRc = (C) => StyleSheet.create({
 });
 
 const makeHc = (C) => StyleSheet.create({
-  wrap: { width: 105, alignItems: 'center' },
-  img: { width: 82, height: 82, borderRadius: 41, backgroundColor: C.inputBg },
-  closed: { position: 'absolute', top: 0, left: 11, right: 11, height: 82, borderRadius: 41, backgroundColor: 'rgba(0,0,0,0.42)', justifyContent: 'center', alignItems: 'center' },
-  closedTxt: { color: '#FFF', fontSize: 11, fontWeight: '800' },
-  name: { fontSize: 13, fontWeight: '700', color: C.text, textAlign: 'center', marginTop: 7 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 },
-  rating: { fontSize: 12, color: C.text, fontWeight: '600' },
+  wrap: { width: 128 },
+  imgBox: { width: 128, height: 96, borderRadius: 20, overflow: 'hidden', position: 'relative', backgroundColor: C.inputBg, ...C.shadow.soft },
+  img: { width: '100%', height: '100%' },
+  scrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 44 },
+  closed: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  closedTxt: { color: '#FFF', fontSize: 12, fontWeight: '800' },
+  ratePill: { position: 'absolute', top: 8, right: 8, flexDirection: 'row-reverse', alignItems: 'center', gap: 2, backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
+  rateTxt: { fontSize: 11, fontWeight: '800', color: C.text },
+  logoDot: { position: 'absolute', bottom: 6, left: 6, width: 26, height: 26, borderRadius: 9, borderWidth: 2, borderColor: '#FFF', overflow: 'hidden', backgroundColor: '#FFF' },
+  logoImg: { width: '100%', height: '100%' },
+  name: { fontSize: 13.5, fontWeight: '800', color: C.text, textAlign: 'right', marginTop: 7 },
+  time: { fontSize: 11.5, color: C.gray, textAlign: 'right', marginTop: 1, fontWeight: '600' },
 });
 
 const makeS = (C) => StyleSheet.create({
