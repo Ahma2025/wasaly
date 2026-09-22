@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import api from '../utils/api';
 import GradientHeader from '../components/GradientHeader';
+import { GRADIENTS, SHADOW } from '../theme';
+import { FadeIn } from '../components/Anim';
 import { readCache, writeCache } from '../utils/cache';
 
 const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', green: '#34C759', bg: '#F8F9FA' };
@@ -60,11 +63,14 @@ export default function EarningsScreen() {
         </View>
 
         {/* Summary */}
-        <View style={styles.summaryCard}>
+        <FadeIn>
+        <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.summaryCard}>
+          <View style={styles.summaryGlow} />
           <Text style={styles.summaryTitle}>إجمالي الأرباح</Text>
           <Text style={styles.summaryAmount}>{parseFloat(data?.stats?.earnings || 0).toFixed(2)}₪</Text>
           <Text style={styles.summaryDeliveries}>{data?.stats?.deliveries || 0} توصيلة</Text>
-        </View>
+        </LinearGradient>
+        </FadeIn>
 
         {/* Wallet */}
         <View style={styles.walletCard}>
@@ -102,7 +108,8 @@ const styles = StyleSheet.create({
   periodBtn: { flex: 1, padding: 11, borderRadius: 14, backgroundColor: '#FFF', alignItems: 'center', borderWidth: 1.5, borderColor: '#EDEDF0' },
   periodBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary, elevation: 3, shadowColor: COLORS.primary, shadowOpacity: 0.35, shadowRadius: 7, shadowOffset: { width: 0, height: 3 } },
   periodText: { fontWeight: '700', color: COLORS.text, fontSize: 13 },
-  summaryCard: { backgroundColor: COLORS.primary, borderRadius: 24, padding: 26, alignItems: 'center', marginBottom: 16, elevation: 8, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 18, shadowOffset: { width: 0, height: 10 } },
+  summaryCard: { borderRadius: 24, padding: 26, alignItems: 'center', marginBottom: 16, overflow: 'hidden', ...SHADOW.float },
+  summaryGlow: { position: 'absolute', top: -40, right: -30, width: 150, height: 150, borderRadius: 75, backgroundColor: 'rgba(255,255,255,0.12)' },
   summaryTitle: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '600' },
   summaryAmount: { color: '#FFF', fontSize: 42, fontWeight: '900', marginVertical: 4 },
   summaryDeliveries: { color: 'rgba(255,255,255,0.85)', fontSize: 14 },
