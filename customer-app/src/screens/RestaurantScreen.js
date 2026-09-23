@@ -306,13 +306,18 @@ export default function RestaurantScreen() {
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16 }}>
-            <View style={styles.sheetItemHeader}>
-              {selectedItem?.image && <Image source={{ uri: selectedItem.image }} style={styles.sheetItemImg} />}
-              <View style={{ flex: 1, marginLeft: selectedItem?.image ? 12 : 0 }}>
+            {selectedItem?.image ? (
+              <View style={styles.sheetHeroWrap}>
+                <Image source={{ uri: selectedItem.image }} style={styles.sheetHeroImg} />
+                <LinearGradient colors={['transparent', 'rgba(10,10,20,0.35)']} style={styles.sheetHeroScrim} />
+              </View>
+            ) : null}
+            <View style={styles.sheetTitleBlock}>
+              <View style={styles.sheetTitleRow}>
                 <Text style={styles.sheetItemName}>{selectedItem?.name_ar}</Text>
-                {selectedItem?.description_ar ? <Text style={styles.sheetItemDesc}>{selectedItem.description_ar}</Text> : null}
                 <Text style={styles.sheetItemPrice}>{parseFloat(selectedItem?.price || 0).toFixed(2)}₪</Text>
               </View>
+              {selectedItem?.description_ar ? <Text style={styles.sheetItemDesc}>{selectedItem.description_ar}</Text> : null}
             </View>
 
             {selectedItem?.addon_groups?.map((group, gi) => (
@@ -402,13 +407,16 @@ const makeStyles = (COLORS) => StyleSheet.create({
   dietChipOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   dietChipTxt: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
-  sheet: { backgroundColor: COLORS.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%', paddingBottom: 34 },
-  sheetHandle: { width: 40, height: 4, backgroundColor: COLORS.border, borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
-  sheetItemHeader: { flexDirection: 'row', padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.line, alignItems: 'center' },
-  sheetItemImg: { width: 90, height: 90, borderRadius: 12 },
-  sheetItemName: { fontSize: 17, fontWeight: '800', color: COLORS.text },
-  sheetItemDesc: { fontSize: 13, color: COLORS.gray, marginTop: 4 },
-  sheetItemPrice: { fontSize: 16, fontWeight: '700', color: COLORS.primary, marginTop: 8 },
+  sheet: { backgroundColor: COLORS.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '88%', paddingBottom: 34, overflow: 'hidden' },
+  sheetHandle: { width: 44, height: 5, backgroundColor: COLORS.border, borderRadius: 3, alignSelf: 'center', marginTop: 10, marginBottom: 6, zIndex: 2 },
+  sheetHeroWrap: { width: '100%', height: 190, position: 'relative' },
+  sheetHeroImg: { width: '100%', height: '100%' },
+  sheetHeroScrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 70 },
+  sheetTitleBlock: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: COLORS.line },
+  sheetTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  sheetItemName: { fontSize: 19, fontWeight: '900', color: COLORS.text, flex: 1, textAlign: 'right' },
+  sheetItemDesc: { fontSize: 13.5, color: COLORS.gray, marginTop: 6, lineHeight: 20, textAlign: 'right' },
+  sheetItemPrice: { fontSize: 18, fontWeight: '900', color: COLORS.primary },
   addonGroup: { paddingHorizontal: 16, paddingTop: 16 },
   addonGroupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   addonGroupTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text },
