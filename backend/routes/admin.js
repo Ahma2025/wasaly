@@ -330,8 +330,10 @@ router.post('/notifications/broadcast', auth, adminOnly, async (req, res) => {
     // كل توكن لازم يُبعث بالـ topic تبع تطبيق صاحبه، وإلا ترفضه آبل (DeviceTokenNotForTopic)
     const bundleMap = { customer: 'com.wasaly.customer', driver: 'com.wasaly.driver', restaurant: 'com.wasaly.restaurant', restaurant_owner: 'com.wasaly.restaurant', admin: 'com.wasaly.admin' };
     const byBundle = {};
+    const seenTokens = new Set(); // منع إرسال نفس التوكن أكثر من مرة (لو محفوظ على أكثر من حساب)
     for (const u of users) {
-      if (!u.fcm_token) continue;
+      if (!u.fcm_token || seenTokens.has(u.fcm_token)) continue;
+      seenTokens.add(u.fcm_token);
       const b = bundleMap[u.role] || 'com.wasaly.customer';
       (byBundle[b] = byBundle[b] || []).push(u.fcm_token);
     }

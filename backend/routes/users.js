@@ -7,6 +7,8 @@ router.post('/fcm-token', auth, async (req, res) => {
   try {
     const { token } = req.body;
     if (!token) return res.status(400).json({ success: false, message: 'token required' });
+    // توكن الجهاز الواحد لازم يخص حساب واحد فقط — نشيله من أي حساب ثاني كان مسجّل عليه
+    await pool.query('UPDATE users SET fcm_token=NULL WHERE fcm_token=$1 AND id<>$2', [token, req.user.id]);
     await pool.query('UPDATE users SET fcm_token=$1 WHERE id=$2', [token, req.user.id]);
     res.json({ success: true });
   } catch (e) {
