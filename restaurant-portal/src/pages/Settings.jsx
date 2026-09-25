@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
+import * as Printer from '../utils/printer';
 
 function compressToBase64(file, maxPx = 500, quality = 0.78) {
   return new Promise((resolve, reject) => {
@@ -199,6 +200,9 @@ export default function Settings() {
         </div>
       </div>
 
+      {/* ربط ماكنة الطلبات (الطباعة التلقائية) */}
+      <PrinterSetup restaurant={restaurant} />
+
       {/* Logo & Basic Info */}
       <div className="bg-white rounded-2xl p-4 shadow-soft space-y-4">
         <h2 className="font-bold text-gray-900">معلومات المطعم</h2>
@@ -359,6 +363,92 @@ export default function Settings() {
         className="w-full grad-brand text-white shadow-brand py-4 rounded-2xl font-black text-base disabled:opacity-60 shadow-lg shadow-orange-200">
         {saving ? 'جاري الحفظ...' : '💾 حفظ الإعدادات'}
       </button>
+    </div>
+  );
+}
+
+// ═══ ربط ماكنة الطلبات — إعداد ذاتي لكل مطعم ═══
+function PrinterSetup({ restaurant }) {
+  const supported = Printer.isPrinterSupported();
+  const [saved, setSaved] = useState(Printer.getSavedPrinter());
+  const [auto, setAuto] = useState(Printer.isAutoPrint());
+  const [scanning, setScanning] = useState(false);
+  const [list, setList] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  const scan = async (type) => {
+    // طابعة الشبكة: إدخال IP يدوي بدل البحث
+    if (type === 'tcp') {
+      const ip = window.prompt('أدخل عنوان IP لطابعة الشبكة (مثال: 192.168.1.50)');
+      if (!ip) return;
+      choose(Printer.makeNetworkPrinter(ip.trim(), 9100));
+      return;
+    }
+    setScanning(true); setList([]);
+    try {
+      await Printer.requestPermissions(type);
+      const found = await Printer.listPrinters(type);
+      if (!found.length) toast('ما لقينا ماكنات — تأكد إنها مقترنة بالبلوتوث/موصولة ومشغّلة', { icon: 'ℹ️' });
+      setList(found);
+    } catch (e) { toast.error('فشل البحث: ' + (e?.message || e)); }
+    finally { setScanning(false); }
+  };
+
+  const choose = (p) => { Printer.savePrinter(p); setSaved(p); setList([]); toast.success('تم ربط: ' + p.name); };
+  const unlink = () => { Printer.clearPrinter(); setSaved(null); toast('تم فصل الماكنة', { icon: '🔌' }); };
+  const toggleAuto = () => { const v = !auto; setAuto(v); Printer.setAutoPrint(v); };
+  const doTest = async () => {
+    setBusy(true);
+    try { await Printer.testPrint(restaurant); toast.success('تمت الطباعة التجريبية ✅'); }
+    catch (e) { toast.error('فشلت الطباعة: ' + (e?.message || e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl p-4 shadow-soft space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="text-xl">🖨️</span>
+        <h2 className="font-black text-gray-900">ماكنة الطلبات (الطباعة التلقائية)</h2>
+      </div>
+
+      {!supported ? (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700 font-semibold leading-relaxed">
+          لربط ماكنة الطلبات، افتح <b>تطبيق بوابة المطعم على جهاز أندرويد</b> (تابلت/موبايل) الموصول بالماكنة — الطباعة غير متاحة من متصفّح الكمبيوتر.
+        </div>
+      ) : saved ? (
+        <>
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-black text-green-700">✅ مربوطة: {saved.name}</p>
+              <p className="text-xs text-green-600 mt-0.5">النوع: {saved.type === 'bluetooth' ? 'بلوتوث' : saved.type === 'usb' ? 'USB' : 'شبكة'}</p>
+            </div>
+            <button onClick={unlink} className="text-xs font-bold text-red-500 bg-white border border-red-200 px-3 py-1.5 rounded-lg">فصل</button>
+          </div>
+          <label className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2.5">
+            <span className="text-sm font-bold text-gray-700">طباعة كل طلب جديد تلقائيًا</span>
+            <input type="checkbox" checked={auto} onChange={toggleAuto} className="w-5 h-5 accent-orange-500" />
+          </label>
+          <button onClick={doTest} disabled={busy} className="w-full grad-brand text-white shadow-brand py-3 rounded-xl font-black text-sm disabled:opacity-60">
+            {busy ? 'جاري الطباعة...' : '🧾 طباعة تجريبية'}
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-gray-500 leading-relaxed">اختر طريقة توصيل ماكنتك، ثم اختر الماكنة من القائمة — مرة وحدة وبيتذكّرها الجهاز.</p>
+          <div className="grid grid-cols-3 gap-2">
+            <button onClick={() => scan('bluetooth')} className="bg-gray-50 border border-gray-200 rounded-xl py-2.5 text-xs font-bold">🔵 بلوتوث</button>
+            <button onClick={() => scan('usb')} className="bg-gray-50 border border-gray-200 rounded-xl py-2.5 text-xs font-bold">🔌 USB</button>
+            <button onClick={() => scan('tcp')} className="bg-gray-50 border border-gray-200 rounded-xl py-2.5 text-xs font-bold">🌐 شبكة</button>
+          </div>
+          {scanning && <p className="text-center text-sm text-gray-400 py-2">🔎 جاري البحث...</p>}
+          {list.map((p, i) => (
+            <button key={i} onClick={() => choose(p)} className="w-full flex items-center justify-between bg-gray-50 hover:bg-orange-50 border border-gray-200 rounded-xl px-3 py-3">
+              <span className="text-sm font-bold text-gray-800">{p.name}</span>
+              <span className="text-xs font-black text-orange-500">اختيار</span>
+            </button>
+          ))}
+        </>
+      )}
     </div>
   );
 }

@@ -25,6 +25,7 @@
     "react-router-dom": "^6.21.1",
     "recharts": "^2.10.3",
     "socket.io-client": "^4.8.3",
+    "thermal-printer-cordova-plugin": "^1.0.6",
     "zustand": "^4.4.7"
   },
   "devDependencies": {

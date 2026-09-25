@@ -5,6 +5,17 @@ import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 import OrderMap from '../components/OrderMap';
 import { showBrowserNotification } from '../utils/pushNotifications';
+import * as Printer from '../utils/printer';
+
+// طباعة تلقائية للطلب الجديد على ماكنة الطلبات (إن كانت مربوطة ومفعّلة)
+async function autoPrintOrder(orderId, restaurant) {
+  try {
+    if (!Printer.isPrinterSupported() || !Printer.getSavedPrinter() || !Printer.isAutoPrint()) return;
+    const r = await api.get(`/orders/${orderId}`);
+    const full = r.data || r;
+    await Printer.printOrder(full, restaurant, full.items || []);
+  } catch (e) { /* الطابعة مفصولة أو خطأ مؤقت — نتجاهل بصمت */ }
+}
 
 const STATUS_LABELS = {
   pending: 'قيد الانتظار',
@@ -75,6 +86,7 @@ export default function Orders() {
         playNewOrderChime();
         toast('🔔 طلب جديد!', { icon: '🛍️', duration: 6000 });
         showBrowserNotification('🛎️ طلب جديد!', `طلب #${order.order_number || ''} ينتظر موافقتك`, { order_id: order.order_id });
+        autoPrintOrder(order.order_id || order.id, restaurant); // 🖨️ طباعة تلقائية
         fetchOrders();
       }
     });
@@ -333,6 +345,14 @@ function OrderCard({ order, token, isExpanded, onToggle, onAccept, onUpdateStatu
                 {action.label}
               </button>
             ))}
+            {Printer.isPrinterSupported() && Printer.getSavedPrinter() && (
+              <button onClick={async () => {
+                try { const r = await api.get(`/orders/${order.id}`); const f = r.data || r; await Printer.printOrder(f, restaurant, f.items || []); toast.success('تمت الطباعة 🖨️'); }
+                catch (e) { toast.error('فشلت الطباعة: ' + (e?.message || e)); }
+              }} className="w-full bg-white text-gray-700 border border-gray-200 py-2.5 rounded-xl font-bold text-sm">
+                🖨️ طباعة الطلب
+              </button>
+            )}
             {['pending', 'confirmed', 'preparing'].includes(order.status) && (
               <button onClick={() => onCancel(order.id)}
                 className="w-full bg-red-50 text-red-500 border border-red-200 py-2.5 rounded-xl font-bold text-sm">

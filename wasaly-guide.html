@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+<style>
+  @page { size: A4; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Tajawal', sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  :root{ --brand:#FF6B00; --deep:#F53B57; --ink:#14142B; --sub:#6B7280; --line:#ECEEF3; --bg:#F7F8FB;
+    --grad:linear-gradient(135deg,#FF8A00,#FF5E3A 55%,#F53B57); }
+  body { color: var(--ink); background:#fff; }
+  .page { width: 210mm; min-height: 297mm; padding: 20mm 16mm; position: relative; page-break-after: always; overflow: hidden; }
+  .page:last-child { page-break-after: auto; }
+
+  /* Cover */
+  .cover { background: var(--grad); color:#fff; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; padding: 0 20mm; }
+  .cover .orb1{ position:absolute; top:-120px; right:-90px; width:340px; height:340px; border-radius:50%; background:rgba(255,255,255,.12); }
+  .cover .orb2{ position:absolute; bottom:-140px; left:-100px; width:400px; height:400px; border-radius:50%; background:rgba(255,255,255,.10); }
+  .cover .logo{ width:130px; height:130px; border-radius:40px; background:rgba(255,255,255,.2); border:3px solid rgba(255,255,255,.45); display:flex; align-items:center; justify-content:center; font-size:70px; margin-bottom:26px; position:relative; }
+  .cover h1{ font-size:64px; font-weight:900; position:relative; }
+  .cover .sub{ font-size:22px; font-weight:600; opacity:.95; margin-top:8px; position:relative; }
+  .cover .line{ width:80px; height:5px; background:rgba(255,255,255,.6); border-radius:3px; margin:26px 0; }
+  .cover .desc{ font-size:16px; opacity:.9; max-width:440px; line-height:2; position:relative; }
+  .cover .foot{ position:absolute; bottom:24mm; font-size:13px; letter-spacing:3px; opacity:.7; }
+
+  /* Section headings */
+  .shead{ display:flex; align-items:center; gap:12px; margin-bottom:20px; }
+  .shead .num{ width:46px; height:46px; border-radius:14px; background:var(--grad); color:#fff; display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:900; }
+  .shead h2{ font-size:26px; font-weight:900; }
+  .shead .en{ font-size:12px; color:var(--sub); font-weight:600; }
+
+  .lead{ font-size:14.5px; color:#374151; line-height:2; margin-bottom:18px; background:var(--bg); border-radius:14px; padding:14px 16px; border-right:4px solid var(--brand); }
+
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .feat{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:11px 13px; display:flex; gap:9px; align-items:flex-start; }
+  .feat .ic{ color:var(--brand); font-weight:900; font-size:15px; flex-shrink:0; }
+  .feat .tx b{ font-size:13.5px; font-weight:800; display:block; }
+  .feat .tx span{ font-size:12px; color:var(--sub); line-height:1.6; }
+
+  .appcard{ border-radius:16px; padding:16px 18px; color:#fff; margin-bottom:16px; display:flex; align-items:center; gap:14px; }
+  .appcard .em{ font-size:38px; }
+  .appcard h3{ font-size:20px; font-weight:900; }
+  .appcard p{ font-size:12.5px; opacity:.92; margin-top:2px; }
+  .c-cust{ background:linear-gradient(135deg,#FF8A00,#FF5E3A); }
+  .c-driv{ background:linear-gradient(135deg,#7B3FF2,#4B49C9); }
+  .c-rest{ background:linear-gradient(135deg,#1BA85B,#0E8043); }
+  .c-adm{ background:linear-gradient(135deg,#1A1A2E,#3A3A5E); }
+
+  .pill{ display:inline-block; background:#FFEDE2; color:var(--brand); font-size:11px; font-weight:800; padding:3px 10px; border-radius:999px; margin:0 0 10px; }
+
+  /* price */
+  .pricebox{ background:var(--grad); color:#fff; border-radius:22px; padding:30px; text-align:center; position:relative; overflow:hidden; margin-top:8px; }
+  .pricebox .orb{ position:absolute; top:-60px; left:-40px; width:200px; height:200px; border-radius:50%; background:rgba(255,255,255,.12); }
+  .pricebox .lbl{ font-size:15px; opacity:.9; position:relative; }
+  .pricebox .val{ font-size:60px; font-weight:900; position:relative; line-height:1.1; margin:6px 0; }
+  .pricebox .inc{ font-size:14px; opacity:.95; position:relative; }
+  .deliver{ list-style:none; margin-top:16px; }
+  .deliver li{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:9px; font-size:14px; font-weight:700; display:flex; align-items:center; gap:10px; }
+  .deliver li .ck{ width:24px; height:24px; border-radius:8px; background:#E9FBF0; color:#16A34A; display:flex; align-items:center; justify-content:center; font-weight:900; flex-shrink:0; }
+
+  .footer{ text-align:center; color:var(--sub); font-size:12px; margin-top:26px; padding-top:14px; border-top:1px solid var(--line); }
+  .pgnum{ position:absolute; bottom:12mm; left:16mm; font-size:11px; color:#B4B9C4; }
+  .brandtag{ position:absolute; bottom:12mm; right:16mm; font-size:11px; color:var(--brand); font-weight:800; }
+</style>
+</head>
+<body>
+
+<!-- ===== COVER ===== -->
+<div class="page cover">
+  <div class="orb1"></div><div class="orb2"></div>
+  <div class="logo">🛵</div>
+  <h1>وصلّي</h1>
+  <div class="sub">منظومة متكاملة لتوصيل الطعام والطلبات</div>
+  <div class="line"></div>
+  <div class="desc">دليل شامل للنظام — أربعة تطبيقات متكاملة، سيرفر سحابي قوي، وحماية على أعلى مستوى.<br>عرض تقديمي واحتراف كامل جاهز للتشغيل الفوري.</div>
+  <div class="foot">WSSELY · FOOD DELIVERY SYSTEM</div>
+</div>
+
+<!-- ===== OVERVIEW ===== -->
+<div class="page">
+  <div class="shead"><div class="num">۱</div><div><h2>نظرة عامة على النظام</h2><div class="en">System Overview</div></div></div>
+  <div class="lead">«وصلّي» منظومة توصيل طعام متكاملة واحترافية، تربط الزبائن بالمطاعم والسائقين من خلال أربعة تطبيقات متصلة بسيرفر مركزي واحد يعمل على مدار الساعة. النظام جاهز للتشغيل الفوري ويغطّي دورة الطلب كاملة — من التصفّح حتى وصول الطلب لباب الزبون مع تتبّع مباشر على الخريطة.</div>
+
+  <div class="appcard c-cust"><div class="em">📱</div><div><h3>تطبيق الزبون</h3><p>iOS + Android — تصفّح، طلب، دفع، تتبّع مباشر</p></div></div>
+  <div class="appcard c-driv"><div class="em">🛵</div><div><h3>تطبيق السائق</h3><p>iOS + Android — استقبال الطلبات، الملاحة، الأرباح</p></div></div>
+  <div class="appcard c-rest"><div class="em">🏪</div><div><h3>بوابة المطعم</h3><p>إدارة الطلبات والمنيو والعروض لحظيًا</p></div></div>
+  <div class="appcard c-adm"><div class="em">🖥️</div><div><h3>لوحة الإدارة</h3><p>تحكّم كامل بالمنصة، التحليلات والمحاسبة</p></div></div>
+
+  <div class="footer">منظومة وصلّي — دليل شامل</div>
+  <div class="pgnum">2</div><div class="brandtag">وصلّي</div>
+</div>
+
+<!-- ===== CUSTOMER APP ===== -->
+<div class="page">
+  <div class="shead"><div class="num">۲</div><div><h2>تطبيق الزبون</h2><div class="en">Customer App · iOS &amp; Android</div></div></div>
+  <div class="lead">قلب المنظومة والواجهة التي يراها الزبون. صُمّم ليكون سريعًا وسهلًا وأنيقًا: الزبون يتصفّح المطاعم، يبني طلبه بالتفصيل، يدفع، ثم يتابع سائقه لحظة بلحظة على الخريطة حتى الباب — كل ذلك بتصميم عصري وحركة سلسة وبدون أي انتظار أو تعليق.</div>
+  <span class="pill">تجربة مستخدم فاخرة وسريعة بدون أي تحميل</span>
+  <div class="grid2">
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>تسجيل ودخول آمن</b><span>برقم الهاتف وكلمة مرور، وحساب جديد بخطوات بسيطة</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>كود دعوة الأصدقاء</b><span>ادعُ أصدقاءك واربحوا رصيدًا معًا</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>تصفّح المطاعم والماركت</b><span>تصنيفات، مقترحات، الأعلى تقييمًا، اطلب مرة أخرى</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>بحث فوري</b><span>عن المطاعم والأصناف بالنتائج اللحظية</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>صفحة مطعم متكاملة</b><span>منيو بالأقسام، صور، فلاتر (حار/نباتي/عروض)</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>إضافات وخيارات للأصناف</b><span>أحجام وإضافات وملاحظات خاصة لكل صنف</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>سلة ذكية</b><span>تعديل الكميات، كوبونات خصم، حد أدنى للطلب</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>توصيل أو استلام</b><span>رسوم توصيل حسب الموقع، وتوصيل مجاني فوق مبلغ معيّن</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>الطلب الجماعي</b><span>«اطلبوا سوا — كسر الحساب» بكود مشترك للمجموعة</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>تتبّع مباشر على الخريطة</b><span>موقع السائق ينزلق لحظيًا + خطوات الحالة ووقت الوصول</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>إشعارات فورية</b><span>لكل مرحلة: قبول، تحضير، بالطريق، وصل</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>المحفظة ونقاط الولاء</b><span>مستويات (برونز/فضي/ذهبي/بلاتيني) ورصيد</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>المفضّلة والعناوين</b><span>عناوين متعددة بتحديد GPS، وقائمة مطاعمك المفضّلة</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>تقييم الطلبات</b><span>تقييم بالنجوم مع صور وتعليقات</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>الوضع الليلي</b><span>مظهر فاتح/داكن يتبع النظام</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>دعم فني بالمحادثة</b><span>تواصل مباشر مع الإدارة داخل التطبيق</span></div></div>
+  </div>
+  <div class="pgnum">3</div><div class="brandtag">وصلّي</div>
+</div>
+
+<!-- ===== DRIVER APP ===== -->
+<div class="page">
+  <div class="shead"><div class="num">۳</div><div><h2>تطبيق السائق</h2><div class="en">Driver App · iOS &amp; Android</div></div></div>
+  <div class="lead">أداة عمل السائق اليومية. يستقبل الطلبات القريبة منه مع تنبيه صوتي، يقبلها بضغطة، ويتابع مساره على الخريطة من المطعم حتى الزبون، مع احتساب أرباحه تلقائيًا — ويبقى موقعه محدّثًا للزبون حتى لو كان التطبيق مغلقًا.</div>
+  <span class="pill">أداة عمل كاملة للسائق من الاستلام حتى التسليم</span>
+  <div class="grid2">
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>تشغيل/إيقاف الاتصال</b><span>زر «متصل» لبدء استقبال الطلبات</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>استقبال طلب جديد</b><span>مع مؤقّت قبول وصوت واهتزاز تنبيه</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>تفاصيل الطلب والمسافات</b><span>المطعم، الزبون، أجر التوصيل، المسافة</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>تتبّع الموقع بالخلفية</b><span>يعمل حتى والتطبيق مغلق أثناء التوصيل</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>خريطة وملاحة</b><span>مسار للمطعم ثم للزبون، واتصال مباشر</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>الأرباح</b><span>تقارير يومية/أسبوعية/شهرية + المحفظة</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>سجل التوصيلات</b><span>كل الطلبات المنفّذة بالتفصيل</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>التقييمات والدعم</b><span>تقييمات الزبائن ودعم فني داخل التطبيق</span></div></div>
+  </div>
+
+  <div class="shead" style="margin-top:26px"><div class="num">۴</div><div><h2>بوابة المطعم</h2><div class="en">Restaurant Portal</div></div></div>
+  <div class="lead">لوحة صاحب المطعم لإدارة عمله بالكامل: يستقبل الطلبات فور وصولها مع تنبيه صوتي، يتابع مبيعاته بالأرقام والرسوم، ويتحكّم بمنيوه وأسعاره وعروضه وأوقات عمله لحظيًا من أي جهاز.</div>
+  <span class="pill">تحكّم كامل بالمطعم من أي جهاز</span>
+  <div class="grid2">
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>لوحة إحصاءات</b><span>مبيعات اليوم/الشهر، متوسط الطلب، رسوم بيانية</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>إدارة الطلبات لحظيًا</b><span>قبول، تحضير، تعيين سائق تلقائي، صوت تنبيه</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>إدارة المنيو</b><span>فئات، أصناف، صور، أسعار وخصومات، إضافات</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>إتاحة/إخفاء الأصناف</b><span>تحكّم لحظي بتوفّر كل صنف</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>الزبائن المميّزون (VIP)</b><span>مكافأة زبائنك الدائمين</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>فتح/إغلاق المطعم</b><span>والتقييمات والإعدادات والشعار</span></div></div>
+  </div>
+  <div class="pgnum">4</div><div class="brandtag">وصلّي</div>
+</div>
+
+<!-- ===== ADMIN ===== -->
+<div class="page">
+  <div class="shead"><div class="num">۵</div><div><h2>لوحة الإدارة</h2><div class="en">Admin Dashboard</div></div></div>
+  <div class="lead">مركز القيادة للمنصة كلها. من هنا يدير المالك المستخدمين والمطاعم والسائقين، ويتابع الطلبات والعمليات الحيّة، ويطّلع على التحليلات والمحاسبة والعمولات، ويطلق العروض والإشعارات — تحكّم كامل بكل تفصيلة في مكان واحد.</div>
+  <span class="pill">تحكّم مركزي كامل بالمنصة</span>
+  <div class="grid2">
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>لوحة رئيسية شاملة</b><span>مؤشرات المنصة كاملة بلمحة</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>إدارة المستخدمين</b><span>عرض، حظر/تفعيل، بحث</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>إدارة المطاعم</b><span>تفعيل، تمييز، حذف، ضبط العمولات</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>إدارة السائقين</b><span>المتابعة والإحصاءات</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>العمليات الحية (LiveOps)</b><span>كل الطلبات النشطة والسائقين المتصلين</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>التحليلات</b><span>رسوم ومؤشرات أداء تفصيلية</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>المحاسبة</b><span>عمولات المطاعم والسائقين والصافي</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>البانرات والتصنيفات</b><span>إعلانات وفئات المنيو الرئيسية</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>القسائم والكوبونات</b><span>حملات خصم مرنة</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>مناطق التوصيل</b><span>تحديد المناطق ورسوم كل منطقة</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>بثّ الإشعارات</b><span>إرسال إشعار جماعي للزبائن/السائقين/المطاعم</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>الدعم والمحادثات</b><span>إدارة رسائل الدعم الفني</span></div></div>
+  </div>
+  <div class="pgnum">5</div><div class="brandtag">وصلّي</div>
+</div>
+
+<!-- ===== SERVER + SECURITY ===== -->
+<div class="page">
+  <div class="shead"><div class="num">۶</div><div><h2>السيرفر والبنية التقنية</h2><div class="en">Server &amp; Infrastructure</div></div></div>
+  <div class="lead">النظام مبني على بنية سحابية حديثة وقوية تعمل على مدار الساعة، مصمّمة لتحمّل النمو وضغط الطلبات مع سرعة استجابة عالية وثبات.</div>
+  <div class="grid2">
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>سيرفر مركزي سحابي</b><span>Node.js / Express يعمل 24/7 على استضافة سحابية موثوقة</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>قاعدة بيانات قوية</b><span>PostgreSQL — موثوقة وقابلة للتوسّع</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>اتصال لحظي (Realtime)</b><span>WebSocket لتتبّع السائق والطلبات فورًا</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>إشعارات Push احترافية</b><span>Firebase للأندرويد و APNs للآيفون</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>أداء عالٍ</b><span>ضغط البيانات (gzip) وتخزين مؤقّت لسرعة فائقة</span></div></div>
+    <div class="feat"><span class="ic">✦</span><div class="tx"><b>مراقبة وصحّة النظام</b><span>نقطة فحص (Health Check) ومراقبة استمرارية الخدمة</span></div></div>
+  </div>
+
+  <div class="shead" style="margin-top:26px"><div class="num">۷</div><div><h2>الحماية والأمان</h2><div class="en">Security</div></div></div>
+  <div class="lead">أمان البيانات أولوية قصوى — النظام محمي بطبقات متعددة على مستوى الحسابات والبيانات والاتصال.</div>
+  <div class="grid2">
+    <div class="feat"><span class="ic">🔒</span><div class="tx"><b>كلمات مرور مشفّرة</b><span>تُخزَّن مشفّرة (bcrypt) ولا يمكن قراءتها كنص</span></div></div>
+    <div class="feat"><span class="ic">🔒</span><div class="tx"><b>مصادقة JWT</b><span>توكن آمن لكل جلسة دخول</span></div></div>
+    <div class="feat"><span class="ic">🔒</span><div class="tx"><b>صلاحيات حسب الدور</b><span>فصل تام بين الزبون/السائق/المطعم/الإدارة</span></div></div>
+    <div class="feat"><span class="ic">🔒</span><div class="tx"><b>حماية من الثغرات</b><span>منع XSS وحقن الأكواد وتنظيف كل المدخلات</span></div></div>
+    <div class="feat"><span class="ic">🔒</span><div class="tx"><b>منع الوصول غير المصرّح</b><span>فحص ملكية كل عملية (IDOR protection)</span></div></div>
+    <div class="feat"><span class="ic">🔒</span><div class="tx"><b>حدّ معدّل الطلبات</b><span>Rate limiting ضد الاستغلال والهجمات</span></div></div>
+    <div class="feat"><span class="ic">🔒</span><div class="tx"><b>اتصال مشفّر HTTPS</b><span>كل البيانات تُنقل عبر قناة مشفّرة</span></div></div>
+    <div class="feat"><span class="ic">🔒</span><div class="tx"><b>فحص المرفوعات</b><span>التحقق من الصور المرفوعة وحدود الأحجام</span></div></div>
+  </div>
+  <div class="pgnum">6</div><div class="brandtag">وصلّي</div>
+</div>
+
+<!-- ===== PRICE ===== -->
+<div class="page">
+  <div class="shead"><div class="num">۸</div><div><h2>ما ستحصل عليه والسعر</h2><div class="en">Deliverables &amp; Price</div></div></div>
+  <ul class="deliver">
+    <li><span class="ck">✓</span> تطبيق الزبون كامل — iOS و Android</li>
+    <li><span class="ck">✓</span> تطبيق السائق كامل — iOS و Android</li>
+    <li><span class="ck">✓</span> بوابة المطعم (تطبيق/ويب)</li>
+    <li><span class="ck">✓</span> لوحة الإدارة الكاملة</li>
+    <li><span class="ck">✓</span> السيرفر وقاعدة البيانات وكل الإعدادات</li>
+    <li><span class="ck">✓</span> كامل الأكواد المصدرية (Source Code)</li>
+    <li><span class="ck">✓</span> كامل حقوق الملكية للنظام</li>
+    <li><span class="ck">✓</span> دعم فني مجاني لمدة ٦ أشهر</li>
+  </ul>
+
+  <div class="pricebox">
+    <div class="orb"></div>
+    <div class="lbl">السعر الإجمالي للنظام المتكامل</div>
+    <div class="val">25,000 ₪</div>
+    <div class="inc">شامل الحقوق الكاملة + الأكواد المصدرية + دعم فني ٦ أشهر</div>
+  </div>
+
+  <div class="footer">
+    منظومة وصلّي لتوصيل الطعام — عرض متكامل جاهز للتشغيل الفوري.<br>
+    نتطلّع للعمل معك. 🚀
+  </div>
+  <div class="pgnum">7</div><div class="brandtag">وصلّي</div>
+</div>
+
+</body>
+</html>
