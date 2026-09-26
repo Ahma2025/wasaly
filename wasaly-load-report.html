@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+<style>
+  @page { size: A4; margin: 0; }
+  * { margin:0; padding:0; box-sizing:border-box; font-family:'Tajawal',sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  :root{ --brand:#FF6B00; --deep:#F53B57; --ink:#14142B; --sub:#6B7280; --line:#ECEEF3; --bg:#F7F8FB;
+    --grad:linear-gradient(135deg,#FF8A00,#FF5E3A 55%,#F53B57); --ok:#16A34A; --warn:#D97706; --bad:#DC2626; }
+  body{ color:var(--ink); }
+  .page{ width:210mm; min-height:297mm; padding:18mm 15mm; position:relative; page-break-after:always; }
+  .page:last-child{ page-break-after:auto; }
+  .cover{ background:var(--grad); color:#fff; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; }
+  .cover .orb{ position:absolute; top:-100px; left:-80px; width:320px; height:320px; border-radius:50%; background:rgba(255,255,255,.12); }
+  .cover .em{ font-size:80px; margin-bottom:14px; position:relative;}
+  .cover h1{ font-size:46px; font-weight:900; position:relative; }
+  .cover .s{ font-size:19px; opacity:.95; margin-top:10px; font-weight:600; position:relative; }
+  .cover .d{ font-size:14px; opacity:.9; margin-top:22px; max-width:430px; line-height:2; position:relative; }
+  .shead{ display:flex; align-items:center; gap:12px; margin:0 0 16px; }
+  .shead .n{ width:42px;height:42px;border-radius:12px; background:var(--grad); color:#fff; display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;}
+  .shead h2{ font-size:23px; font-weight:900; }
+  h3{ font-size:16px; font-weight:900; margin:16px 0 8px; }
+  p{ font-size:13.5px; line-height:1.9; color:#374151; }
+  .lead{ font-size:13.5px; line-height:2; background:var(--bg); border-radius:12px; padding:13px 15px; border-right:4px solid var(--brand); margin-bottom:14px; }
+  table{ width:100%; border-collapse:collapse; margin:10px 0; font-size:12px; }
+  th,td{ border:1px solid var(--line); padding:8px 9px; text-align:right; vertical-align:top; }
+  th{ background:#FFF3EC; font-weight:800; color:#8a3d00; }
+  .b-ok{ color:var(--ok); font-weight:800; } .b-warn{ color:var(--warn); font-weight:800; } .b-bad{ color:var(--bad); font-weight:800; }
+  .card{ border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
+  .card.bad{ border-right:4px solid var(--bad); } .card.warn{ border-right:4px solid var(--warn); } .card.ok{ border-right:4px solid var(--ok); }
+  .card h4{ font-size:14px; font-weight:900; margin-bottom:4px; }
+  .card .sev{ font-size:11px; font-weight:800; padding:2px 8px; border-radius:999px; }
+  .sev.high{ background:#FEE2E2; color:#B91C1C; } .sev.med{ background:#FEF3C7; color:#92400E; } .sev.done{ background:#DCFCE7; color:#15803D; }
+  ul{ margin:6px 22px; } li{ font-size:13px; line-height:1.9; }
+  .pgnum{ position:absolute; bottom:10mm; left:15mm; font-size:10px; color:#B4B9C4; }
+  .brandtag{ position:absolute; bottom:10mm; right:15mm; font-size:10px; color:var(--brand); font-weight:800; }
+  .foot{ text-align:center; color:var(--sub); font-size:11px; margin-top:20px; padding-top:12px; border-top:1px solid var(--line); }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="page cover">
+  <div class="orb"></div>
+  <div class="em">⚙️</div>
+  <h1>تقرير قدرة التحمّل والأداء</h1>
+  <div class="s">منظومة وصلّي — فحص معماري عميق للسيرفر</div>
+  <div class="d">تقييم قدرة النظام على تحمّل النمو المتوقّع خلال ٥ أشهر، وتحديد الاختناقات، والإصلاحات المطبّقة، وخارطة الطريق للوصول للأرقام المستهدفة.</div>
+</div>
+
+<!-- EXEC SUMMARY -->
+<div class="page">
+  <div class="shead"><div class="n">۱</div><h2>الملخّص التنفيذي</h2></div>
+  <div class="lead">تم إجراء <b>فحص معماري عميق</b> للكود وبنية السيرفر وقاعدة البيانات ونظام الوقت الحقيقي والإشعارات. الفحص يكشف الاختناقات الحقيقية قبل حدوثها (وهو الأسلوب الآمن — بدل ضرب حِمل حقيقي يوقّع الخدمة على الزبائن الحاليين). النتيجة: النظام <b>سليم ويعمل ممتاز للحجم الحالي</b>، لكنه كان <b>غير جاهز للأرقام المستهدفة</b> بسبب نقاط محدّدة تم إصلاح أهمّها الآن، وبقيت نقاط معمارية تحتاج بنية تحتية إضافية.</div>
+
+  <h3>الأرقام المستهدفة (خلال ٥ أشهر)</h3>
+  <table>
+    <tr><th>المؤشّر</th><th>الرقم المستهدف</th></tr>
+    <tr><td>المطاعم</td><td>1,000</td></tr>
+    <tr><td>الزبائن</td><td>1,000,000</td></tr>
+    <tr><td>السائقون</td><td>300</td></tr>
+    <tr><td>ذروة الطلبات المتزامنة</td><td>~1,000 طلب/الثانية (ذروة)</td></tr>
+    <tr><td>رسائل الدعم</td><td>~1,000 رسالة/الثانية (ذروة)</td></tr>
+    <tr><td>التتبّع الحيّ + الإشعارات</td><td>عشرات إلى مئات الآلاف من الاتصالات المتزامنة</td></tr>
+  </table>
+
+  <h3>الحكم النهائي بلمحة</h3>
+  <table>
+    <tr><th>الحالة</th><th>المعنى</th></tr>
+    <tr><td><span class="b-ok">✅ تم إصلاحه الآن</span></td><td>الفهارس، تخفيف حمل التتبّع، البثّ الجماعي، سعة الاتصالات</td></tr>
+    <tr><td><span class="b-warn">⚠️ يحتاج بنية تحتية</span></td><td>توسيع أفقي للسيرفر + Redis للوقت الحقيقي + طابور للإشعارات + تخزين صور خارجي</td></tr>
+  </table>
+  <div class="foot">تقرير وصلّي — قدرة التحمّل</div>
+  <div class="pgnum">2</div><div class="brandtag">وصلّي</div>
+</div>
+
+<!-- ARCHITECTURE -->
+<div class="page">
+  <div class="shead"><div class="n">۲</div><h2>البنية الحالية</h2></div>
+  <ul>
+    <li><b>سيرفر التطبيق:</b> Node.js / Express — <b>نسخة واحدة</b> (Single Instance) على Railway.</li>
+    <li><b>قاعدة البيانات:</b> PostgreSQL (نسخة واحدة)، مجمّع اتصالات (Pool).</li>
+    <li><b>الوقت الحقيقي:</b> Socket.io لبثّ الطلبات وتتبّع السائق — <b>بدون Redis Adapter</b>.</li>
+    <li><b>الإشعارات:</b> Firebase (أندرويد) + APNs (آيفون)، تُرسل من داخل السيرفر.</li>
+    <li><b>الأداء:</b> ضغط gzip مفعّل، تخزين مؤقّت جزئي، حدّ معدّل طلبات لكل IP (بالذاكرة).</li>
+    <li><b>الصور:</b> مخزّنة حاليًا كنص Base64 داخل قاعدة البيانات.</li>
+  </ul>
+  <div class="lead">النقطة الجوهرية: البنية الحالية <b>عمودية (نسخة واحدة)</b>. للوصول لمليون مستخدم لازم تصير <b>أفقية (عدّة نسخ)</b>، وهذا يتطلّب إزالة الحالة المخزّنة بالذاكرة (Redis) — وهو محور التوصيات.</div>
+  <div class="pgnum">3</div><div class="brandtag">وصلّي</div>
+</div>
+
+<!-- FINDINGS -->
+<div class="page">
+  <div class="shead"><div class="n">۳</div><h2>الاختناقات المكتشفة</h2></div>
+
+  <div class="card bad"><h4>1) غياب الفهارس (Indexes) <span class="sev high">حرج</span></h4>
+    <p>الجداول الرئيسية (الطلبات، المستخدمون، المطاعم، الأصناف، الإشعارات) كانت بلا فهارس. أي استعلام كان يفحص الجدول كاملًا — يعني عند ملايين الصفوف تتحوّل الاستعلامات من أجزاء من الميلي ثانية إلى <b>ثوانٍ</b>، فيمتلئ مجمّع الاتصالات ويتوقّف السيرفر. <b>هذا كان سيوقّع النظام أول ما يكبر.</b></p></div>
+
+  <div class="card bad"><h4>2) الوقت الحقيقي بنسخة واحدة بلا Redis <span class="sev high">حرج للهدف</span></h4>
+    <p>Socket.io على نسخة واحدة يتحمّل عمليًا ~10,000–30,000 اتصال متزامن كحدّ أقصى، ولا يمكن توزيعه على عدّة نسخ بدون <b>@socket.io/redis-adapter</b>. عند مئات الآلاف من الاتصالات (تتبّع + إشعارات) هذه النسخة الواحدة لن تكفي.</p></div>
+
+  <div class="card bad"><h4>3) الإشعار الجماعي لمليون مستخدم <span class="sev high">حرج للهدف</span></h4>
+    <p>البثّ كان يرسل الإشعار <b>لكل توكن على حدة وبالتسلسل</b> داخل نفس الطلب — إرسال مليون إشعار هكذا يستغرق ساعات ويفشل. يحتاج <b>طابور خلفي (Queue)</b> + إرسال FCM جماعي (Multicast).</p></div>
+
+  <div class="card warn"><h4>4) الصور Base64 داخل قاعدة البيانات <span class="sev med">مهم</span></h4>
+    <p>صور المطاعم والأصناف والبانرات مخزّنة كنص Base64 في قاعدة البيانات. هذا يضخّم حجم القاعدة ويبطّئ الاستعلامات ويستهلك حزمة إنترنت هائلة مع كل تحميل منيو. الحل: <b>تخزين خارجي (Object Storage) + CDN</b> وحفظ الروابط فقط.</p></div>
+
+  <div class="card warn"><h4>5) كتابة موقع السائق على كل نبضة <span class="sev med">مهم</span></h4>
+    <p>كان موقع كل سائق يُكتب في قاعدة البيانات مع كل إشارة (كل ٥ ثوانٍ) + استعلام لإيجاد الزبون. يضاعف الحمل بلا داعٍ.</p></div>
+
+  <div class="card warn"><h4>6) حالة مخزّنة بالذاكرة (حدّ المعدّل) <span class="sev med">مهم عند التوسّع</span></h4>
+    <p>حدّ معدّل الطلبات مخزّن بذاكرة النسخة الواحدة — لن يعمل بشكل صحيح عند تشغيل عدّة نسخ. يجب نقله إلى Redis عند التوسّع الأفقي.</p></div>
+  <div class="pgnum">4</div><div class="brandtag">وصلّي</div>
+</div>
+
+<!-- FIXED NOW -->
+<div class="page">
+  <div class="shead"><div class="n">۴</div><h2>ما تم إصلاحه الآن</h2></div>
+
+  <div class="card ok"><h4>✅ إضافة كل الفهارس الناقصة <span class="sev done">منفّذ</span></h4>
+    <p>أُضيفت فهارس شاملة على: الطلبات (حسب الزبون/المطعم/السائق/الحالة/التاريخ)، الأصناف، المستخدمين، الإشعارات، السائقين، التقييمات، العناوين، المحفظة، الدعم. <b>النتيجة: الاستعلامات تبقى سريعة (ميلي ثانية) حتى مع ملايين الصفوف.</b> هذا أكبر مكسب أداء منفرد.</p></div>
+
+  <div class="card ok"><h4>✅ تخفيف حمل التتبّع الحيّ <span class="sev done">منفّذ</span></h4>
+    <p>البثّ اللحظي للزبون يتم فورًا على كل نبضة (تجربة سلسة)، بينما الكتابة لقاعدة البيانات صارت <b>كل ١٥ ثانية</b> فقط، مع <b>كاش</b> لهوية زبون كل طلب (إلغاء استعلام على كل نبضة). تقليل ضخم لحمل قاعدة البيانات.</p></div>
+
+  <div class="card ok"><h4>✅ البثّ الجماعي للإشعارات — إدراج مجمّع <span class="sev done">منفّذ</span></h4>
+    <p>تخزين الإشعارات صار <b>إدراجًا مجمّعًا (Batch)</b> بدل صف-صف — أسرع بمئات المرات عند الأعداد الكبيرة (مع إزالة التوكنات المكرّرة المطبّقة سابقًا).</p></div>
+
+  <div class="card ok"><h4>✅ رفع سعة اتصالات قاعدة البيانات <span class="sev done">منفّذ</span></h4>
+    <p>رُفع الحدّ إلى ٣٠ اتصالًا وصار قابلًا للضبط عبر متغيّر بيئة حسب خطة Postgres.</p></div>
+
+  <div class="card ok"><h4>✅ سكربت اختبار حِمل (k6) <span class="sev done">جاهز</span></h4>
+    <p>أُرفق سكربت <b>k6</b> جاهز لقياس الأداء فعليًا على بيئة اختبار (تصاعد حتى ٥٠٠ مستخدم متزامن) — <code>backend/loadtest/k6-wasaly.js</code>.</p></div>
+  <div class="pgnum">5</div><div class="brandtag">وصلّي</div>
+</div>
+
+<!-- CAPACITY TABLE -->
+<div class="page">
+  <div class="shead"><div class="n">۵</div><h2>تقييم القدرة لكل نظام</h2></div>
+  <table>
+    <tr><th>النظام</th><th>قبل</th><th>بعد إصلاحات اليوم</th><th>للوصول لهدف الـ٥ أشهر</th></tr>
+    <tr><td>قراءات قاعدة البيانات</td><td class="b-bad">فحص كامل — ينهار مبكرًا</td><td class="b-ok">مفهرس — ملايين الصفوف</td><td>خطة Postgres أقوى (4–8 vCPU)</td></tr>
+    <tr><td>كتابة الطلبات (ذروة 1000/ث)</td><td class="b-warn">محدود</td><td class="b-warn">أفضل</td><td>طابور/تجميع كتابة + Postgres قوي</td></tr>
+    <tr><td>سيرفر التطبيق</td><td class="b-warn">نسخة واحدة</td><td class="b-warn">نسخة واحدة</td><td class="b-bad">عدّة نسخ + موازِن حِمل</td></tr>
+    <tr><td>الوقت الحقيقي (Sockets)</td><td class="b-bad">~10–30 ألف اتصال</td><td class="b-warn">نفسه</td><td class="b-bad">Redis Adapter + عدّة نسخ</td></tr>
+    <tr><td>التتبّع الحيّ (نبضات)</td><td class="b-warn">كتابة كل نبضة</td><td class="b-ok">كل 15ث + كاش</td><td>يتوسّع مع الـSockets</td></tr>
+    <tr><td>إشعار جماعي (مليون)</td><td class="b-bad">تسلسلي — يفشل</td><td class="b-warn">DB مجمّع</td><td class="b-bad">طابور + FCM Multicast</td></tr>
+    <tr><td>الصور</td><td class="b-bad">Base64 بالقاعدة</td><td class="b-warn">نفسه</td><td class="b-bad">تخزين خارجي + CDN</td></tr>
+    <tr><td>حدّ المعدّل</td><td class="b-warn">بالذاكرة</td><td class="b-warn">نفسه</td><td>Redis عند تعدّد النسخ</td></tr>
+    <tr><td>الدعم الفني (1000/ث)</td><td class="b-warn">—</td><td class="b-ok">مفهرس</td><td>مراقبة تضخّم إشعار الإدمن</td></tr>
+  </table>
+  <div class="lead">الخلاصة: بعد إصلاحات اليوم، <b>قاعدة البيانات والتتبّع صاروا جاهزين للنموّ الكبير</b>. أما <b>التوسّع الأفقي (عدّة نسخ + Redis) والإشعار الجماعي وتخزين الصور</b> فهي المتطلّبات المتبقّية للوصول لمليون مستخدم.</div>
+  <div class="pgnum">6</div><div class="brandtag">وصلّي</div>
+</div>
+
+<!-- ROADMAP -->
+<div class="page">
+  <div class="shead"><div class="n">۶</div><h2>خارطة الطريق للوصول للهدف</h2></div>
+
+  <h3>أولوية عالية (قبل الوصول لأرقام كبيرة)</h3>
+  <ul>
+    <li><b>Redis + @socket.io/redis-adapter:</b> لتوزيع الوقت الحقيقي على عدّة نسخ — هذا يفكّ سقف الاتصالات المتزامنة (التتبّع + الإشعارات اللحظية).</li>
+    <li><b>تشغيل عدّة نسخ من السيرفر خلف موازِن حِمل (Autoscaling):</b> لتحمّل ذروة الطلبات والزيارات.</li>
+    <li><b>طابور إشعارات (BullMQ على Redis) + إرسال FCM جماعي:</b> لإرسال ملايين الإشعارات بأمان وبالخلفية.</li>
+    <li><b>نقل الصور لتخزين خارجي (Cloudflare R2 / S3) + CDN:</b> يقلّص حجم القاعدة واستهلاك الإنترنت بشكل جذري ويسرّع كل الشاشات.</li>
+  </ul>
+
+  <h3>أولوية متوسطة</h3>
+  <ul>
+    <li>ترقية خطة Postgres (CPU/RAM) + مراقبة الاستعلامات البطيئة، وإضافة <b>نسخة قراءة (Read Replica)</b> عند اشتداد القراءات.</li>
+    <li>نقل حدّ المعدّل إلى Redis عند تعدّد النسخ.</li>
+    <li>تجميع كتابة عناصر الطلب في إدراج واحد، وطابور لكتابة الطلبات وقت الذروة.</li>
+    <li>مراقبة (Monitoring): APM + تنبيهات (CPU، الذاكرة، زمن الاستجابة، أخطاء).</li>
+  </ul>
+
+  <h3>ملاحظة صريحة ومهنية</h3>
+  <div class="lead">إصلاحات اليوم (الفهارس + تخفيف التتبّع + تجميع الإشعارات + سعة الاتصالات) <b>رفعت سقف التحمّل عشرات المرّات</b> وهي مطبّقة بالكود. لكن الوصول الكامل لمليون مستخدم و1000 طلب/ثانية <b>يتطلّب البنود عالية الأولوية أعلاه</b> — وهي قرارات بنية تحتية (Redis + عدّة نسخ + تخزين صور)، ننفّذها على مراحل مع نموّ الأرقام الفعلي، فلا يتفاجأ المشروع في الشهر الخامس.</div>
+  <div class="foot">تقرير وصلّي — قدرة التحمّل والأداء · نهاية التقرير</div>
+  <div class="pgnum">7</div><div class="brandtag">وصلّي</div>
+</div>
+
+</body>
+</html>

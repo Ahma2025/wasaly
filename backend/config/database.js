@@ -368,7 +368,7 @@ if (!process.env.DATABASE_URL) {
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    max: 20,
+    max: Number(process.env.PG_POOL_MAX) || 30, // قابل للضبط عبر متغيّر بيئة حسب خطة Postgres
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
   });

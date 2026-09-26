@@ -15,6 +15,12 @@ module.exports = (io) => {
     }
   });
 
+  // كاش بالذاكرة: orderId → customerId (يوفّر SELECT على كل نبضة موقع)
+  const _orderCustomer = new Map();
+  // آخر وقت حفظنا فيه موقع السائق بقاعدة البيانات (تقليل الكتابة)
+  const _lastPersist = new Map();
+  const PERSIST_EVERY = 15000; // نكتب الموقع بالـ DB كل 15 ثانية فقط، والبثّ اللحظي للزبون كل نبضة
+
   io.on('connection', (socket) => {
     console.log(`Socket connected: user ${socket.userId} (${socket.userRole})`);
     socket.join(`user:${socket.userId}`);
@@ -22,20 +28,23 @@ module.exports = (io) => {
     // Driver sends live location with orderId
     socket.on('driver:location', async ({ lat, lng, orderId }) => {
       try {
-        // Update driver's current location in DB
-        await pool.query(
-          'UPDATE drivers SET current_lat=$1, current_lng=$2 WHERE user_id=$3',
-          [lat, lng, socket.userId]
-        );
-
+        // 1) البثّ اللحظي للزبون فورًا (بدون انتظار قاعدة البيانات)
         if (orderId) {
-          // Find the customer of this order and emit only to them
-          const { rows } = await pool.query(
-            'SELECT customer_id FROM orders WHERE id=$1', [orderId]
-          );
-          if (rows[0]) {
-            io.to(`user:${rows[0].customer_id}`).emit('driver:location', { lat, lng, orderId });
+          let customerId = _orderCustomer.get(String(orderId));
+          if (customerId === undefined) {
+            const { rows } = await pool.query('SELECT customer_id FROM orders WHERE id=$1', [orderId]);
+            customerId = rows[0] ? rows[0].customer_id : null;
+            if (_orderCustomer.size > 10000) _orderCustomer.clear(); // حماية الذاكرة
+            _orderCustomer.set(String(orderId), customerId); // كاش
           }
+          if (customerId) io.to(`user:${customerId}`).emit('driver:location', { lat, lng, orderId });
+        }
+        // 2) حفظ الموقع بقاعدة البيانات كل 15 ثانية فقط (بدل كل نبضة)
+        const now = Date.now();
+        if (now - (_lastPersist.get(socket.userId) || 0) >= PERSIST_EVERY) {
+          _lastPersist.set(socket.userId, now);
+          pool.query('UPDATE drivers SET current_lat=$1, current_lng=$2 WHERE user_id=$3',
+            [lat, lng, socket.userId]).catch(() => {});
         }
       } catch (e) {
         console.error('driver:location error:', e.message);

@@ -19,6 +19,41 @@ async function runMigrations() {
     `CREATE TABLE IF NOT EXISTS group_orders (id SERIAL PRIMARY KEY, code TEXT UNIQUE, host_id TEXT, restaurant_id TEXT, restaurant_name TEXT, status TEXT DEFAULT 'open', order_id TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS group_order_items (id SERIAL PRIMARY KEY, group_id INTEGER, user_id TEXT, user_name TEXT, menu_item_id TEXT, name TEXT, price NUMERIC DEFAULT 0, image TEXT, quantity INTEGER DEFAULT 1, options TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE INDEX IF NOT EXISTS group_order_items_group_idx ON group_order_items(group_id)`,
+
+    // ⚡️ فهارس الأداء — ضرورية للتحمّل عند الكبر (بدونها الاستعلامات تفحص الجداول كاملة)
+    // users
+    `CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)`,
+    `CREATE INDEX IF NOT EXISTS idx_users_fcm ON users(fcm_token) WHERE fcm_token IS NOT NULL`,
+    // restaurants
+    `CREATE INDEX IF NOT EXISTS idx_rest_owner ON restaurants(owner_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_rest_category ON restaurants(category_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_rest_active_open ON restaurants(is_active, is_open)`,
+    // menu
+    `CREATE INDEX IF NOT EXISTS idx_menucat_rest ON menu_categories(restaurant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_menuitem_rest ON menu_items(restaurant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_menuitem_cat ON menu_items(category_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_itemopt_item ON item_options(item_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_itemoptval_opt ON item_option_values(option_id)`,
+    // orders — الأهم (ملايين الصفوف متوقّعة)
+    `CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id, created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_orders_restaurant ON orders(restaurant_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_orders_driver ON orders(driver_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_orderitems_order ON order_items(order_id)`,
+    // notifications
+    `CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_notif_unread ON notifications(user_id, is_read)`,
+    // drivers
+    `CREATE INDEX IF NOT EXISTS idx_drivers_online ON drivers(is_online, is_busy)`,
+    // reviews / addresses / wallet / coupons / support
+    `CREATE INDEX IF NOT EXISTS idx_reviews_rest ON reviews(restaurant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_reviews_driver ON reviews(driver_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_addr_user ON addresses(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_wallet_user ON wallet_transactions(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_couponusage_user ON coupon_usage(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(order_number)`,
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); } catch (e) { /* column already exists */ }
