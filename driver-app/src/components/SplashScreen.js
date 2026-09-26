@@ -23,8 +23,8 @@ export default function SplashScreen({ onFinish }) {
       Animated.timing(ringPulse, { toValue: 0, duration: 0, useNativeDriver: true }),
     ])).start();
 
-    Animated.timing(barAnim, { toValue: 1, duration: 1800, delay: 300, useNativeDriver: false })
-      .start(() => setTimeout(() => onFinish && onFinish(), 300));
+    Animated.timing(barAnim, { toValue: 1, duration: 950, delay: 150, useNativeDriver: false })
+      .start(() => setTimeout(() => onFinish && onFinish(), 150));
   }, []);
 
   const barWidth = barAnim.interpolate({ inputRange: [0, 1], outputRange: [0, width * 0.6] });

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+<style>
+  @page { size: A4; margin: 0; }
+  * { margin:0; padding:0; box-sizing:border-box; font-family:'Tajawal',sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  :root{ --brand:#FF6B00; --deep:#F53B57; --ink:#14142B; --sub:#6B7280; --line:#ECEEF3; --bg:#F7F8FB; --ok:#16A34A; --warn:#D97706; --bad:#DC2626; }
+  body{ color:var(--ink); }
+  .page{ width:210mm; min-height:297mm; padding:18mm 15mm; position:relative; page-break-after:always; }
+  .page:last-child{ page-break-after:auto; }
+  .cover{ background:linear-gradient(135deg,#0E7C4A,#12B76A 55%,#0BA5A0); color:#fff; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; }
+  .cover .orb{ position:absolute; top:-100px; left:-80px; width:320px; height:320px; border-radius:50%; background:rgba(255,255,255,.12); }
+  .cover .em{ font-size:80px; margin-bottom:14px; position:relative; }
+  .cover h1{ font-size:44px; font-weight:900; position:relative; }
+  .cover .s{ font-size:19px; opacity:.95; margin-top:10px; font-weight:600; position:relative; }
+  .cover .d{ font-size:14px; opacity:.9; margin-top:22px; max-width:430px; line-height:2; position:relative; }
+  .shead{ display:flex; align-items:center; gap:12px; margin:0 0 16px; }
+  .shead .n{ width:42px;height:42px;border-radius:12px; background:linear-gradient(135deg,#12B76A,#0BA5A0); color:#fff; display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900; }
+  .shead h2{ font-size:23px; font-weight:900; }
+  h3{ font-size:16px; font-weight:900; margin:16px 0 8px; }
+  p{ font-size:13.5px; line-height:1.9; color:#374151; }
+  .lead{ font-size:13.5px; line-height:2; background:var(--bg); border-radius:12px; padding:13px 15px; border-right:4px solid var(--ok); margin-bottom:14px; }
+  table{ width:100%; border-collapse:collapse; margin:8px 0; font-size:12px; }
+  th,td{ border:1px solid var(--line); padding:8px 9px; text-align:right; vertical-align:top; }
+  th{ background:#E9FBF0; font-weight:800; color:#0E7C4A; }
+  .ok{ color:var(--ok); font-weight:800; }
+  .card{ border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; border-right:4px solid var(--ok); }
+  .card h4{ font-size:14px; font-weight:900; margin-bottom:4px; }
+  .badge{ font-size:11px;font-weight:800;padding:2px 9px;border-radius:999px;background:#DCFCE7;color:#15803D; }
+  .pgnum{ position:absolute; bottom:10mm; left:15mm; font-size:10px; color:#B4B9C4; }
+  .brandtag{ position:absolute; bottom:10mm; right:15mm; font-size:10px; color:var(--brand); font-weight:800; }
+  .foot{ text-align:center; color:var(--sub); font-size:11px; margin-top:20px; padding-top:12px; border-top:1px solid var(--line); }
+</style>
+</head>
+<body>
+
+<div class="page cover">
+  <div class="orb"></div>
+  <div class="em">🛡️</div>
+  <h1>تقرير الأمان والحماية</h1>
+  <div class="s">منظومة وصلّي — فحص أمني عميق وشامل</div>
+  <div class="d">فحص كامل لكل طبقات الحماية: المصادقة، الصلاحيات، حقن قواعد البيانات، الثغرات، الأسرار، ورفع الملفات — مع الإصلاحات المطبّقة.</div>
+</div>
+
+<div class="page">
+  <div class="shead"><div class="n">۱</div><h2>الخلاصة التنفيذية</h2></div>
+  <div class="lead">تم إجراء <b>فحص أمني عميق</b> لكامل السيرفر. النتيجة: <b>المنظومة محمية بمستوى عالٍ جدًا</b> — الطبقات الأساسية كلها موجودة وسليمة، ولم يُعثر على ثغرات حرجة قابلة للاختراق. تم أيضًا تطبيق <b>تحصين إضافي (Defense in Depth)</b> لرفع المستوى أكثر.</div>
+  <h3>التقييم العام</h3>
+  <table>
+    <tr><th>المجال</th><th>الحالة</th></tr>
+    <tr><td>حقن قواعد البيانات (SQL Injection)</td><td class="ok">✅ محمي بالكامل</td></tr>
+    <tr><td>المصادقة وكلمات المرور</td><td class="ok">✅ قوي</td></tr>
+    <tr><td>الصلاحيات والوصول (IDOR)</td><td class="ok">✅ محمي</td></tr>
+    <tr><td>حماية التخمين والإغراق (Brute-force / DoS)</td><td class="ok">✅ موجود</td></tr>
+    <tr><td>الأسرار والمفاتيح</td><td class="ok">✅ لا تسريب</td></tr>
+    <tr><td>رفع الملفات</td><td class="ok">✅ آمن</td></tr>
+    <tr><td>تسريب معلومات الأخطاء</td><td class="ok">✅ تم تحصينه الآن</td></tr>
+  </table>
+  <div class="foot">تقرير وصلّي — الأمان</div>
+  <div class="pgnum">2</div><div class="brandtag">وصلّي</div>
+</div>
+
+<div class="page">
+  <div class="shead"><div class="n">۲</div><h2>ما تم فحصه والنتائج</h2></div>
+
+  <div class="card"><h4>🔐 المصادقة (Authentication) <span class="badge">سليم</span></h4>
+    <p>كلمات المرور مشفّرة بـ <b>bcrypt</b> (لا تُخزَّن كنص ولا يمكن استرجاعها). الدخول عبر <b>JWT</b> موقّع بمفتاح سرّي (مضبوط بمتغيّر بيئة، غير مكشوف). كل طلب يتحقق أن الحساب <b>فعّال وغير محظور</b>. لا يتم إرجاع كلمة المرور المشفّرة في أي رد.</p></div>
+
+  <div class="card"><h4>🗄️ حقن قواعد البيانات (SQL Injection) <span class="badge">محمي</span></h4>
+    <p>كل الاستعلامات تستخدم <b>معاملات آمنة (Parameterized $1,$2)</b>. حتى الاستعلامات الديناميكية (أسماء الأعمدة) مبنية من <b>قوائم بيضاء ثابتة</b> — لا مدخلات مستخدم تدخل نص الاستعلام. لا توجد ثغرة حقن.</p></div>
+
+  <div class="card"><h4>👤 الصلاحيات والوصول (IDOR / Authorization) <span class="badge">محمي</span></h4>
+    <p>فصل صلاحيات كامل حسب الدور (زبون / سائق / مطعم / إدارة). تفاصيل كل طلب لا يراها إلا <b>صاحبه أو السائق المعيّن أو صاحب المطعم أو الإدارة</b>. تعديل الطلبات محصور بالجهة المخوّلة فقط. المطاعم تتحقق من ملكية العناصر قبل أي تعديل.</p></div>
+
+  <div class="card"><h4>🛡️ الحماية ضد التخمين والإغراق <span class="badge">موجود</span></h4>
+    <p>حدّ معدّل طلبات لكل IP (مشترك عبر Redis عند التوسّع). عدّاد محاولات دخول فاشلة يقفل مؤقتًا بعد محاولات متكررة (Brute-force). حدّ إرسال رموز التحقق (OTP).</p></div>
+
+  <div class="card"><h4>🔑 الأسرار والمفاتيح <span class="badge">لا تسريب</span></h4>
+    <p>لا توجد أي مفاتيح أو أسرار مرفوعة على Git (تم التأكد). ملفات الأسرار (مفاتيح Firebase / APNs / .env) مستثناة بالكامل. لا مفاتيح مكتوبة داخل الكود. الاتصال كله عبر <b>HTTPS مشفّر</b>.</p></div>
+
+  <div class="card"><h4>🖼️ رفع الملفات <span class="badge">آمن</span></h4>
+    <p>يُقبل الصور فقط (فحص نوع)، ثم <b>تُعاد معالجتها بالكامل</b> (تُحوّل وتُضغط) — ما يزيل أي كود خبيث مخبّأ داخل الصورة. حدّ لحجم الملف. التخزين الآن على CDN خارجي.</p></div>
+  <div class="pgnum">3</div><div class="brandtag">وصلّي</div>
+</div>
+
+<div class="page">
+  <div class="shead"><div class="n">۳</div><h2>التحصين الإضافي المطبّق الآن</h2></div>
+  <div class="card"><h4>✅ إخفاء تفاصيل أخطاء السيرفر</h4>
+    <p>أُضيف حاجز مركزي يمنع تسريب أي تفاصيل داخلية للأخطاء (5xx) للعميل في الإنتاج — يُرجَع فقط رسالة عامة، فلا يستفيد أي مهاجم من رسائل الأخطاء للاستكشاف.</p></div>
+  <div class="card"><h4>✅ منع تكرار الإشعارات + عزل التوكنات</h4>
+    <p>(سابقًا) تم إصلاح تسريب/تكرار توكنات الإشعارات بحيث كل توكن يخص حسابًا واحدًا فقط.</p></div>
+  <div class="card"><h4>✅ رؤوس حماية HTTP (Helmet) + ضغط + HTTPS</h4>
+    <p>رؤوس أمان قياسية مفعّلة على كل الردود، وإخفاء بصمة الخادم.</p></div>
+
+  <h3>توصيات مستقبلية (عند التوسّع لعدّة نسخ)</h3>
+  <table>
+    <tr><th>التوصية</th><th>الفائدة</th></tr>
+    <tr><td>نقل عدّاد التخمين إلى Redis</td><td>حماية موحّدة عبر كل النسخ عند التشغيل بعدّة سيرفرات</td></tr>
+    <tr><td>مراجعة أمنية دورية (كل بضعة أشهر)</td><td>ضمان استمرار الحماية مع إضافة ميزات جديدة</td></tr>
+    <tr><td>نسخ احتياطي مجدول لقاعدة البيانات</td><td>استرجاع سريع عند أي طارئ</td></tr>
+    <tr><td>مراقبة وتنبيهات (Monitoring)</td><td>كشف أي نشاط غير طبيعي فورًا</td></tr>
+  </table>
+
+  <div class="lead">النتيجة النهائية: <b>منظومة وصلّي آمنة بمستوى عالٍ جدًا، لا توجد ثغرات حرجة، وتم رفع مستوى التحصين أكثر.</b> الأمان عملية مستمرة — مع كل ميزة جديدة يُنصح بمراجعة سريعة للحفاظ على نفس المستوى.</div>
+  <div class="foot">تقرير وصلّي — الأمان والحماية · نهاية التقرير</div>
+  <div class="pgnum">4</div><div class="brandtag">وصلّي</div>
+</div>
+
+</body>
+</html>

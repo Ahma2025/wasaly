@@ -32,22 +32,30 @@ export const AuthProvider = ({ children }) => {
       const t = await SecureStore.getItemAsync('token');
       if (t) {
         setToken(t);
-        const data = await api.get('/auth/me');
-        setUser(data.user);
+        // عرض فوري من الكاش (بدون انتظار الشبكة) — يلغي شاشة التحميل البيضا
+        try {
+          const cached = await SecureStore.getItemAsync('user');
+          if (cached) setUser(JSON.parse(cached));
+        } catch {}
+        setLoading(false); // ندخل التطبيق فورًا
+        // تحقّق بالخلفية (تحديث البيانات، وتسجيل خروج فقط لو التوكن غير صالح)
+        api.get('/auth/me')
+          .then(data => { if (data?.user) { setUser(data.user); SecureStore.setItemAsync('user', JSON.stringify(data.user)).catch(() => {}); } })
+          .catch(async (e) => {
+            if (e?.message !== 'Network error' && e?.status === 401) {
+              await SecureStore.deleteItemAsync('token'); setToken(null); setUser(null);
+            }
+          });
         registerForPushNotifications().catch(() => {});
+        return;
       }
-    } catch (e) {
-      // Only clear token on auth errors — network errors should not log out the user
-      if (e?.message !== 'Network error') {
-        await SecureStore.deleteItemAsync('token');
-        setToken(null);
-      }
-    }
-    finally { setLoading(false); }
+    } catch (e) { /* ignore */ }
+    setLoading(false);
   };
 
   const login = async (tokenValue, userData) => {
     await SecureStore.setItemAsync('token', tokenValue);
+    try { await SecureStore.setItemAsync('user', JSON.stringify(userData)); } catch {}
     setToken(tokenValue);
     setUser(userData);
     registerForPushNotifications().catch(() => {});
@@ -56,6 +64,7 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try { await api.post('/auth/logout'); } catch {}
     await SecureStore.deleteItemAsync('token');
+    try { await SecureStore.deleteItemAsync('user'); } catch {}
     setToken(null);
     setUser(null);
   };

@@ -84,12 +84,18 @@ export default function DriverHome() {
     };
   }, []);
 
+  // عرض آخر حالة معروفة فورًا من الكاش (بدل وميض "غير متصل")
+  useEffect(() => {
+    AsyncStorage.getItem('driver_online').then(v => { if (v === '1') setIsOnline(true); }).catch(() => {});
+  }, []);
+
   const fetchDriverStatus = async () => {
     try {
       const r = await api.get('/drivers/me');
       const driver = r.data || r;
       const online = !!(driver.is_online || driver.isOnline);
       setIsOnline(online);
+      AsyncStorage.setItem('driver_online', online ? '1' : '0').catch(() => {});
       if (driver.rating != null) setDriverRating(parseFloat(driver.rating) || 0);
       if (online) startLocationInterval();
     } catch {}
@@ -184,6 +190,7 @@ export default function DriverHome() {
         lng: location?.longitude
       });
       setIsOnline(value);
+      AsyncStorage.setItem('driver_online', value ? '1' : '0').catch(() => {});
       if (value) {
         startLocationInterval();
       } else {
