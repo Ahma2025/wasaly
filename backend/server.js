@@ -77,6 +77,18 @@ const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
+// ⚡️ توزيع الوقت الحقيقي على عدّة نسخ سيرفر عبر Redis (يفعّل تلقائيًا عند ضبط REDIS_URL)
+const { isRedisEnabled, getRedis, newConnection } = require('./utils/redis');
+if (isRedisEnabled) {
+  try {
+    const { createAdapter } = require('@socket.io/redis-adapter');
+    const pubClient = newConnection();
+    const subClient = newConnection();
+    io.adapter(createAdapter(pubClient, subClient));
+    console.log('✅ Socket.io Redis adapter enabled — horizontal scaling ON');
+  } catch (e) { console.error('[Socket adapter] ', e.message); }
+}
+
 // Middleware
 app.use(compression()); // ضغط gzip — يقلّص ردود JSON/الصور base64 بأكثر من 50%
 app.use(helmet());
@@ -86,12 +98,23 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// 🛡️ حدّ معدّل الطلبات لكل IP — حماية ضد الإغراق (DoS) والسحب والتخمين الآلي
-const _rl = new Map(); // ip → { count, reset }
-const RL_MAX = 300, RL_WINDOW = 60 * 1000; // 300 طلب/دقيقة — أكثر بكثير من أي استخدام طبيعي
-app.use((req, res, next) => {
+// 🛡️ حدّ معدّل الطلبات لكل IP — حماية ضد الإغراق (DoS)
+// عند تفعيل Redis: عدّاد مشترك بين كل النسخ (صحيح مع التوسّع الأفقي). وإلا: بالذاكرة (نسخة واحدة).
+const RL_MAX = Number(process.env.RL_MAX) || 300, RL_WINDOW = 60 * 1000;
+const _rl = new Map();
+const _redisRL = getRedis();
+app.use(async (req, res, next) => {
   if (req.path === '/health') return next();
   const ip = req.ip || 'unknown';
+  if (_redisRL) {
+    try {
+      const key = `rl:${ip}`;
+      const n = await _redisRL.incr(key);
+      if (n === 1) await _redisRL.pexpire(key, RL_WINDOW);
+      if (n > RL_MAX) return res.status(429).json({ success: false, message: 'طلبات كثيرة، انتظر قليلاً' });
+      return next();
+    } catch { return next(); } // لو Redis وقع لأي سبب، لا نمنع المستخدم
+  }
   const now = Date.now();
   let r = _rl.get(ip);
   if (!r || now > r.reset) { r = { count: 0, reset: now + RL_WINDOW }; _rl.set(ip, r); }

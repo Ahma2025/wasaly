@@ -2,6 +2,7 @@ const router = require('express').Router();
 const multer = require('multer');
 const sharp = require('sharp');
 const { auth } = require('../middleware/auth');
+const { uploadJpeg } = require('../utils/storage');
 
 // نحفظ في الذاكرة (مش على القرص) — لأن قرص Railway مؤقّت ويُمسح عند إعادة النشر
 const upload = multer({
@@ -13,14 +14,14 @@ const upload = multer({
   }
 });
 
-// نضغط الصورة ونحوّلها base64 لتُخزَّن داخل قاعدة البيانات — تبقى دائماً بعد إعادة النشر
+// نضغط الصورة ثم نخزّنها خارجيًا (R2/S3) لو مفعّل، وإلا Base64 داخل القاعدة (fallback آمن)
 async function toDataUri(buffer) {
   const out = await sharp(buffer)
     .rotate()
     .resize({ width: 1000, height: 1000, fit: 'inside', withoutEnlargement: true })
     .jpeg({ quality: 72 })
     .toBuffer();
-  return `data:image/jpeg;base64,${out.toString('base64')}`;
+  return uploadJpeg(out);
 }
 
 router.post('/', auth, upload.single('file'), async (req, res) => {

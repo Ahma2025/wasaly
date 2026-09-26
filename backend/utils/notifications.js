@@ -200,16 +200,29 @@ async function sendFcmToken(token, title, body, data = {}) {
   }
 }
 
+// منفّذ متوازٍ بحدود (Concurrency Pool) — يمنع فتح آلاف الاتصالات دفعة وحدة
+async function runPool(items, limit, worker) {
+  let i = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      try { await worker(items[idx]); } catch {}
+    }
+  });
+  await Promise.all(runners);
+}
+
 // ─── Unified send: auto-routes iOS → APNs, Android → FCM ─────────────────
+const FCM_CONCURRENCY = Number(process.env.FCM_CONCURRENCY) || 50;
 const sendFCM = async (tokens, title, body, data = {}, bundleId = 'com.wasaly.customer') => {
   const list = (Array.isArray(tokens) ? tokens : [tokens]).filter(Boolean);
   const apnsTokens = list.filter(isApnsToken);
   const fcmTokens  = list.filter(t => !isApnsToken(t));
 
-  const promises = [];
-  if (apnsTokens.length) promises.push(sendApns(apnsTokens, title, body, data, bundleId));
-  for (const t of fcmTokens) promises.push(sendFcmToken(t, title, body, data));
-  await Promise.allSettled(promises);
+  await Promise.allSettled([
+    apnsTokens.length ? sendApns(apnsTokens, title, body, data, bundleId) : Promise.resolve(),
+    runPool(fcmTokens, FCM_CONCURRENCY, (t) => sendFcmToken(t, title, body, data)),
+  ]);
 };
 
 // ─── Save notification to DB ───────────────────────────────────────────────

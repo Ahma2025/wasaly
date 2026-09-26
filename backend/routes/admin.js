@@ -342,12 +342,17 @@ router.post('/notifications/broadcast', auth, adminOnly, async (req, res) => {
       const b = bundleMap[u.role] || 'com.wasaly.customer';
       (byBundle[b] = byBundle[b] || []).push(u.fcm_token);
     }
-    for (const [bundleId, toks] of Object.entries(byBundle)) {
-      for (let i = 0; i < toks.length; i += 100) {
-        await sendFCM(toks.slice(i, i + 100), title, body, { type: 'broadcast' }, bundleId);
+    // نرد فورًا، ونكمّل الإرسال بالخلفية حتى لا يتعلّق الطلب عند الأعداد الكبيرة
+    res.json({ success: true, recipients: users.length, queued: true });
+    (async () => {
+      for (const [bundleId, toks] of Object.entries(byBundle)) {
+        for (let i = 0; i < toks.length; i += 500) {
+          try { await sendFCM(toks.slice(i, i + 500), title, body, { type: 'broadcast' }, bundleId); } catch {}
+        }
       }
-    }
-    res.json({ success: true, recipients: users.length });
+      console.log(`[broadcast] done: ${users.length} recipients`);
+    })();
+    return;
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }
