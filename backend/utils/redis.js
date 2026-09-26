@@ -21,7 +21,9 @@ function getRedis() {
 // عميل جديد (للـ pub/sub — يحتاج اتصالات منفصلة)
 function newConnection() {
   if (!ENABLED) return null;
-  return new IORedis(URL, { maxRetriesPerRequest: null, enableReadyCheck: false });
+  const c = new IORedis(URL, { maxRetriesPerRequest: null, enableReadyCheck: false });
+  c.on('error', (e) => console.error('[Redis pub/sub] error:', e.message)); // بدونه أي خطأ يوقّع العملية
+  return c;
 }
 
 module.exports = { isRedisEnabled: ENABLED, getRedis, newConnection };
