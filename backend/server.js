@@ -137,6 +137,19 @@ app.use((req, res, next) => {
   next();
 });
 
+// 🛡️ حاجز أمني مركزي: يمنع تسريب تفاصيل أخطاء السيرفر الداخلية (5xx) للعميل بالإنتاج
+app.use((req, res, next) => {
+  const _json = res.json.bind(res);
+  res.json = (body) => {
+    if (process.env.NODE_ENV === 'production' && res.statusCode >= 500 &&
+        body && typeof body === 'object' && 'message' in body) {
+      body = { ...body, message: 'حدث خطأ في الخادم' };
+    }
+    return _json(body);
+  };
+  next();
+});
+
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
