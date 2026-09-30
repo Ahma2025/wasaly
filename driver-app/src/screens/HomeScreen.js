@@ -232,12 +232,16 @@ export default function DriverHome() {
     } catch (e) { console.error('fetchStats error:', e); }
   };
 
+  const pIsPersonal = pendingOrder?.order_type === 'personal';
+  const pPickLat = pIsPersonal ? pendingOrder?.pickup_lat : pendingOrder?.restaurant_lat;
+  const pPickLng = pIsPersonal ? pendingOrder?.pickup_lng : pendingOrder?.restaurant_lng;
+
   const distToRestaurant = pendingOrder && location
-    ? calcDistance(location.latitude, location.longitude, pendingOrder.restaurant_lat, pendingOrder.restaurant_lng)
+    ? calcDistance(location.latitude, location.longitude, pPickLat, pPickLng)
     : null;
 
   const distToCustomer = pendingOrder
-    ? calcDistance(pendingOrder.restaurant_lat, pendingOrder.restaurant_lng, pendingOrder.delivery_lat, pendingOrder.delivery_lng)
+    ? calcDistance(pPickLat, pPickLng, pendingOrder.delivery_lat, pendingOrder.delivery_lng)
     : null;
 
   return (
@@ -298,8 +302,8 @@ export default function DriverHome() {
             <View style={styles.activeBadge}><Text style={styles.activeBadgeText}>قيد التوصيل</Text></View>
           </View>
           <View style={styles.activeRow}>
-            <Ionicons name="restaurant-outline" size={16} color="rgba(255,255,255,0.8)" />
-            <Text style={styles.activeText}>{activeOrder.restaurant_name}</Text>
+            <Ionicons name={activeOrder.order_type === 'personal' ? 'cube-outline' : 'restaurant-outline'} size={16} color="rgba(255,255,255,0.8)" />
+            <Text style={styles.activeText}>{activeOrder.order_type === 'personal' ? (activeOrder.service_type === 'ride' ? 'توصيل راكب' : 'توصيل طرد') : activeOrder.restaurant_name}</Text>
           </View>
           <View style={styles.activeRow}>
             <Ionicons name="location-outline" size={16} color="rgba(255,255,255,0.8)" />
@@ -321,12 +325,22 @@ export default function DriverHome() {
 
           <View style={styles.pendingInfo}>
             <View style={styles.pendingRow}>
-              <Ionicons name="restaurant-outline" size={16} color={COLORS.primary} />
-              <Text style={styles.pendingRestaurant}>{pendingOrder.restaurant_name}</Text>
+              <Ionicons name={pIsPersonal ? (pendingOrder.service_type === 'ride' ? 'people-outline' : 'cube-outline') : 'restaurant-outline'} size={16} color={COLORS.primary} />
+              <Text style={styles.pendingRestaurant}>
+                {pIsPersonal
+                  ? `${pendingOrder.service_type === 'ride' ? 'توصيل راكب' : 'توصيل طرد'} · ${pendingOrder.vehicle === 'car' ? '🚗' : '🛵'}`
+                  : pendingOrder.restaurant_name}
+              </Text>
             </View>
+            {pIsPersonal && (
+              <View style={styles.pendingRow}>
+                <Ionicons name="ellipse" size={12} color={COLORS.green} />
+                <Text style={styles.pendingAddr} numberOfLines={1}>{pendingOrder.pickup_address || 'نقطة الاستلام على الخريطة'}</Text>
+              </View>
+            )}
             <View style={styles.pendingRow}>
               <Ionicons name="location-outline" size={16} color={COLORS.gray} />
-              <Text style={styles.pendingAddr} numberOfLines={1}>{pendingOrder.delivery_address || 'عنوان التوصيل'}</Text>
+              <Text style={styles.pendingAddr} numberOfLines={1}>{pendingOrder.delivery_address || (pIsPersonal ? 'نقطة التسليم' : 'عنوان التوصيل')}</Text>
             </View>
             <View style={styles.pendingFeeRow}>
               <View style={styles.pendingFeeBox}>
@@ -341,7 +355,7 @@ export default function DriverHome() {
               )}
               {distToRestaurant && (
                 <View style={styles.pendingFeeBox}>
-                  <Text style={styles.pendingFeeLabel}>المطعم بُعدك</Text>
+                  <Text style={styles.pendingFeeLabel}>{pIsPersonal ? 'الاستلام بُعدك' : 'المطعم بُعدك'}</Text>
                   <Text style={styles.pendingFeeVal}>{distToRestaurant} كم</Text>
                 </View>
               )}

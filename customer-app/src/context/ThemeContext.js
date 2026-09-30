@@ -6,20 +6,22 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const BRAND = '#FF6B00';
 const BRAND_DEEP = '#F53B57';
 
-// تدرّجات فخمة تُستخدم عبر التطبيق
+// تدرّجات فخمة تُستخدم عبر التطبيق (٣ محطات = عمق أنعم)
 const GRADIENTS = {
-  brand:  ['#FF8A00', '#FF5E3A'],      // برتقالي → أحمر دافئ (الهوية)
-  sunset: ['#FF6B00', '#F53B57'],      // غروب فاخر
-  gold:   ['#FFB800', '#FF7A00'],      // ذهبي
-  dark:   ['#1A1A2E', '#0E0E1A'],      // ليلي
-  glass:  ['rgba(255,255,255,0.18)', 'rgba(255,255,255,0.02)'],
+  brand:  ['#FF9A2E', '#FF6B00', '#FF4D3D'], // برتقالي دافئ متدرّج (الهوية)
+  sunset: ['#FF8A1E', '#FB5A3C', '#F53B57'], // غروب فاخر بثلاث محطات
+  gold:   ['#FFCE4D', '#FFB800', '#FF7A00'], // ذهبي لامع
+  dark:   ['#211F3A', '#14142B', '#0B0B18'], // ليلي عميق
+  glass:  ['rgba(255,255,255,0.22)', 'rgba(255,255,255,0.04)'],
+  sheen:  ['rgba(255,255,255,0.28)', 'rgba(255,255,255,0)'], // لمعة زجاجية علوية
 };
 
-// ظلال جاهزة (ناعمة/عائمة) للإحساس ثلاثي الأبعاد
+// ظلال جاهزة (ناعمة/عائمة/متوهّجة) للإحساس ثلاثي الأبعاد الفخم
 const SHADOW = {
-  soft:  { elevation: 4,  shadowColor: '#1A1A2E', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
-  card:  { elevation: 6,  shadowColor: '#1A1A2E', shadowOpacity: 0.12, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
-  float: { elevation: 12, shadowColor: '#FF6B00', shadowOpacity: 0.30, shadowRadius: 20, shadowOffset: { width: 0, height: 10 } },
+  soft:  { elevation: 3,  shadowColor: '#1A1A2E', shadowOpacity: 0.07, shadowRadius: 14, shadowOffset: { width: 0, height: 5 } },
+  card:  { elevation: 7,  shadowColor: '#1A1A2E', shadowOpacity: 0.10, shadowRadius: 22, shadowOffset: { width: 0, height: 10 } },
+  float: { elevation: 14, shadowColor: '#FF5E3A', shadowOpacity: 0.28, shadowRadius: 26, shadowOffset: { width: 0, height: 14 } },
+  glow:  { elevation: 10, shadowColor: '#F53B57', shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } }, // توهّج للعناصر النشطة
 };
 
 const RADIUS = { sm: 12, md: 18, lg: 24, xl: 32, pill: 999 };

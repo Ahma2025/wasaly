@@ -12,10 +12,13 @@ body { direction: rtl; background: #F5F6F8; color: #1A1A2E; }
 button, a, input, [role="button"] { transition: all .18s cubic-bezier(.4,0,.2,1); }
 button:active { transform: scale(.97); }
 
-/* ظلال جاهزة أنعم وأعمق */
-.shadow-soft { box-shadow: 0 4px 20px rgba(26,26,46,.06), 0 1px 3px rgba(26,26,46,.04); }
-.shadow-card { box-shadow: 0 8px 28px rgba(26,26,46,.08), 0 2px 6px rgba(26,26,46,.05); }
-.shadow-brand { box-shadow: 0 8px 22px rgba(255,107,0,.35); }
+/* ظلال جاهزة أنعم وأعمق ومتعددة الطبقات (إحساس فخم) */
+.shadow-soft { box-shadow: 0 2px 8px rgba(26,26,46,.04), 0 6px 24px rgba(26,26,46,.05); }
+.shadow-card { box-shadow: 0 2px 6px rgba(26,26,46,.04), 0 12px 34px rgba(26,26,46,.08); }
+.shadow-brand { box-shadow: 0 10px 28px rgba(245,59,87,.34), 0 3px 8px rgba(255,107,0,.24); }
+
+/* حلقة تركيز أنيقة موحّدة (وصول أفضل) */
+:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 0 0 5px rgba(255,107,0,.55); border-radius: 12px; }
 
 /* شريط تمرير أنيق */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -32,12 +35,23 @@ button:active { transform: scale(.97); }
 @keyframes shimmer { 100% { transform: translateX(100%); } }
 
 /* ===== لمسات فخمة إضافية ===== */
-.grad-brand { background: linear-gradient(135deg, #FF8A00, #FF5E3A); }
-.grad-sunset { background: linear-gradient(135deg, #FF8A00 0%, #FF5E3A 55%, #F53B57 100%); }
+.grad-brand { background: linear-gradient(135deg, #FF9A2E, #FF6B00 55%, #FF4D3D); }
+.grad-sunset { background: linear-gradient(135deg, #FF8A1E 0%, #FB5A3C 55%, #F53B57 100%); }
 .grad-text { background: linear-gradient(135deg,#FF8A00,#F53B57); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .hover-lift { transition: transform .22s cubic-bezier(.4,0,.2,1), box-shadow .22s ease; }
-.hover-lift:hover { transform: translateY(-4px); box-shadow: 0 16px 34px rgba(26,26,46,.12); }
+.hover-lift:hover { transform: translateY(-4px); box-shadow: 0 20px 40px rgba(26,26,46,.13), 0 4px 10px rgba(26,26,46,.06); }
 .glass { background: rgba(255,255,255,.14); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.2); }
+
+/* لمعة زجاجية علوية توضع فوق أي عنصر بتدرّج (position:relative على الأب) */
+.sheen { position: relative; overflow: hidden; }
+.sheen::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 45%;
+  background: linear-gradient(180deg, rgba(255,255,255,.26), rgba(255,255,255,0)); pointer-events: none; }
+
+/* زر فخم بتدرّج وتوهّج */
+.btn-lux { background: linear-gradient(135deg,#FF8A1E,#FB5A3C 55%,#F53B57); color:#fff; font-weight:800;
+  border-radius: 16px; box-shadow: 0 10px 26px rgba(245,59,87,.34); transition: transform .18s, box-shadow .22s, filter .2s; }
+.btn-lux:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(245,59,87,.42); filter: brightness(1.04); }
+.btn-lux:active { transform: translateY(0) scale(.98); }
 .stagger > * { animation: fadeUp .4s cubic-bezier(.4,0,.2,1) both; }
 .stagger > *:nth-child(1){animation-delay:.03s}.stagger > *:nth-child(2){animation-delay:.08s}
 .stagger > *:nth-child(3){animation-delay:.13s}.stagger > *:nth-child(4){animation-delay:.18s}

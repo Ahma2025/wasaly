@@ -18,6 +18,16 @@ const STEPS = [
   { status: 'delivered', nextStatus: null, label: 'تم التوصيل', icon: '✅', desc: 'أكمل التوصيل بنجاح', buttonLabel: null },
 ];
 
+// خطوات الطلب الشخصي (راكب/طرد) — نفس الحالات بأسماء مناسبة
+function getPersonalSteps(order) {
+  const isRide = order?.service_type === 'ride';
+  return [
+    { status: 'confirmed', nextStatus: 'on_the_way', label: 'انطلق لنقطة الاستلام', icon: '🏍️', desc: 'توجّه إلى نقطة الاستلام', buttonLabel: isRide ? 'ركب الزبون ✅' : 'استلمت الطرد ✅' },
+    { status: 'on_the_way', nextStatus: 'delivered', label: 'في الطريق للتسليم', icon: '📦', desc: 'توجّه إلى نقطة التسليم', buttonLabel: isRide ? 'وصلنا الوجهة ✅' : 'تم التسليم ✅' },
+    { status: 'delivered', nextStatus: null, label: 'تم التسليم', icon: '✅', desc: 'اكتمل الطلب بنجاح', buttonLabel: null },
+  ];
+}
+
 function buildDriverMapHTML({ restLat, restLng, custLat, custLng, driverLat, driverLng }) {
   const cLat = driverLat || restLat || custLat || 31.9;
   const cLng = driverLng || restLng || custLng || 35.2;
@@ -245,9 +255,15 @@ export default function DeliveryScreen({ route, navigation }) {
     } catch (e) { /* تجاهل */ }
   };
 
+  const isPersonal = orderData?.order_type === 'personal';
+  const steps = isPersonal ? getPersonalSteps(orderData) : STEPS;
+  const pickupPoint = isPersonal
+    ? { lat: orderData?.pickup_lat, lng: orderData?.pickup_lng }
+    : { lat: orderData?.restaurant_lat, lng: orderData?.restaurant_lng };
+
   const nextStep = async () => {
     if (!orderData || updating) return;
-    const step = STEPS[currentStep];
+    const step = steps[currentStep];
     if (!step.nextStatus) return;
     setUpdating(true);
     try {
@@ -275,24 +291,24 @@ export default function DeliveryScreen({ route, navigation }) {
     Linking.openURL(`tel:${phone}`);
   };
 
-  const currentStep_obj = STEPS[currentStep];
+  const currentStep_obj = steps[currentStep];
 
   const mapTarget = currentStep === 0
-    ? { lat: orderData?.restaurant_lat, lng: orderData?.restaurant_lng }
+    ? pickupPoint
     : { lat: orderData?.delivery_lat, lng: orderData?.delivery_lng };
 
   // تُبنى مرة واحدة؛ حركة الموقع تتم عبر postMessage (انزلاق ناعم) لا بإعادة البناء
   const mapHtml = React.useMemo(
     () => buildDriverMapHTML({
-      restLat: orderData?.restaurant_lat,
-      restLng: orderData?.restaurant_lng,
+      restLat: pickupPoint.lat,
+      restLng: pickupPoint.lng,
       custLat: orderData?.delivery_lat,
       custLng: orderData?.delivery_lng,
       driverLat: driverLoc?.lat,
       driverLng: driverLoc?.lng,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [orderData?.restaurant_lat, orderData?.restaurant_lng, orderData?.delivery_lat, orderData?.delivery_lng]
+    [pickupPoint.lat, pickupPoint.lng, orderData?.delivery_lat, orderData?.delivery_lng]
   );
 
   return (
@@ -330,7 +346,7 @@ export default function DeliveryScreen({ route, navigation }) {
           onPress={() => openMaps(mapTarget.lat, mapTarget.lng)}
         >
           <Ionicons name="navigate" size={16} color="#FFF" />
-          <Text style={styles.navBtnText}>{currentStep === 0 ? 'ملاحة للمطعم' : 'ملاحة للزبون'}</Text>
+          <Text style={styles.navBtnText}>{currentStep === 0 ? (isPersonal ? 'ملاحة لنقطة الاستلام' : 'ملاحة للمطعم') : (isPersonal ? 'ملاحة للتسليم' : 'ملاحة للزبون')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -339,7 +355,7 @@ export default function DeliveryScreen({ route, navigation }) {
         {/* Step Progress */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>تقدم التوصيل</Text>
-          {STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <View key={i} style={styles.stepRow}>
               <View style={[styles.stepCircle, i < currentStep && styles.stepDone, i === currentStep && styles.stepActive]}>
                 <Text style={{ fontSize: 16 }}>{i < currentStep ? '✅' : s.icon}</Text>
@@ -354,24 +370,59 @@ export default function DeliveryScreen({ route, navigation }) {
 
         {/* Order Info */}
         <View style={styles.card}>
-          <View style={styles.infoRow}>
-            <Ionicons name="restaurant-outline" size={18} color={COLORS.primary} />
-            <View style={styles.infoText}>
-              <Text style={styles.infoLabel}>المطعم</Text>
-              <Text style={styles.infoValue}>{orderData?.restaurant_name || '-'}</Text>
-            </View>
-          </View>
-          <View style={styles.infoRow}>
-            <Ionicons name="person-outline" size={18} color={COLORS.primary} />
-            <View style={styles.infoText}>
-              <Text style={styles.infoLabel}>الزبون</Text>
-              <Text style={styles.infoValue}>{orderData?.customer_name || '-'}</Text>
-            </View>
-          </View>
+          {isPersonal ? (
+            <>
+              <View style={styles.infoRow}>
+                <Ionicons name={orderData?.service_type === 'ride' ? 'people-outline' : 'cube-outline'} size={18} color={COLORS.primary} />
+                <View style={styles.infoText}>
+                  <Text style={styles.infoLabel}>نوع الطلب</Text>
+                  <Text style={styles.infoValue}>
+                    {orderData?.service_type === 'ride' ? `توصيل راكب (${orderData?.passengers || 1})` : 'توصيل طرد'}
+                    {' · '}{orderData?.vehicle === 'car' ? '🚗 سيارة' : '🛵 دراجة'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.infoRow}>
+                <Ionicons name="ellipse" size={14} color={COLORS.green} />
+                <View style={styles.infoText}>
+                  <Text style={styles.infoLabel}>نقطة الاستلام</Text>
+                  <Text style={styles.infoValue}>{orderData?.pickup_address || 'محدّدة على الخريطة'}</Text>
+                </View>
+              </View>
+              {orderData?.service_type === 'parcel' && (orderData?.parcel_desc || orderData?.recipient_name || orderData?.recipient_phone) ? (
+                <View style={styles.infoRow}>
+                  <Ionicons name="reader-outline" size={18} color={COLORS.primary} />
+                  <View style={styles.infoText}>
+                    <Text style={styles.infoLabel}>تفاصيل الطرد</Text>
+                    <Text style={styles.infoValue}>
+                      {orderData?.parcel_desc || '-'}{orderData?.recipient_name ? ` · ${orderData.recipient_name}` : ''}{orderData?.recipient_phone ? ` · ${orderData.recipient_phone}` : ''}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <View style={styles.infoRow}>
+                <Ionicons name="restaurant-outline" size={18} color={COLORS.primary} />
+                <View style={styles.infoText}>
+                  <Text style={styles.infoLabel}>المطعم</Text>
+                  <Text style={styles.infoValue}>{orderData?.restaurant_name || '-'}</Text>
+                </View>
+              </View>
+              <View style={styles.infoRow}>
+                <Ionicons name="person-outline" size={18} color={COLORS.primary} />
+                <View style={styles.infoText}>
+                  <Text style={styles.infoLabel}>الزبون</Text>
+                  <Text style={styles.infoValue}>{orderData?.customer_name || '-'}</Text>
+                </View>
+              </View>
+            </>
+          )}
           <View style={styles.infoRow}>
             <Ionicons name="location-outline" size={18} color={COLORS.primary} />
             <View style={styles.infoText}>
-              <Text style={styles.infoLabel}>عنوان التوصيل</Text>
+              <Text style={styles.infoLabel}>{isPersonal ? 'نقطة التسليم' : 'عنوان التوصيل'}</Text>
               <Text style={styles.infoValue}>{orderData?.delivery_address || '-'}</Text>
             </View>
           </View>
@@ -392,10 +443,19 @@ export default function DeliveryScreen({ route, navigation }) {
             <Ionicons name="call" size={22} color={COLORS.primary} />
             <Text style={styles.actionLabel}>اتصل بالزبون</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => callNumber(orderData?.restaurant_phone)}>
-            <Ionicons name="restaurant" size={22} color={COLORS.primary} />
-            <Text style={styles.actionLabel}>اتصل بالمطعم</Text>
-          </TouchableOpacity>
+          {isPersonal ? (
+            orderData?.service_type === 'parcel' && orderData?.recipient_phone ? (
+              <TouchableOpacity style={styles.actionBtn} onPress={() => callNumber(orderData?.recipient_phone)}>
+                <Ionicons name="call-outline" size={22} color={COLORS.primary} />
+                <Text style={styles.actionLabel}>اتصل بالمستلِم</Text>
+              </TouchableOpacity>
+            ) : null
+          ) : (
+            <TouchableOpacity style={styles.actionBtn} onPress={() => callNumber(orderData?.restaurant_phone)}>
+              <Ionicons name="restaurant" size={22} color={COLORS.primary} />
+              <Text style={styles.actionLabel}>اتصل بالمطعم</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </ScrollView>
 

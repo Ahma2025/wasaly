@@ -6,6 +6,20 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--", "--port", "3001", "--host"],
       "port": 3001
+    },
+    {
+      "name": "restaurant-portal",
+      "cwd": "restaurant-portal",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "3002", "--host"],
+      "port": 3002
+    },
+    {
+      "name": "admin-dashboard",
+      "cwd": "admin-dashboard",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "3003", "--host"],
+      "port": 3003
     }
   ]
 }

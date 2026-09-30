@@ -18,6 +18,7 @@ const Reviews = lazy(() => import('./pages/Reviews'));
 const Chats = lazy(() => import('./pages/Chats'));
 const LiveOps = lazy(() => import('./pages/LiveOps'));
 const Accounting = lazy(() => import('./pages/Accounting'));
+const PersonalDelivery = lazy(() => import('./pages/PersonalDelivery'));
 
 const NAV = [
   { to: '/', icon: '📊', label: 'الرئيسية' },
@@ -30,6 +31,7 @@ const NAV = [
 
 const NAV2 = [
   { to: '/zones', icon: '📍', label: 'التوصيل' },
+  { to: '/personal-delivery', icon: '🧍', label: 'توصيل شخصي' },
   { to: '/analytics', icon: '📈', label: 'التحليلات' },
   { to: '/coupons', icon: '🎟️', label: 'الكوبونات' },
   { to: '/notifications', icon: '🔔', label: 'الإشعارات' },
@@ -94,6 +96,7 @@ function AppLayout() {
             <Route path="/chats" element={<Chats />} />
             <Route path="/live" element={<LiveOps />} />
             <Route path="/accounting" element={<Accounting />} />
+            <Route path="/personal-delivery" element={<PersonalDelivery />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

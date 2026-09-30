@@ -27,7 +27,7 @@ function TabButton({ focused, label, onPress }) {
     <Pressable style={styles.item} onPress={() => { Haptics.selectionAsync().catch(() => {}); onPress(); }}>
       <Animated.View style={{ transform: [{ scale }, { translateY }], alignItems: 'center' }}>
         {focused ? (
-          <LinearGradient colors={GRADIENTS.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.pill}>
+          <LinearGradient colors={GRADIENTS.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.pill, SHADOW.glow]}>
             <Ionicons name={on} size={22} color="#FFF" />
           </LinearGradient>
         ) : (
@@ -58,7 +58,7 @@ const styles = StyleSheet.create({
   wrap: {
     position: 'absolute', left: 14, right: 14, bottom: Platform.OS === 'ios' ? 26 : 16,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
-    height: 68, borderRadius: 26, borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.card, paddingHorizontal: 6,
+    height: 70, borderRadius: 30, borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.card, paddingHorizontal: 6,
   },
   item: { flex: 1, alignItems: 'center', justifyContent: 'center', height: '100%' },
   pill: { width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },

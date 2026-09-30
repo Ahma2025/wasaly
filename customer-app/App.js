@@ -73,6 +73,7 @@ import PaymentWebViewScreen from './src/screens/PaymentWebViewScreen';
 import CategoryScreen from './src/screens/CategoryScreen';
 import SupportChatScreen from './src/screens/SupportChatScreen';
 import GroupOrderScreen from './src/screens/GroupOrderScreen';
+import PersonalDeliveryScreen from './src/screens/PersonalDeliveryScreen';
 import FloatingTabBar from './src/components/FloatingTabBar';
 
 const Tab = createBottomTabNavigator();
@@ -142,6 +143,7 @@ function AppNavigator() {
           <Stack.Screen name="Category" component={CategoryScreen} />
           <Stack.Screen name="SupportChat" component={SupportChatScreen} />
           <Stack.Screen name="GroupOrder" component={GroupOrderScreen} />
+          <Stack.Screen name="PersonalDelivery" component={PersonalDeliveryScreen} />
         </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} />

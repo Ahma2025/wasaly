@@ -8,14 +8,16 @@ export const COLORS = {
 };
 
 export const GRADIENTS = {
-  brand:  ['#FF8A00', '#FF5E3A'],
-  sunset: ['#FF8A00', '#FF5E3A', '#F53B57'],
-  green:  ['#2FD673', '#1BA85B'],
-  gold:   ['#FFB800', '#FF7A00'],
+  brand:  ['#FF9A2E', '#FF6B00', '#FF4D3D'],
+  sunset: ['#FF8A1E', '#FB5A3C', '#F53B57'],
+  green:  ['#38E07E', '#2FD673', '#1BA85B'],
+  gold:   ['#FFCE4D', '#FFB800', '#FF7A00'],
+  sheen:  ['rgba(255,255,255,0.28)', 'rgba(255,255,255,0)'],
 };
 
 export const SHADOW = {
-  soft:  { elevation: 4,  shadowColor: '#14142B', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
-  card:  { elevation: 6,  shadowColor: '#14142B', shadowOpacity: 0.12, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
-  float: { elevation: 12, shadowColor: '#FF6B00', shadowOpacity: 0.30, shadowRadius: 20, shadowOffset: { width: 0, height: 10 } },
+  soft:  { elevation: 3,  shadowColor: '#14142B', shadowOpacity: 0.07, shadowRadius: 14, shadowOffset: { width: 0, height: 5 } },
+  card:  { elevation: 7,  shadowColor: '#14142B', shadowOpacity: 0.10, shadowRadius: 22, shadowOffset: { width: 0, height: 10 } },
+  float: { elevation: 14, shadowColor: '#FF5E3A', shadowOpacity: 0.28, shadowRadius: 26, shadowOffset: { width: 0, height: 14 } },
+  glow:  { elevation: 10, shadowColor: '#F53B57', shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
 };

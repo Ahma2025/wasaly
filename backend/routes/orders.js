@@ -106,6 +106,94 @@ async function assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, ad
   } catch (e) { console.error('assignDriver error:', e.message); return null; }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  🧍📦 التوصيل الشخصي (راكب / طرد) — يعيد استخدام التوزيع + التتبّع
+// ═══════════════════════════════════════════════════════════════
+function haversineKm(aLat, aLng, bLat, bLng) {
+  const R = 6371;
+  const dLat = (bLat - aLat) * Math.PI / 180;
+  const dLng = (bLng - aLng) * Math.PI / 180;
+  const s = Math.sin(dLat/2) ** 2 + Math.cos(aLat*Math.PI/180) * Math.cos(bLat*Math.PI/180) * Math.sin(dLng/2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
+}
+async function getPersonalConfig() {
+  try {
+    const { rows } = await pool.query("SELECT value FROM app_settings WHERE key='personal_delivery'");
+    return rows[0] ? JSON.parse(rows[0].value) : null;
+  } catch (e) { return null; }
+}
+function computeFare(cfg, vehicle, size, km) {
+  const v = cfg[vehicle] || cfg.bike || { base: 3, perKm: 2 };
+  let fare = Number(v.base) + Number(v.perKm) * km;
+  if (size && cfg.parcelSize && cfg.parcelSize[size]) fare += Number(cfg.parcelSize[size]);
+  fare = Math.max(fare, Number(cfg.minFare) || 0);
+  return Math.round(fare * 100) / 100;
+}
+
+// إعدادات الخدمة (لعرضها بالتطبيق)
+router.get('/personal/config', auth, async (req, res) => {
+  const cfg = await getPersonalConfig();
+  res.json({ success: true, data: cfg || { enabled: false } });
+});
+
+// تسعير فوري حسب المسافة
+router.post('/personal/quote', auth, async (req, res) => {
+  try {
+    const { vehicle = 'bike', parcel_size, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng } = req.body;
+    const cfg = await getPersonalConfig();
+    if (!cfg || !cfg.enabled) return res.status(400).json({ success: false, message: 'الخدمة غير متاحة حالياً' });
+    const km = haversineKm(+pickup_lat, +pickup_lng, +dropoff_lat, +dropoff_lng);
+    if (!isFinite(km)) return res.status(400).json({ success: false, message: 'حدّد نقطة الاستلام والتسليم' });
+    const fare = computeFare(cfg, vehicle, parcel_size, km);
+    res.json({ success: true, data: { distance_km: Math.round(km * 100) / 100, fare } });
+  } catch (e) { res.status(500).json({ success: false, message: 'حدث خطأ' }); }
+});
+
+// إنشاء طلب شخصي + توزيع فوري على أقرب سائق
+router.post('/personal', auth, async (req, res) => {
+  try {
+    const {
+      service_type = 'parcel', vehicle = 'bike',
+      pickup_lat, pickup_lng, pickup_address,
+      dropoff_lat, dropoff_lng, delivery_address,
+      recipient_name, recipient_phone, parcel_desc, parcel_size, parcel_photo,
+      passengers, notes, payment_method = 'cash',
+    } = req.body;
+
+    const cfg = await getPersonalConfig();
+    if (!cfg || !cfg.enabled) return res.status(400).json({ success: false, message: 'الخدمة غير متاحة حالياً' });
+    if (!pickup_lat || !pickup_lng || !dropoff_lat || !dropoff_lng) {
+      return res.status(400).json({ success: false, message: 'حدّد نقطة الاستلام والتسليم' });
+    }
+
+    const km = haversineKm(+pickup_lat, +pickup_lng, +dropoff_lat, +dropoff_lng);
+    const fare = computeFare(cfg, vehicle, service_type === 'parcel' ? parcel_size : null, km);
+    const orderNumber = generateOrderNumber();
+
+    const { rows } = await pool.query(
+      `INSERT INTO orders (order_number, customer_id, restaurant_id, delivery_address, delivery_lat, delivery_lng,
+        subtotal, delivery_fee, discount, total, payment_method, notes, order_type, status,
+        service_type, vehicle, pickup_lat, pickup_lng, pickup_address, recipient_name, recipient_phone,
+        parcel_desc, parcel_size, parcel_photo, passengers, distance_km)
+       VALUES ($1,$2,NULL,$3,$4,$5, 0,$6,0,$6,$7,$8,'personal','confirmed',
+        $9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+      [orderNumber, req.user.id, delivery_address || '', dropoff_lat, dropoff_lng,
+       fare, payment_method, notes || '', service_type, vehicle, pickup_lat, pickup_lng, pickup_address || '',
+       recipient_name || '', recipient_phone || '', parcel_desc || '', parcel_size || '', parcel_photo || '',
+       passengers || 1, Math.round(km * 100) / 100]
+    );
+    const order = rows[0];
+
+    // توزيع فوري (نفس محرّك التوزيع) انطلاقاً من نقطة الاستلام
+    assignDriverToOrder(req.io, order.id, pickup_lat, pickup_lng).catch(() => {});
+
+    res.json({ success: true, data: order });
+  } catch (e) {
+    console.error('personal order error:', e.message);
+    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
+  }
+});
+
 // Place order
 router.post('/', auth, async (req, res) => {
   try {

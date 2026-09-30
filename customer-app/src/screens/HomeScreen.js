@@ -385,6 +385,18 @@ export default function HomeScreen() {
           </LinearGradient>
         </TouchableOpacity>
 
+        <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate('PersonalDelivery')} style={{ marginHorizontal: 16, marginBottom: 12 }}>
+          <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 18, padding: 15, ...C.shadow.float }}>
+            <Text style={{ fontSize: 24 }}>📦</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 15 }}>طلب شخصي — راكب أو طرد</Text>
+              <Text style={{ color: '#FFF', opacity: 0.9, fontSize: 11, marginTop: 2 }}>وصّل طرد أو اطلب سائق يوصّلك · دراجة أو سيارة</Text>
+            </View>
+            <Ionicons name="chevron-back" size={20} color="#FFF" />
+          </LinearGradient>
+        </TouchableOpacity>
+
         <View style={s.divider} />
 
         {/* فرز المطاعم + فاجئني + المفتوحة الآن */}

@@ -54,6 +54,25 @@ async function runMigrations() {
     `CREATE INDEX IF NOT EXISTS idx_couponusage_user ON coupon_usage(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(order_number)`,
+
+    // 🧍📦 التوصيل الشخصي (راكب / طرد) — نعيد استخدام جدول orders مع أعمدة إضافية
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS service_type TEXT`,          // 'ride' | 'parcel'
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS vehicle TEXT`,              // 'bike' | 'car'
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_lat NUMERIC`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_lng NUMERIC`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_address TEXT`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS recipient_name TEXT`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS recipient_phone TEXT`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS parcel_desc TEXT`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS parcel_size TEXT`,          // 'small' | 'medium' | 'large'
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS parcel_photo TEXT`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS passengers INTEGER`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS distance_km NUMERIC`,
+    `CREATE INDEX IF NOT EXISTS idx_orders_service ON orders(service_type)`,
+
+    // ⚙️ إعدادات عامة (KV) — منها تسعير التوصيل الشخصي
+    `CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`,
+    `INSERT INTO app_settings(key, value) VALUES ('personal_delivery', '{"enabled":true,"bike":{"base":3,"perKm":2},"car":{"base":5,"perKm":3},"parcelSize":{"small":0,"medium":3,"large":5},"minFare":3}') ON CONFLICT (key) DO NOTHING`,
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); } catch (e) { /* column already exists */ }

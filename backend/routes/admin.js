@@ -435,4 +435,37 @@ router.patch('/restaurants/:id/commission', auth, adminOnly, async (req, res) =>
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+// ⚙️ إعدادات التوصيل الشخصي (تشغيل + تسعير)
+router.get('/settings/personal-delivery', auth, adminOnly, async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT value FROM app_settings WHERE key='personal_delivery'");
+    const val = rows[0] ? JSON.parse(rows[0].value) : { enabled: false };
+    res.json({ success: true, data: val });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+router.put('/settings/personal-delivery', auth, adminOnly, async (req, res) => {
+  try {
+    const cfg = req.body || {};
+    // تحقّق مبسّط من البنية
+    const clean = {
+      enabled: !!cfg.enabled,
+      bike: { base: Number(cfg?.bike?.base) || 0, perKm: Number(cfg?.bike?.perKm) || 0 },
+      car:  { base: Number(cfg?.car?.base)  || 0, perKm: Number(cfg?.car?.perKm)  || 0 },
+      parcelSize: {
+        small:  Number(cfg?.parcelSize?.small)  || 0,
+        medium: Number(cfg?.parcelSize?.medium) || 0,
+        large:  Number(cfg?.parcelSize?.large)  || 0,
+      },
+      minFare: Number(cfg?.minFare) || 0,
+    };
+    await pool.query(
+      `INSERT INTO app_settings(key, value, updated_at) VALUES ('personal_delivery', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()`,
+      [JSON.stringify(clean)]
+    );
+    res.json({ success: true, data: clean });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 module.exports = router;
