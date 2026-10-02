@@ -212,7 +212,7 @@ function DriverStats({ driverId }) {
           {stats.weekly.map((d, i) => (
             <div key={i} className="flex justify-between text-xs">
               <span className="text-gray-500">{d.date}</span>
-              <span>{d.orders} طلب • <strong>{parseFloat(d.earnings).toFixed(2)}₪</strong></span>
+              <span>{d.orders} طلب • <strong>{parseFloat(d.earnings || 0).toFixed(2)}₪</strong></span>
             </div>
           ))}
         </div>

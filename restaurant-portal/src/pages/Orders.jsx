@@ -446,7 +446,7 @@ function OrderItems({ orderId }) {
                         ✚ {opt.name_ar || opt.name || opt.label || opt}
                       </span>
                       {(opt.price > 0) && (
-                        <span className="text-xs text-gray-400">+{parseFloat(opt.price).toFixed(2)}₪</span>
+                        <span className="text-xs text-gray-400">+{parseFloat(opt.price || 0).toFixed(2)}₪</span>
                       )}
                     </div>
                   ))}

@@ -92,7 +92,7 @@ export default function EarningsScreen() {
           <View key={i} style={styles.dayRow}>
             <Text style={styles.dayDate}>{day.date}</Text>
             <Text style={styles.dayCount}>{day.count} توصيلة</Text>
-            <Text style={styles.dayEarnings}>{parseFloat(day.earnings).toFixed(2)}₪</Text>
+            <Text style={styles.dayEarnings}>{parseFloat(day.earnings || 0).toFixed(2)}₪</Text>
           </View>
         ))}
       </ScrollView>

@@ -33,7 +33,7 @@ export default function ReviewsScreen({ navigation }) {
       <GradientHeader title="تقييماتي ⭐" />
 
       <View style={styles.summary}>
-        <Text style={styles.avg}>{parseFloat(avg).toFixed(1)} ⭐</Text>
+        <Text style={styles.avg}>{parseFloat(avg || 0).toFixed(1)} ⭐</Text>
         <Text style={styles.count}>{count} تقييم من الزبائن</Text>
       </View>
 

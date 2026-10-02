@@ -486,7 +486,7 @@ export default function CartScreen() {
           {parseFloat(tip) > 0 && (
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>بقشيش السائق</Text>
-              <Text style={styles.summaryVal}>{parseFloat(tip).toFixed(2)}₪</Text>
+              <Text style={styles.summaryVal}>{parseFloat(tip || 0).toFixed(2)}₪</Text>
             </View>
           )}
           {redeemValue > 0 && (
