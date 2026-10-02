@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 
 const STATUS_LABELS = { pending: 'انتظار', confirmed: 'مؤكد', preparing: 'تحضير', ready: 'جاهز', picked_up: 'مع السائق', delivered: 'تم التوصيل', cancelled: 'ملغي' };
 const STATUS_COLORS = { pending: 'bg-yellow-100 text-yellow-700', confirmed: 'bg-blue-100 text-blue-700', preparing: 'bg-purple-100 text-purple-700', ready: 'bg-cyan-100 text-cyan-700', picked_up: 'bg-orange-100 text-orange-700', delivered: 'bg-green-100 text-green-700', cancelled: 'bg-red-100 text-red-700' };
+const STATUS_ACCENT = { pending: '#F59E0B', confirmed: '#3B82F6', preparing: '#8B5CF6', ready: '#06B6D4', picked_up: '#FF6B00', delivered: '#16A34A', cancelled: '#EF4444' };
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState(readCache('adm_orders') || []);
@@ -47,7 +48,8 @@ export default function AdminOrders() {
         {loading ? [...Array(6)].map((_, i) => <div key={i} className="h-24 bg-white rounded-2xl border animate-pulse" />)
           : orders.length === 0 ? <div className="text-center py-12 text-gray-400">لا توجد طلبات</div>
           : <div className="space-y-3 stagger">{orders.map(o => (
-          <div key={o.id} className="bg-white rounded-2xl shadow-soft hover-lift p-4 cursor-pointer"
+          <div key={o.id} className="bg-white rounded-2xl shadow-card hover-lift p-4 cursor-pointer border border-gray-50"
+            style={{ borderRight: `4px solid ${STATUS_ACCENT[o.status] || '#CBD5E1'}` }}
             onClick={() => setSelected(selected?.id === o.id ? null : o)}>
             <div className="flex justify-between items-start mb-2">
               <div>

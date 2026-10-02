@@ -71,13 +71,16 @@ function BottomNav() {
 function AppLayout() {
   return (
     <div className="min-h-screen bg-gray-50" dir="rtl">
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-gray-100 px-4 flex items-center gap-3 shadow-soft"
-        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)', paddingBottom: '16px' }}>
-        <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl flex items-center justify-center text-white font-black text-lg shadow-brand">و</div>
-        <div>
-          <h1 className="font-black text-gray-900 leading-none text-base">وصلّي</h1>
-          <p className="text-[10px] text-gray-400">لوحة الإدارة</p>
+      <header className="sticky z-40 bg-white/90 backdrop-blur-xl px-4 flex items-center gap-3 relative"
+        style={{ top: 'env(safe-area-inset-top, 0px)', paddingTop: 'calc(env(safe-area-inset-top) + 14px)', paddingBottom: '14px', boxShadow: '0 2px 20px rgba(26,26,46,0.05)' }}>
+        <div className="sheen w-11 h-11 grad-sunset rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-brand overflow-hidden">و</div>
+        <div className="flex-1">
+          <h1 className="font-black text-gray-900 leading-none text-lg tracking-tight">وصلّي</h1>
+          <p className="text-[11px] text-gray-400 font-bold mt-0.5">لوحة الإدارة</p>
         </div>
+        <span className="text-[10px] font-black text-orange-500 bg-orange-50 border border-orange-100 rounded-full px-3 py-1">● مباشر</span>
+        {/* شريط متدرّج سفلي فخم */}
+        <div className="absolute bottom-0 left-0 right-0 h-[3px] grad-sunset opacity-90" />
       </header>
       <main className="pb-20">
         <Suspense fallback={<div className="p-4"><PageSkeleton cards={4} rows={6} /></div>}>
