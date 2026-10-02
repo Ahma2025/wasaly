@@ -114,14 +114,30 @@ function signJWT(serviceAccount) {
   return `${toSign}.${sig}`;
 }
 
+// حساب خدمة Firebase: من متغيّر بيئة (base64) أولاً — ثم ملف محلي (fallback للتطوير)
+// مهم: Railway يتجاهل ملفات .gitignore عند الرفع، فالملف غير موجود على الإنتاج → نعتمد على متغيّر البيئة
+function getServiceAccount() {
+  const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
+  if (b64) {
+    try { return JSON.parse(Buffer.from(b64, 'base64').toString('utf8')); }
+    catch (e) { console.error('[FCM] invalid FIREBASE_SERVICE_ACCOUNT_BASE64:', e.message); }
+  }
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT; // يدعم JSON خام أيضاً
+  if (raw) { try { return JSON.parse(raw); } catch (e) { console.error('[FCM] invalid FIREBASE_SERVICE_ACCOUNT:', e.message); } }
+  try {
+    const saPath = path.join(__dirname, '../firebase-service-account.json');
+    if (fs.existsSync(saPath)) return JSON.parse(fs.readFileSync(saPath, 'utf8'));
+  } catch (e) { console.error('[FCM] read SA file error:', e.message); }
+  return null;
+}
+
 async function getFCMAccessToken() {
   if (_fcmAccessToken && Date.now() < _fcmTokenExpiry) return _fcmAccessToken;
 
-  const saPath = path.join(__dirname, '../firebase-service-account.json');
-  if (!fs.existsSync(saPath)) return null;
+  const sa = getServiceAccount();
+  if (!sa) { console.warn('[FCM] No service account — set FIREBASE_SERVICE_ACCOUNT_BASE64 env var'); return null; }
 
   try {
-    const sa = JSON.parse(fs.readFileSync(saPath, 'utf8'));
     const jwt = signJWT(sa);
     const body = `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`;
     const res  = await fetchFn('https://oauth2.googleapis.com/token', {
@@ -147,9 +163,8 @@ async function sendFcmToken(token, title, body, data = {}) {
   const accessToken = await getFCMAccessToken();
   if (!accessToken) return;
 
-  const saPath = path.join(__dirname, '../firebase-service-account.json');
-  if (!fs.existsSync(saPath)) return;
-  const sa = JSON.parse(fs.readFileSync(saPath, 'utf8'));
+  const sa = getServiceAccount();
+  if (!sa) return;
 
   const dataPayload = Object.fromEntries(
     Object.entries({ type: '', order_id: '', ...data }).map(([k, v]) => [k, String(v)])
