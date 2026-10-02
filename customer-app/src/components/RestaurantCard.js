@@ -13,6 +13,12 @@ export default function RestaurantCard({ restaurant: r, onPress }) {
       <View style={styles.imgBox}>
         <Image source={{ uri: r.cover_image || r.logo }} style={styles.image} />
         <LinearGradient colors={['transparent', 'rgba(10,10,20,0.5)']} style={styles.scrim} />
+        {!!r.rating && (
+          <View style={styles.ratePill}>
+            <Ionicons name="star" size={12} color="#FFD700" />
+            <Text style={styles.ratePillText}>{Number(r.rating).toFixed(1)}</Text>
+          </View>
+        )}
       </View>
       {!r.is_open && <View style={styles.closedOverlay}><Text style={styles.closedText}>مغلق</Text></View>}
       {!!r.is_featured && (
@@ -37,8 +43,8 @@ export default function RestaurantCard({ restaurant: r, onPress }) {
           <View style={styles.stat}><Ionicons name="time-outline" size={13} color={COLORS.gray} /><Text style={styles.statText}>{r.delivery_time_min || 20}-{r.delivery_time_max || 40} د</Text></View>
           <Text style={styles.dot}>•</Text>
           <View style={styles.stat}>
-            <Ionicons name="bicycle-outline" size={13} color={COLORS.gray} />
-            <Text style={styles.statText}>{r.delivery_fee === 0 ? 'مجاني' : `${r.delivery_fee || 0}₪`}</Text>
+            <Ionicons name="bicycle-outline" size={13} color={r.delivery_fee === 0 ? COLORS.green : COLORS.gray} />
+            <Text style={[styles.statText, r.delivery_fee === 0 && { color: COLORS.green, fontWeight: '800' }]}>{r.delivery_fee === 0 ? 'توصيل مجاني' : `${r.delivery_fee || 0}₪`}</Text>
           </View>
           {!!r.distance_km && (
             <>
@@ -60,6 +66,8 @@ const makeStyles = (COLORS) => StyleSheet.create({
   closedOverlay: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: 'rgba(20,20,35,0.55)', height: 158, justifyContent: 'center', alignItems: 'center' },
   closedText: { color: '#FFF', fontSize: 18, fontWeight: '800', letterSpacing: 0.5 },
   featuredBadge: { position: 'absolute', top: 12, left: 12, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, ...COLORS.shadow.float },
+  ratePill: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(10,10,20,0.6)', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  ratePillText: { color: '#FFF', fontSize: 12, fontWeight: '800' },
   featuredText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
   info: { padding: 14 },
   row: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
