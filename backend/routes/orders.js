@@ -511,12 +511,17 @@ router.patch('/:id/status', auth, async (req, res) => {
     if (timeFields[status]) {
       setClause += `, ${timeFields[status]}=NOW()`;
     }
-    if (status === 'delivered') {
+    // 🛡️ حماية من الدفع المزدوج: نطبّق آثار "تم التوصيل" مرة واحدة فقط (لو الطلب لسا مش مُسلّم)
+    const alreadyDelivered = order.status === 'delivered';
+    if (status === 'delivered' && !alreadyDelivered) {
       setClause += `, actual_delivery_time=NOW(), payment_status='paid'`;
-      // Free up driver
-      await pool.query('UPDATE drivers SET is_busy=false WHERE user_id=$1', [order.driver_id]);
-      // Add earnings to driver
-      await pool.query('UPDATE drivers SET wallet_balance=wallet_balance+$1 WHERE user_id=$2', [order.delivery_fee, order.driver_id]);
+      if (order.driver_id) {
+        await pool.query('UPDATE drivers SET is_busy=false WHERE user_id=$1', [order.driver_id]);
+        await pool.query('UPDATE drivers SET wallet_balance=wallet_balance+$1 WHERE user_id=$2', [order.delivery_fee || 0, order.driver_id]);
+      }
+    } else if (status === 'delivered' && alreadyDelivered) {
+      // الطلب مُسلّم مسبقاً — لا نكرّر الدفع ولا نغيّر شيئاً
+      return res.json({ success: true, already: true });
     }
 
     await pool.query(`UPDATE orders SET ${setClause} WHERE id=$2`, params);
