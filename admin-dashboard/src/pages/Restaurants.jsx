@@ -13,7 +13,7 @@ export default function Restaurants() {
   const [form, setForm] = useState({
     name_ar: '', description_ar: '', city: '', address: '', phone: '',
     min_order: '10', delivery_fee: '5', delivery_time_min: '20', delivery_time_max: '40',
-    owner_phone: '', owner_password: 'rest123', category_id: '1', lat: '31.9', lng: '35.2',
+    owner_phone: '', owner_password: '', category_id: '1', lat: '31.9', lng: '35.2',
     store_type: 'restaurant'
   });
 
@@ -32,13 +32,17 @@ export default function Restaurants() {
   };
 
   const addRestaurant = async () => {
-    if (!form.name_ar || !form.city) return toast.error('أدخل الاسم والمدينة');
+    if (!form.name_ar.trim()) return toast.error('أدخل اسم المطعم');
+    if (!form.owner_phone.trim()) return toast.error('أدخل رقم الهاتف');
+    if (!form.owner_password || form.owner_password.length < 4) return toast.error('أدخل كلمة مرور (4 أحرف على الأقل)');
     setSaving(true);
     try {
-      await api.post('/admin/restaurants', form);
+      // الأدمن ينشئ المطعم بأقل الحقول؛ الباقي يكمّله صاحب المطعم من بوابته
+      const payload = { ...form, phone: form.phone || form.owner_phone, city: form.city || '-' };
+      await api.post('/admin/restaurants', payload);
       toast.success('تم إضافة المطعم ✅');
       setShowForm(false);
-      setForm({ name_ar: '', description_ar: '', city: '', address: '', phone: '', min_order: '10', delivery_fee: '5', delivery_time_min: '20', delivery_time_max: '40', owner_phone: '', owner_password: 'rest123', category_id: '1', lat: '31.9', lng: '35.2', store_type: 'restaurant' });
+      setForm({ name_ar: '', description_ar: '', city: '', address: '', phone: '', min_order: '10', delivery_fee: '5', delivery_time_min: '20', delivery_time_max: '40', owner_phone: '', owner_password: '', category_id: '1', lat: '31.9', lng: '35.2', store_type: 'restaurant' });
       fetchRestaurants();
     } catch (e) { toast.error(e.message || 'فشل الإضافة'); }
     finally { setSaving(false); }
@@ -79,70 +83,25 @@ export default function Restaurants() {
 
       {showForm && (
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3">
-          <h2 className="font-bold text-gray-900">مطعم / متجر جديد</h2>
+          <h2 className="font-bold text-gray-900">مطعم جديد</h2>
+          <p className="text-xs text-gray-400">أنشئ الحساب بأقل المعلومات — صاحب المطعم يكمّل باقي التفاصيل (الموقع، المنيو، الأوقات) من بوابته.</p>
 
-          {/* نوع المنشأة */}
           <div>
-            <label className="text-xs font-bold text-gray-600 mb-2 block">نوع المنشأة *</label>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { val: 'restaurant', icon: '🍽️', label: 'مطعم', desc: 'يظهر بالصفحة الرئيسية' },
-                { val: 'market',     icon: '🛒', label: 'ماركت', desc: 'يظهر بقسم الماركت' },
-              ].map(t => (
-                <button key={t.val} type="button"
-                  onClick={() => setForm(f => ({ ...f, store_type: t.val }))}
-                  className={`p-3 rounded-xl border-2 text-right transition-all ${form.store_type === t.val ? 'border-orange-500 bg-orange-50' : 'border-gray-200 bg-white'}`}>
-                  <div className="text-2xl mb-1">{t.icon}</div>
-                  <div className={`text-sm font-bold ${form.store_type === t.val ? 'text-orange-600' : 'text-gray-700'}`}>{t.label}</div>
-                  <div className="text-[10px] text-gray-400 mt-0.5">{t.desc}</div>
-                </button>
-              ))}
-            </div>
+            <label className="text-xs font-bold text-gray-600 mb-1 block">اسم المطعم *</label>
+            <input className="w-full border border-gray-200 rounded-xl p-3 text-sm" placeholder="مثال: مطعم العميد"
+              value={form.name_ar} onChange={e => setForm(f => ({...f, name_ar: e.target.value}))} />
+          </div>
+          <div>
+            <label className="text-xs font-bold text-gray-600 mb-1 block">رقم الهاتف * <span className="text-gray-400 font-normal">(يُستخدم لتسجيل الدخول)</span></label>
+            <input className="w-full border border-gray-200 rounded-xl p-3 text-sm" placeholder="مثال: 0599123456" inputMode="tel"
+              value={form.owner_phone} onChange={e => setForm(f => ({...f, owner_phone: e.target.value}))} />
+          </div>
+          <div>
+            <label className="text-xs font-bold text-gray-600 mb-1 block">كلمة المرور *</label>
+            <input className="w-full border border-gray-200 rounded-xl p-3 text-sm" placeholder="اكتب كلمة مرور للمطعم"
+              value={form.owner_password} onChange={e => setForm(f => ({...f, owner_password: e.target.value}))} />
           </div>
 
-          <input className="w-full border border-gray-200 rounded-xl p-3 text-sm" placeholder="اسم المطعم *"
-            value={form.name_ar} onChange={e => setForm(f => ({...f, name_ar: e.target.value}))} />
-          <textarea className="w-full border border-gray-200 rounded-xl p-3 text-sm" placeholder="وصف المطعم" rows={2}
-            value={form.description_ar} onChange={e => setForm(f => ({...f, description_ar: e.target.value}))} />
-          <div className="grid grid-cols-2 gap-3">
-            <input className="border border-gray-200 rounded-xl p-3 text-sm" placeholder="المدينة *"
-              value={form.city} onChange={e => setForm(f => ({...f, city: e.target.value}))} />
-            <input className="border border-gray-200 rounded-xl p-3 text-sm" placeholder="رقم الهاتف"
-              value={form.phone} onChange={e => setForm(f => ({...f, phone: e.target.value}))} />
-          </div>
-          <input className="w-full border border-gray-200 rounded-xl p-3 text-sm" placeholder="العنوان"
-            value={form.address} onChange={e => setForm(f => ({...f, address: e.target.value}))} />
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500">الحد الأدنى (₪)</label>
-              <input className="w-full border border-gray-200 rounded-xl p-2 text-sm mt-1" type="number"
-                value={form.min_order} onChange={e => setForm(f => ({...f, min_order: e.target.value}))} />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">رسوم التوصيل (₪)</label>
-              <input className="w-full border border-gray-200 rounded-xl p-2 text-sm mt-1" type="number"
-                value={form.delivery_fee} onChange={e => setForm(f => ({...f, delivery_fee: e.target.value}))} />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">وقت التوصيل من (دق)</label>
-              <input className="w-full border border-gray-200 rounded-xl p-2 text-sm mt-1" type="number"
-                value={form.delivery_time_min} onChange={e => setForm(f => ({...f, delivery_time_min: e.target.value}))} />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">وقت التوصيل حتى (دق)</label>
-              <input className="w-full border border-gray-200 rounded-xl p-2 text-sm mt-1" type="number"
-                value={form.delivery_time_max} onChange={e => setForm(f => ({...f, delivery_time_max: e.target.value}))} />
-            </div>
-          </div>
-          <div className="border-t pt-3">
-            <p className="text-xs font-bold text-gray-600 mb-2">حساب صاحب المطعم</p>
-            <div className="grid grid-cols-2 gap-3">
-              <input className="border border-gray-200 rounded-xl p-3 text-sm" placeholder="رقم هاتف المالك"
-                value={form.owner_phone} onChange={e => setForm(f => ({...f, owner_phone: e.target.value}))} />
-              <input className="border border-gray-200 rounded-xl p-3 text-sm" placeholder="كلمة المرور"
-                value={form.owner_password} onChange={e => setForm(f => ({...f, owner_password: e.target.value}))} />
-            </div>
-          </div>
           <div className="flex gap-2">
             <button onClick={addRestaurant} disabled={saving}
               className="flex-1 bg-orange-500 text-white py-3 rounded-xl font-bold text-sm disabled:opacity-60">
