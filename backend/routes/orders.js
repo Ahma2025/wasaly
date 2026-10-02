@@ -292,7 +292,8 @@ router.post('/', auth, async (req, res) => {
     }
 
     const total = Math.max(0, dueBeforeWallet - walletUsed);
-    const pointsEarned = Math.floor((subtotal + deliveryFee - discount) * 10);
+    // نقطة واحدة لكل ₪ (الاستبدال 100 نقطة=5₪ → استرجاع 5%). كان ×10 بالغلط = استرجاع 50%!
+    const pointsEarned = Math.max(0, Math.floor(subtotal - discount));
     const orderNumber = generateOrderNumber();
 
     const { rows: newOrders } = await pool.query(
