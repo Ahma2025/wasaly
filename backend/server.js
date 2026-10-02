@@ -70,6 +70,9 @@ async function runMigrations() {
     `ALTER TABLE orders ADD COLUMN IF NOT EXISTS distance_km NUMERIC`,
     `CREATE INDEX IF NOT EXISTS idx_orders_service ON orders(service_type)`,
 
+    // منع تكرار رقم الهاتف على مستوى قاعدة البيانات (يُتجاهل لو فيه تكرارات قديمة)
+    `CREATE UNIQUE INDEX IF NOT EXISTS uniq_users_phone ON users(phone) WHERE phone IS NOT NULL`,
+
     // ⚙️ إعدادات عامة (KV) — منها تسعير التوصيل الشخصي
     `CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`,
     `INSERT INTO app_settings(key, value) VALUES ('personal_delivery', '{"enabled":true,"bike":{"base":3,"perKm":2},"car":{"base":5,"perKm":3},"parcelSize":{"small":0,"medium":3,"large":5},"minFare":3}') ON CONFLICT (key) DO NOTHING`,

@@ -107,16 +107,29 @@ router.post('/verify-otp', async (req, res) => {
 router.post('/register', async (req, res) => {
   try {
     let { name, email, phone, password, city, referred_by } = req.body;
+    // تطبيع + تحقّق صارم من الحقول (يمنع إنشاء حساب ناقص)
+    name = (name || '').trim();
+    city = (city || '').trim();
     if (phone) phone = phone.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
+    if (!name) return res.status(400).json({ success: false, message: 'الرجاء إدخال الاسم', field: 'name' });
+    if (!phone || phone.length < 9) return res.status(400).json({ success: false, message: 'رقم هاتف غير صحيح', field: 'phone' });
+    if (!password || String(password).length < 6) return res.status(400).json({ success: false, message: 'كلمة المرور 6 أحرف على الأقل', field: 'password' });
+
     const existing = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
-    if (existing.rows[0]) return res.status(400).json({ success: false, message: 'رقم الهاتف مسجل مسبقاً' });
+    if (existing.rows[0]) return res.status(409).json({ success: false, message: 'رقم الهاتف مسجل مسبقاً', code: 'PHONE_EXISTS' });
 
     const hash = await bcrypt.hash(password, 12);
     const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const { rows } = await pool.query(
-      `INSERT INTO users (name, email, phone, password_hash, referral_code, role, city, is_verified) VALUES ($1,$2,$3,$4,$5,'customer',$6,true) RETURNING *`,
-      [name, email || null, phone, hash, referralCode, city || null]
-    );
+    let rows;
+    try {
+      ({ rows } = await pool.query(
+        `INSERT INTO users (name, email, phone, password_hash, referral_code, role, city, is_verified) VALUES ($1,$2,$3,$4,$5,'customer',$6,true) RETURNING *`,
+        [name, email || null, phone, hash, referralCode, city || null]
+      ));
+    } catch (insErr) {
+      if (insErr.code === '23505') return res.status(409).json({ success: false, message: 'رقم الهاتف مسجل مسبقاً', code: 'PHONE_EXISTS' }); // سباق/ضغط مزدوج
+      throw insErr;
+    }
     const user = rows[0];
 
     // 🎁 مكافأة الدعوة — إذا سجّل بكود صديق، الاثنين ياخدوا 10₪ محفظة
