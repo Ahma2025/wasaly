@@ -33,6 +33,31 @@ const triedDrivers = new Map(); // key: orderId (نص) -> Set من معرّفا�
 // يوقف بحث السائق نهائياً لهذا الطلب (عند القبول/الإلغاء/التسليم)
 function stopDispatch(orderId) { triedDrivers.delete(String(orderId)); }
 
+// 💸 استرجاع فوائد الطلب عند الإلغاء (محفظة + نقاط + كوبون + عكس الكاش باك) — مرة واحدة فقط
+async function refundOrderBenefits(order) {
+  try {
+    if (!order || order.benefits_refunded) return;
+    const walletUsed = parseFloat(order.wallet_used) || 0;
+    const pointsRedeemed = parseInt(order.points_redeemed) || 0;
+    const cashback = parseFloat(order.cashback_given) || 0;
+    if (walletUsed > 0) {
+      await pool.query('UPDATE users SET wallet_balance = wallet_balance + $1 WHERE id=$2', [walletUsed, order.customer_id]);
+      await pool.query(`INSERT INTO wallet_transactions (user_id, type, amount, description) VALUES ($1,'credit',$2,$3)`,
+        [order.customer_id, walletUsed, `استرجاع إلغاء طلب #${order.order_number}`]);
+    }
+    if (pointsRedeemed > 0) {
+      await pool.query('UPDATE users SET loyalty_points = loyalty_points + $1 WHERE id=$2', [pointsRedeemed, order.customer_id]);
+    }
+    if (cashback > 0) {
+      await pool.query('UPDATE users SET wallet_balance = GREATEST(0, wallet_balance - $1) WHERE id=$2', [cashback, order.customer_id]);
+    }
+    if (order.coupon_code) {
+      await pool.query('UPDATE coupons SET usage_count = GREATEST(0, usage_count - 1) WHERE code=$1', [order.coupon_code]);
+    }
+    await pool.query('UPDATE orders SET benefits_refunded=true WHERE id=$1', [order.id]);
+  } catch (e) { console.error('refundOrderBenefits error:', e.message); }
+}
+
 async function assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, addExcludeId = null) {
   try {
     const key = String(orderId);
@@ -340,6 +365,9 @@ router.post('/', auth, async (req, res) => {
           [req.user.id, cashback, `كاش باك طلب #${orderNumber}`]
         );
       }
+      // خزّن ما استُخدم/مُنح حتى نسترجعه بدقّة عند الإلغاء
+      await pool.query('UPDATE orders SET wallet_used=$1, points_redeemed=$2, cashback_given=$3 WHERE id=$4',
+        [walletUsed || 0, pointsRedeemed || 0, cashback || 0, order.id]);
     } catch (fxErr) {
       console.error('post-order effects (non-fatal):', fxErr.message);
     }
@@ -524,6 +552,13 @@ router.patch('/:id/status', auth, async (req, res) => {
       return res.json({ success: true, already: true });
     }
 
+    // إلغاء من المطعم/الأدمن → حرّر السائق واسترجع فوائد الزبون (مرة واحدة)
+    if (status === 'cancelled' && order.status !== 'cancelled') {
+      stopDispatch(order.id);
+      if (order.driver_id) await pool.query('UPDATE drivers SET is_busy=false WHERE user_id=$1', [order.driver_id]);
+      await refundOrderBenefits(order);
+    }
+
     await pool.query(`UPDATE orders SET ${setClause} WHERE id=$2`, params);
 
     notifyUser(req.io, order.customer_id, 'order_status', { order_id: order.id, status });
@@ -625,6 +660,7 @@ router.patch('/:id/cancel', auth, async (req, res) => {
     if (order.driver_id) {
       await pool.query('UPDATE drivers SET is_busy=false WHERE user_id=$1', [order.driver_id]);
     }
+    await refundOrderBenefits(order); // استرجاع المحفظة/النقاط/الكوبون للزبون
     res.json({ success: true });
   } catch (e) {
     console.error(e.message);

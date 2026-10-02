@@ -73,6 +73,12 @@ async function runMigrations() {
     // منع تكرار رقم الهاتف على مستوى قاعدة البيانات (يُتجاهل لو فيه تكرارات قديمة)
     `CREATE UNIQUE INDEX IF NOT EXISTS uniq_users_phone ON users(phone) WHERE phone IS NOT NULL`,
 
+    // تتبّع ما استُخدم بالطلب حتى نسترجعه عند الإلغاء (محفظة/نقاط/كاش باك)
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS wallet_used NUMERIC DEFAULT 0`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS points_redeemed INTEGER DEFAULT 0`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS cashback_given NUMERIC DEFAULT 0`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS benefits_refunded BOOLEAN DEFAULT false`,
+
     // ⚙️ إعدادات عامة (KV) — منها تسعير التوصيل الشخصي
     `CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`,
     `INSERT INTO app_settings(key, value) VALUES ('personal_delivery', '{"enabled":true,"bike":{"base":3,"perKm":2},"car":{"base":5,"perKm":3},"parcelSize":{"small":0,"medium":3,"large":5},"minFare":3}') ON CONFLICT (key) DO NOTHING`,
