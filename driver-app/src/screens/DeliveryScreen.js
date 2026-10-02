@@ -378,7 +378,6 @@ export default function DeliveryScreen({ route, navigation }) {
                   <Text style={styles.infoLabel}>نوع الطلب</Text>
                   <Text style={styles.infoValue}>
                     {orderData?.service_type === 'ride' ? `توصيل راكب (${orderData?.passengers || 1})` : 'توصيل طرد'}
-                    {' · '}{orderData?.vehicle === 'car' ? '🚗 سيارة' : '🛵 دراجة'}
                   </Text>
                 </View>
               </View>

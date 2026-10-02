@@ -447,18 +447,8 @@ router.get('/settings/personal-delivery', auth, adminOnly, async (req, res) => {
 router.put('/settings/personal-delivery', auth, adminOnly, async (req, res) => {
   try {
     const cfg = req.body || {};
-    // تحقّق مبسّط من البنية
-    const clean = {
-      enabled: !!cfg.enabled,
-      bike: { base: Number(cfg?.bike?.base) || 0, perKm: Number(cfg?.bike?.perKm) || 0 },
-      car:  { base: Number(cfg?.car?.base)  || 0, perKm: Number(cfg?.car?.perKm)  || 0 },
-      parcelSize: {
-        small:  Number(cfg?.parcelSize?.small)  || 0,
-        medium: Number(cfg?.parcelSize?.medium) || 0,
-        large:  Number(cfg?.parcelSize?.large)  || 0,
-      },
-      minFare: Number(cfg?.minFare) || 0,
-    };
+    // التسعير صار من مناطق التوصيل الجغرافية — نخزّن حالة التفعيل فقط
+    const clean = { enabled: !!cfg.enabled };
     await pool.query(
       `INSERT INTO app_settings(key, value, updated_at) VALUES ('personal_delivery', $1, NOW())
        ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()`,

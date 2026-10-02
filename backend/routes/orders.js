@@ -147,29 +147,21 @@ async function getPersonalConfig() {
     return rows[0] ? JSON.parse(rows[0].value) : null;
   } catch (e) { return null; }
 }
-function computeFare(cfg, vehicle, size, km) {
-  const v = cfg[vehicle] || cfg.bike || { base: 3, perKm: 2 };
-  let fare = Number(v.base) + Number(v.perKm) * km;
-  if (size && cfg.parcelSize && cfg.parcelSize[size]) fare += Number(cfg.parcelSize[size]);
-  fare = Math.max(fare, Number(cfg.minFare) || 0);
-  return Math.round(fare * 100) / 100;
-}
-
-// إعدادات الخدمة (لعرضها بالتطبيق)
+// إعدادات الخدمة (لعرضها بالتطبيق) — التسعير يعتمد على مناطق التوصيل الجغرافية
 router.get('/personal/config', auth, async (req, res) => {
   const cfg = await getPersonalConfig();
   res.json({ success: true, data: cfg || { enabled: false } });
 });
 
-// تسعير فوري حسب المسافة
+// تسعير فوري حسب المسافة + مناطق التوصيل (نفس أسعار الدليفري)
 router.post('/personal/quote', auth, async (req, res) => {
   try {
-    const { vehicle = 'bike', parcel_size, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng } = req.body;
+    const { pickup_lat, pickup_lng, dropoff_lat, dropoff_lng } = req.body;
     const cfg = await getPersonalConfig();
     if (!cfg || !cfg.enabled) return res.status(400).json({ success: false, message: 'الخدمة غير متاحة حالياً' });
     const km = haversineKm(+pickup_lat, +pickup_lng, +dropoff_lat, +dropoff_lng);
     if (!isFinite(km)) return res.status(400).json({ success: false, message: 'حدّد نقطة الاستلام والتسليم' });
-    const fare = computeFare(cfg, vehicle, parcel_size, km);
+    const fare = await getDeliveryFee(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng);
     res.json({ success: true, data: { distance_km: Math.round(km * 100) / 100, fare } });
   } catch (e) { res.status(500).json({ success: false, message: 'حدث خطأ' }); }
 });
@@ -178,7 +170,7 @@ router.post('/personal/quote', auth, async (req, res) => {
 router.post('/personal', auth, async (req, res) => {
   try {
     const {
-      service_type = 'parcel', vehicle = 'bike',
+      service_type = 'parcel',
       pickup_lat, pickup_lng, pickup_address,
       dropoff_lat, dropoff_lng, delivery_address,
       recipient_name, recipient_phone, parcel_desc, parcel_size, parcel_photo,
@@ -192,7 +184,9 @@ router.post('/personal', auth, async (req, res) => {
     }
 
     const km = haversineKm(+pickup_lat, +pickup_lng, +dropoff_lat, +dropoff_lng);
-    const fare = computeFare(cfg, vehicle, service_type === 'parcel' ? parcel_size : null, km);
+    // السعر حسب مناطق التوصيل الجغرافية (نفس أسعار الدليفري) — السائق أي وسيلة
+    const fare = await getDeliveryFee(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng);
+    const vehicle = null;
     const orderNumber = generateOrderNumber();
 
     const { rows } = await pool.query(

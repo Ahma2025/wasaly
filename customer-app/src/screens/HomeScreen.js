@@ -391,7 +391,7 @@ export default function HomeScreen() {
             <Text style={{ fontSize: 24 }}>📦</Text>
             <View style={{ flex: 1 }}>
               <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 15 }}>طلب شخصي — راكب أو طرد</Text>
-              <Text style={{ color: '#FFF', opacity: 0.9, fontSize: 11, marginTop: 2 }}>وصّل طرد أو اطلب سائق يوصّلك · دراجة أو سيارة</Text>
+              <Text style={{ color: '#FFF', opacity: 0.9, fontSize: 11, marginTop: 2 }}>وصّل طرد أو اطلب سائق يوصّلك · السعر حسب المسافة</Text>
             </View>
             <Ionicons name="chevron-back" size={20} color="#FFF" />
           </LinearGradient>

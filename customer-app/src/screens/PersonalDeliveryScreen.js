@@ -51,7 +51,6 @@ export default function PersonalDeliveryScreen({ navigation }) {
 
   const [cfg, setCfg] = useState(null);
   const [serviceType, setServiceType] = useState('parcel'); // 'parcel' | 'ride'
-  const [vehicle, setVehicle] = useState('bike');           // 'bike' | 'car'
   const [pickup, setPickup] = useState(null);
   const [dropoff, setDropoff] = useState(null);
   const [pickupAddr, setPickupAddr] = useState('');
@@ -96,7 +95,6 @@ export default function PersonalDeliveryScreen({ navigation }) {
     setQuoting(true);
     const t = setTimeout(() => {
       api.post('/orders/personal/quote', {
-        vehicle, parcel_size: serviceType === 'parcel' ? parcelSize : undefined,
         pickup_lat: pickup.lat, pickup_lng: pickup.lng,
         dropoff_lat: dropoff.lat, dropoff_lng: dropoff.lng,
       }).then(d => { if (alive) setQuote(d?.data || null); })
@@ -104,7 +102,7 @@ export default function PersonalDeliveryScreen({ navigation }) {
         .finally(() => { if (alive) setQuoting(false); });
     }, 500);
     return () => { alive = false; clearTimeout(t); };
-  }, [pickup, dropoff, vehicle, parcelSize, serviceType]);
+  }, [pickup, dropoff]);
 
   const submit = async () => {
     if (!pickup) return Alert.alert('تنبيه', 'حدّد نقطة الاستلام على الخريطة');
@@ -113,7 +111,7 @@ export default function PersonalDeliveryScreen({ navigation }) {
     setSubmitting(true);
     try {
       const d = await api.post('/orders/personal', {
-        service_type: serviceType, vehicle,
+        service_type: serviceType,
         pickup_lat: pickup.lat, pickup_lng: pickup.lng, pickup_address: pickupAddr,
         dropoff_lat: dropoff.lat, dropoff_lng: dropoff.lng, delivery_address: dropAddr,
         recipient_name: recipientName, recipient_phone: recipientPhone,
@@ -143,7 +141,7 @@ export default function PersonalDeliveryScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <GradientHeader title="طلب شخصي" subtitle="راكب أو طرد — دراجة أو سيارة" />
+      <GradientHeader title="طلب شخصي" subtitle="وصّل طرد أو اطلب سائق يوصّلك" />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 16 }} keyboardShouldPersistTaps="handled">
 
         {/* نوع الخدمة */}
@@ -151,15 +149,6 @@ export default function PersonalDeliveryScreen({ navigation }) {
           {[['parcel', '📦 توصيل طرد'], ['ride', '🧍 توصيل راكب']].map(([k, l]) => (
             <TouchableOpacity key={k} style={[styles.segBtn, serviceType === k && styles.segActive]} onPress={() => setServiceType(k)}>
               <Text style={[styles.segTxt, serviceType === k && styles.segTxtActive]}>{l}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* وسيلة النقل */}
-        <View style={styles.segment}>
-          {[['bike', '🛵 دراجة'], ['car', '🚗 سيارة']].map(([k, l]) => (
-            <TouchableOpacity key={k} style={[styles.segBtn, vehicle === k && styles.segActive]} onPress={() => setVehicle(k)}>
-              <Text style={[styles.segTxt, vehicle === k && styles.segTxtActive]}>{l}</Text>
             </TouchableOpacity>
           ))}
         </View>

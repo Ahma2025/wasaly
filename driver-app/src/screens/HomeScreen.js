@@ -328,7 +328,7 @@ export default function DriverHome() {
               <Ionicons name={pIsPersonal ? (pendingOrder.service_type === 'ride' ? 'people-outline' : 'cube-outline') : 'restaurant-outline'} size={16} color={COLORS.primary} />
               <Text style={styles.pendingRestaurant}>
                 {pIsPersonal
-                  ? `${pendingOrder.service_type === 'ride' ? 'توصيل راكب' : 'توصيل طرد'} · ${pendingOrder.vehicle === 'car' ? '🚗' : '🛵'}`
+                  ? (pendingOrder.service_type === 'ride' ? '🧍 توصيل راكب' : '📦 توصيل طرد')
                   : pendingOrder.restaurant_name}
               </Text>
             </View>
