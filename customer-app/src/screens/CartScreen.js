@@ -195,7 +195,9 @@ export default function CartScreen() {
     }
   };
 
-  const goodsTotal = (deliveryType === 'delivery' ? total + deliveryFee : total) - couponDiscount;
+  // توصيل مجاني فوق 50₪ (مطابق للسيرفر) — نعكسه بالعرض حتى يطابق المبلغ المخصوم فعلياً
+  const effectiveDeliveryFee = (deliveryType === 'delivery' && total >= 50) ? 0 : deliveryFee;
+  const goodsTotal = (deliveryType === 'delivery' ? total + effectiveDeliveryFee : total) - couponDiscount;
   const redeemValue = usePoints ? Math.min(loyaltyPoints * 0.05, Math.max(0, goodsTotal)) : 0;
   const dueBeforeWallet = Math.max(0, goodsTotal - redeemValue) + (parseFloat(tip) || 0);
   const walletUsed = useWallet ? Math.min(walletBalance, dueBeforeWallet) : 0;
@@ -311,7 +313,9 @@ export default function CartScreen() {
               <Text style={styles.feeLabel}>رسوم التوصيل لموقعك:</Text>
               {calculatingFee
                 ? <ActivityIndicator size="small" color={COLORS.primary} />
-                : <Text style={styles.feeValue}>{deliveryFee}₪</Text>
+                : effectiveDeliveryFee === 0
+                  ? <Text style={[styles.feeValue, { color: COLORS.green }]}>مجاني 🎉</Text>
+                  : <Text style={styles.feeValue}>{effectiveDeliveryFee}₪</Text>
               }
             </View>
           )}
