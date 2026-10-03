@@ -556,10 +556,11 @@ router.patch('/:id/status', auth, async (req, res) => {
     await pool.query(`UPDATE orders SET ${setClause} WHERE id=$2`, params);
 
     notifyUser(req.io, order.customer_id, 'order_status', { order_id: order.id, status });
+    const nctx = { personal: order.order_type === 'personal', service: order.service_type };
     try {
-      if (status === 'on_the_way') await Notify.orderOnTheWay(req.io, order.customer_id, order.id);
-      else if (status === 'delivered') await Notify.orderDelivered(req.io, order.customer_id, order.id);
-      else if (status === 'cancelled') await Notify.orderCancelled(req.io, order.customer_id, order.id);
+      if (status === 'on_the_way') await Notify.orderOnTheWay(req.io, order.customer_id, order.id, nctx);
+      else if (status === 'delivered') await Notify.orderDelivered(req.io, order.customer_id, order.id, nctx);
+      else if (status === 'cancelled') await Notify.orderCancelled(req.io, order.customer_id, order.id, nctx);
       else {
         const msgs = { preparing: 'جاري تحضير طلبك 🍳' };
         if (msgs[status]) saveNotification(order.customer_id, msgs[status], 'order_status', { order_id: order.id });
@@ -601,7 +602,7 @@ router.post('/:id/accept', auth, async (req, res) => {
           'SELECT u.name, d.vehicle_type FROM users u JOIN drivers d ON d.user_id=u.id WHERE u.id=$1',
           [req.user.id]
         );
-        await Notify.driverAssigned(req.io, order.customer_id, driverInfo[0]?.name || 'السائق', order.id);
+        await Notify.driverAssigned(req.io, order.customer_id, driverInfo[0]?.name || 'السائق', order.id, { personal: order.order_type === 'personal', service: order.service_type });
       } catch (notifErr) {
         console.error('accept notification error (non-fatal):', notifErr.message);
       }

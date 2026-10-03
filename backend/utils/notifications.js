@@ -305,17 +305,29 @@ const Notify = {
   orderConfirmed: (io, customerId, orderId) =>
     notify(io, customerId, '✅ تم قبول طلبك', 'المطعم قبل طلبك وبدأ التحضير', 'order_confirmed', { order_id: String(orderId) }),
 
-  driverAssigned: (io, customerId, driverName, orderId) =>
-    notify(io, customerId, '🛵 السائق في طريقه', `${driverName} توجّه للمطعم لاستلام طلبك`, 'driver_assigned', { order_id: String(orderId) }),
+  driverAssigned: (io, customerId, driverName, orderId, ctx = {}) =>
+    notify(io, customerId, '🛵 السائق في طريقه',
+      ctx.personal ? `${driverName} متوجّه لنقطة الاستلام` : `${driverName} توجّه للمطعم لاستلام طلبك`,
+      'driver_assigned', { order_id: String(orderId) }),
 
-  orderOnTheWay: (io, customerId, orderId) =>
-    notify(io, customerId, '🚀 طلبك في الطريق!', 'السائق التقط طلبك وهو في طريقه إليك', 'on_the_way', { order_id: String(orderId) }),
+  orderOnTheWay: (io, customerId, orderId, ctx = {}) =>
+    notify(io, customerId,
+      ctx.personal ? (ctx.service === 'ride' ? '🚗 في الطريق لوجهتك!' : '📦 طردك في الطريق') : '🚀 طلبك في الطريق!',
+      ctx.personal ? (ctx.service === 'ride' ? 'السائق انطلق بك إلى وجهتك' : 'السائق استلم الطرد وهو في طريقه للتسليم')
+                   : 'السائق التقط طلبك وهو في طريقه إليك',
+      'on_the_way', { order_id: String(orderId) }),
 
-  orderDelivered: (io, customerId, orderId) =>
-    notify(io, customerId, '🎉 وصل طلبك!', 'استمتع بوجبتك. بالهناء والشفاء!', 'delivered', { order_id: String(orderId) }),
+  orderDelivered: (io, customerId, orderId, ctx = {}) =>
+    notify(io, customerId,
+      ctx.personal ? (ctx.service === 'ride' ? '🙏 وصلت بالسلامة!' : '✅ تم تسليم الطرد') : '🎉 وصل طلبك!',
+      ctx.personal ? (ctx.service === 'ride' ? 'نتمنى لك رحلة سعيدة. شكراً لاستخدامك وصلّي!' : 'تم تسليم طردك بنجاح. شكراً لك!')
+                   : 'استمتع بوجبتك. بالهناء والشفاء!',
+      'delivered', { order_id: String(orderId) }),
 
-  orderCancelled: (io, customerId, orderId) =>
-    notify(io, customerId, '❌ تم إلغاء الطلب', 'تم إلغاء طلبك. اتصل بنا للمساعدة', 'cancelled', { order_id: String(orderId) }),
+  orderCancelled: (io, customerId, orderId, ctx = {}) =>
+    notify(io, customerId, '❌ تم إلغاء الطلب',
+      ctx.personal ? 'تم إلغاء طلبك الشخصي. اتصل بنا للمساعدة' : 'تم إلغاء طلبك. اتصل بنا للمساعدة',
+      'cancelled', { order_id: String(orderId) }),
 
   newOrderForDriver: (io, driverId, orderNumber, orderId) =>
     notify(io, driverId, '📦 طلب توصيل جديد!', `طلب #${orderNumber} ينتظر قبولك`, 'new_order_driver', { order_id: String(orderId) }),
