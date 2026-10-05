@@ -17,15 +17,19 @@ router.get('/vapid-public-key', (req, res) => {
 });
 
 // Save subscription from restaurant portal
-router.post('/subscribe', async (req, res) => {
+router.post('/subscribe', auth, async (req, res) => {
   try {
     const { subscription, restaurant_id } = req.body;
-    if (!subscription || !restaurant_id) return res.status(400).json({ success: false });
-
+    if (!subscription || !restaurant_id || !/^\d+$/.test(String(restaurant_id))) return res.status(400).json({ success: false });
+    if (typeof subscription !== 'object' || !subscription.endpoint) return res.status(400).json({ success: false, message: 'اشتراك غير صالح' });
+    // 🔒 فقط صاحب المطعم (أو الإدارة) يقدر يسجّل اشتراك إشعارات لمطعمه
+    if (req.user.role !== 'admin') {
+      const { rows } = await pool.query('SELECT 1 FROM restaurants WHERE id=$1 AND owner_id=$2', [restaurant_id, req.user.id]);
+      if (!rows[0]) return res.status(403).json({ success: false, message: 'غير مصرح' });
+    }
     const subStr = JSON.stringify(subscription);
-    // Upsert: delete old then insert
-    pool.query('DELETE FROM web_push_subscriptions WHERE restaurant_id=$1', [restaurant_id]);
-    pool.query('INSERT INTO web_push_subscriptions (restaurant_id, subscription) VALUES ($1, $2)', [restaurant_id, subStr]);
+    await pool.query('DELETE FROM web_push_subscriptions WHERE restaurant_id=$1', [restaurant_id]);
+    await pool.query('INSERT INTO web_push_subscriptions (restaurant_id, subscription) VALUES ($1, $2)', [restaurant_id, subStr]);
 
     res.json({ success: true });
   } catch (e) {

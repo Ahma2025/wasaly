@@ -16,21 +16,16 @@ router.get('/', async (req, res) => {
 router.get('/calculate', async (req, res) => {
   try {
     const { lat1, lng1, lat2, lng2 } = req.query;
-    if (!lat1 || !lng1 || !lat2 || !lng2) {
-      return res.json({ success: true, data: { fee: 5, distance_km: 0 } });
+    const { haversineKm, validCoord, getZoneFee } = require('../utils/orderService');
+    if (!validCoord(lat1, lng1) || !validCoord(lat2, lng2)) {
+      return res.status(400).json({ success: false, message: 'حدّد الموقعين على الخريطة' });
     }
-    const R = 6371;
-    const dLat = (parseFloat(lat2) - parseFloat(lat1)) * Math.PI / 180;
-    const dLon = (parseFloat(lng2) - parseFloat(lng1)) * Math.PI / 180;
-    const a = Math.sin(dLat/2)**2 +
-      Math.cos(parseFloat(lat1)*Math.PI/180) * Math.cos(parseFloat(lat2)*Math.PI/180) * Math.sin(dLon/2)**2;
-    const distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-
+    const distKm = haversineKm(+lat1, +lng1, +lat2, +lng2);
     const { rows } = await pool.query(
-      'SELECT * FROM delivery_zones WHERE is_active=true AND min_km <= $1 AND max_km > $1 ORDER BY min_km LIMIT 1',
-      [distKm]
-    );
-    res.json({ success: true, data: { fee: rows[0]?.price || 5, distance_km: distKm.toFixed(2), zone: rows[0] } });
+      'SELECT * FROM delivery_zones WHERE is_active=true AND min_km <= $1 AND max_km > $1 ORDER BY min_km LIMIT 1', [distKm]);
+    // نفس قاعدة التسعير الفعلية: المنطقة المطابقة، وإلا أغلى منطقة، وإن لا مناطق → 5
+    const fee = await getZoneFee(pool, distKm);
+    res.json({ success: true, data: { fee, distance_km: distKm.toFixed(2), zone: rows[0] } });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }

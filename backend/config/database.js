@@ -1,8 +1,34 @@
 const path = require('path');
+const bcrypt = require('bcryptjs');
+
+// 🔐 حساب أدمن أولي — فقط من متغيرات البيئة (ADMIN_PHONE + ADMIN_PASSWORD) وفقط إذا لا يوجد أي أدمن.
+// لا كلمات مرور ثابتة بالكود، ولا طباعة لأي كلمة مرور بالسجلات.
+async function seedAdminFromEnv(query) {
+  const phone = (process.env.ADMIN_PHONE || '').trim();
+  const password = process.env.ADMIN_PASSWORD || '';
+  if (!phone || !password) return;
+  if (password.length < 8) { console.error('⚠️ ADMIN_PASSWORD too short (min 8) — admin seed skipped'); return; }
+  const { rows: admins } = await query("SELECT id FROM users WHERE role='admin' LIMIT 1");
+  if (admins.length) return;
+  const { rows: byPhone } = await query('SELECT id FROM users WHERE phone=$1', [phone]);
+  if (byPhone.length) { console.error('⚠️ ADMIN_PHONE already belongs to a non-admin user — admin seed skipped'); return; }
+  const hash = await bcrypt.hash(password, 12);
+  await query(
+    `INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES ($1,$2,$3,'admin',$4,true,true)`,
+    ['Admin', phone, hash, 'ADM' + Math.random().toString(36).substring(2, 6).toUpperCase()]
+  );
+  console.log('✅ Initial admin account created from ADMIN_PHONE/ADMIN_PASSWORD env');
+}
+
+if (!process.env.DATABASE_URL && process.env.NODE_ENV === 'production') {
+  // بالإنتاج: ممنوع السقوط بصمت على SQLite مؤقّت — نوقف الإقلاع فوراً
+  console.error('❌ DATABASE_URL is not set in production — refusing to start on an ephemeral SQLite DB');
+  process.exit(1);
+}
 
 if (!process.env.DATABASE_URL) {
+  console.warn('⚠️ DATABASE_URL not set — using local SQLite (development only; order transactions require PostgreSQL)');
   const Database = require('better-sqlite3');
-  const bcrypt = require('bcryptjs');
   const db = new Database(path.join(__dirname, '..', 'wasaly.db'));
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
@@ -260,14 +286,6 @@ if (!process.env.DATABASE_URL) {
     console.log('✅ Delivery zones created');
   }
 
-  // Always ensure admin exists (runs every startup)
-  const _adminExists = db.prepare("SELECT id FROM users WHERE phone='05999039704'").get();
-  if (!_adminExists) {
-    db.prepare(`INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES (?,?,?,?,?,1,1)`)
-      .run('Admin', '05999039704', bcrypt.hashSync('123456', 10), 'admin', 'ADM001');
-    console.log('✅ Admin created: 05999039704 / 123456');
-  }
-
   // Seed categories if not exist
   if (!db.prepare("SELECT id FROM categories LIMIT 1").get()) {
     const cats = [
@@ -361,10 +379,11 @@ if (!process.env.DATABASE_URL) {
     }
   };
 
+  pool.isSqlite = true;
+  pool.ready = seedAdminFromEnv((t, p) => pool.query(t, p)).catch(e => console.error('admin seed error:', e.message));
   module.exports = pool;
 } else {
   const { Pool } = require('pg');
-  const bcrypt = require('bcryptjs');
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
@@ -372,13 +391,23 @@ if (!process.env.DATABASE_URL) {
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
   });
-  pool.on('connect', () => console.log('✅ Connected to PostgreSQL'));
-  pool.on('error', (err) => console.error('❌ PostgreSQL error:', err));
+  let _loggedConnect = false;
+  pool.on('connect', () => { if (!_loggedConnect) { _loggedConnect = true; console.log('✅ Connected to PostgreSQL'); } });
+  pool.on('error', (err) => console.error('❌ PostgreSQL error:', err.message));
 
-  // Create all tables and seed initial data
-  (async () => {
+  // Create all tables and seed initial data.
+  // `pool.ready` يُصدَّر حتى ينتظره server.js قبل تشغيل الـ migrations (منع سباق الإقلاع الأول).
+  pool.ready = (async () => {
     try {
-      await new Promise(r => setTimeout(r, 2000));
+      // انتظر حتى تقبل القاعدة الاتصال (بدل sleep ثابت 2 ثانية)
+      for (let attempt = 1; ; attempt++) {
+        try { await pool.query('SELECT 1'); break; }
+        catch (e) {
+          if (attempt >= 30) throw e;
+          console.error(`⏳ DB not ready (attempt ${attempt}): ${e.message}`);
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
 
       await pool.query(`
         CREATE TABLE IF NOT EXISTS users (
@@ -584,18 +613,8 @@ if (!process.env.DATABASE_URL) {
           VALUES ('عروض خاصة','Special Offers','https://via.placeholder.com/400x160/FF6B00/FFF?text=وصلّي','none','',0,true)`);
       }
 
-      // Ensure admin exists
-      const { rows } = await pool.query("SELECT id FROM users WHERE phone='05999039704'");
-      if (rows.length === 0) {
-        const hash = await bcrypt.hash('123456', 10);
-        await pool.query(
-          `INSERT INTO users (name,phone,password_hash,role,referral_code,is_active,is_verified) VALUES ($1,$2,$3,$4,$5,true,true)`,
-          ['Admin', '05999039704', hash, 'admin', 'ADM001']
-        );
-        console.log('✅ Admin created: 05999039704 / 123456');
-      } else {
-        console.log('✅ Admin exists');
-      }
+      // Initial admin — env only (ADMIN_PHONE/ADMIN_PASSWORD), only when no admin exists
+      await seedAdminFromEnv((t, p) => pool.query(t, p));
     } catch (e) {
       console.error('⚠️ DB setup error:', e.message);
     }

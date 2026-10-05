@@ -333,4 +333,4 @@ const Notify = {
     notify(io, driverId, '📦 طلب توصيل جديد!', `طلب #${orderNumber} ينتظر قبولك`, 'new_order_driver', { order_id: String(orderId) }),
 };
 
-module.exports = { saveNotification, sendFCM, getUserTokens, notify, notifyUser, Notify };
+module.exports = { saveNotification, sendFCM, getUserTokens, notify, notifyUser, Notify, getFCMAccessToken };

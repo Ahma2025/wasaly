@@ -8,11 +8,28 @@ const roleAr = (role) => ({ customer: 'زبون', driver: 'سائق', restaurant
 // حزمة التطبيق حسب الدور (للإشعار)
 const bundleFor = (role) => ({ driver: 'com.wasaly.driver', restaurant: 'com.wasaly.restaurant', restaurant_owner: 'com.wasaly.restaurant' }[role] || 'com.wasaly.customer');
 
+// 🔒 التذكرة يراها/يكتب فيها صاحبها أو الإدارة فقط
+async function canAccessTicket(req, ticketId) {
+  if (!/^\d+$/.test(String(ticketId))) return false;
+  if (req.user.role === 'admin') return true;
+  const { rows } = await pool.query('SELECT 1 FROM support_tickets WHERE id=$1 AND user_id=$2', [ticketId, req.user.id]);
+  return rows.length > 0;
+}
+
 router.post('/tickets', auth, async (req, res) => {
-  const { subject, order_id, message } = req.body;
-  const { rows } = await pool.query('INSERT INTO support_tickets (user_id, order_id, subject) VALUES ($1,$2,$3) RETURNING *', [req.user.id, order_id, subject]);
-  await pool.query('INSERT INTO support_messages (ticket_id, sender_id, message) VALUES ($1,$2,$3)', [rows[0].id, req.user.id, message]);
-  res.status(201).json({ success: true, data: rows[0] });
+  try {
+    const { subject, order_id, message } = req.body;
+    if (!subject || !String(subject).trim()) return res.status(400).json({ success: false, message: 'الموضوع مطلوب' });
+    let orderId = null;
+    if (order_id && /^\d+$/.test(String(order_id))) {
+      const { rows: o } = await pool.query('SELECT id FROM orders WHERE id=$1 AND customer_id=$2', [order_id, req.user.id]);
+      orderId = o[0] ? o[0].id : null;
+    }
+    const { rows } = await pool.query('INSERT INTO support_tickets (user_id, order_id, subject, message) VALUES ($1,$2,$3,$4) RETURNING *',
+      [req.user.id, orderId, String(subject).slice(0, 200), message ? String(message).slice(0, 4000) : null]);
+    if (message) await pool.query('INSERT INTO support_messages (ticket_id, sender_id, message) VALUES ($1,$2,$3)', [rows[0].id, req.user.id, String(message).slice(0, 4000)]);
+    res.status(201).json({ success: true, data: rows[0] });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
 router.get('/tickets', auth, async (req, res) => {
@@ -21,18 +38,22 @@ router.get('/tickets', auth, async (req, res) => {
 });
 
 router.get('/tickets/:id/messages', auth, async (req, res) => {
-  const { rows } = await pool.query('SELECT sm.*, u.name FROM support_messages sm JOIN users u ON sm.sender_id=u.id WHERE sm.ticket_id=$1 ORDER BY sm.created_at', [req.params.id]);
+  if (!(await canAccessTicket(req, req.params.id))) return res.status(403).json({ success: false, message: 'غير مصرح' });
+  const { rows } = await pool.query('SELECT sm.*, u.name FROM support_messages sm LEFT JOIN users u ON sm.sender_id=u.id WHERE sm.ticket_id=$1 ORDER BY sm.created_at', [req.params.id]);
   res.json({ success: true, data: rows });
 });
 
 router.post('/tickets/:id/messages', auth, async (req, res) => {
+  if (!(await canAccessTicket(req, req.params.id))) return res.status(403).json({ success: false, message: 'غير مصرح' });
   const { message } = req.body;
-  const { rows } = await pool.query('INSERT INTO support_messages (ticket_id, sender_id, message, is_admin) VALUES ($1,$2,$3,$4) RETURNING *', [req.params.id, req.user.id, message, req.user.role === 'admin']);
+  if (!message || !String(message).trim()) return res.status(400).json({ success: false, message: 'الرسالة فارغة' });
+  const { rows } = await pool.query('INSERT INTO support_messages (ticket_id, sender_id, message, is_admin) VALUES ($1,$2,$3,$4) RETURNING *',
+    [req.params.id, req.user.id, String(message).slice(0, 4000), req.user.role === 'admin']);
   res.status(201).json({ success: true, data: rows[0] });
 });
 
 router.get('/admin/tickets', auth, adminOnly, async (req, res) => {
-  const { rows } = await pool.query('SELECT st.*, u.name, u.phone FROM support_tickets st JOIN users u ON st.user_id=u.id ORDER BY created_at DESC LIMIT 50');
+  const { rows } = await pool.query('SELECT st.*, u.name, u.phone FROM support_tickets st LEFT JOIN users u ON st.user_id=u.id ORDER BY st.created_at DESC LIMIT 50');
   res.json({ success: true, data: rows });
 });
 

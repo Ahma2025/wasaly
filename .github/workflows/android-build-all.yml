@@ -3,6 +3,12 @@ name: Android All Apps → AAB
 on:
   push:
     branches: [master, main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'backend/**'
+      - '*.html'
+      - '*.pdf'
   workflow_dispatch:
 
 concurrency:

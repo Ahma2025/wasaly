@@ -53,7 +53,7 @@ router.post('/addresses', auth, async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO addresses (user_id, label, title, address, lat, lng, floor, notes, is_default)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [req.user.id, label || 'منزل', title || address, address, lat || null, lng || null, floor || null, notes || null, req.body.is_default ? true : false]
+      [req.user.id, label || 'منزل', title || label || 'منزل', address, lat || null, lng || null, floor || null, notes || null, req.body.is_default ? true : false]
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (e) {
@@ -86,13 +86,14 @@ router.delete('/addresses/:id', auth, async (req, res) => {
 // Favorites
 router.get('/favorites', auth, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT r.* FROM favorites f JOIN restaurants r ON f.restaurant_id=r.id WHERE f.user_id=$1`, [req.user.id]
+    `SELECT r.* FROM favorites f JOIN restaurants r ON f.restaurant_id=r.id WHERE f.user_id=$1 AND r.is_active=true`, [req.user.id]
   );
-  res.json({ success: true, data: rows });
+  res.json({ success: true, data: rows.map(({ owner_id, commission_rate, email, ...r }) => r) });
 });
 
 router.post('/favorites/:restaurantId', auth, async (req, res) => {
   try {
+    if (!/^\d+$/.test(String(req.params.restaurantId))) return res.status(400).json({ success: false, message: 'مطعم غير صحيح' });
     await pool.query('INSERT INTO favorites (user_id, restaurant_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.user.id, req.params.restaurantId]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }

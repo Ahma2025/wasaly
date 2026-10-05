@@ -1,402 +1,179 @@
-﻿const router = require('express').Router();
+const router = require('express').Router();
 const pool = require('../config/database');
 const { auth } = require('../middleware/auth');
 const { saveNotification, notifyUser, Notify, sendFCM, getUserTokens } = require('../utils/notifications');
 const { sendWebPush } = require('./webpush');
+const S = require('../utils/orderService');
+const { round2, num, HttpError } = S;
 
-const generateOrderNumber = () => 'WSL' + Date.now().toString().slice(-8);
+const LAHZA_ENABLED = () => !!process.env.LAHZA_SECRET_KEY;
 
-// Calculate delivery fee based on zones
-async function getDeliveryFee(restaurantLat, restaurantLng, deliveryLat, deliveryLng) {
-  try {
-    if (!restaurantLat || !restaurantLng || !deliveryLat || !deliveryLng) return 5;
-    const R = 6371;
-    const dLat = (deliveryLat - restaurantLat) * Math.PI / 180;
-    const dLon = (deliveryLng - restaurantLng) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-      Math.cos(restaurantLat * Math.PI / 180) * Math.cos(deliveryLat * Math.PI / 180) *
-      Math.sin(dLon/2) * Math.sin(dLon/2);
-    const distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+const sendError = (res, e, tag) => {
+  if (e instanceof HttpError) return res.status(e.status).json({ success: false, message: e.message, ...e.extra });
+  console.error(`${tag} error:`, e.message);
+  return res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
+};
 
-    const { rows: zones } = await pool.query(
-      'SELECT * FROM delivery_zones WHERE is_active=true AND min_km <= $1 AND max_km > $1 ORDER BY min_km LIMIT 1',
-      [distKm]
-    );
-    return zones[0]?.price || 5;
-  } catch (e) { return 5; }
-}
-
-// Find nearest available driver and notify them
-// السائقون الذين رُفض/انتهت مهلتهم لكل طلب (في الذاكرة) — عشان ننتقل للتالي وندور عليهم كلهم
-const triedDrivers = new Map(); // key: orderId (نص) -> Set من معرّفات السائقين (نص)
-
-// يوقف بحث السائق نهائياً لهذا الطلب (عند القبول/الإلغاء/التسليم)
-function stopDispatch(orderId) { triedDrivers.delete(String(orderId)); }
-
-// 💸 استرجاع فوائد الطلب عند الإلغاء (محفظة + نقاط + كوبون + عكس الكاش باك) — مرة واحدة فقط
-async function refundOrderBenefits(order) {
-  try {
-    if (!order || order.benefits_refunded) return;
-    const walletUsed = parseFloat(order.wallet_used) || 0;
-    const pointsRedeemed = parseInt(order.points_redeemed) || 0;
-    const cashback = parseFloat(order.cashback_given) || 0;
-    if (walletUsed > 0) {
-      await pool.query('UPDATE users SET wallet_balance = wallet_balance + $1 WHERE id=$2', [walletUsed, order.customer_id]);
-      await pool.query(`INSERT INTO wallet_transactions (user_id, type, amount, description) VALUES ($1,'credit',$2,$3)`,
-        [order.customer_id, walletUsed, `استرجاع إلغاء طلب #${order.order_number}`]);
-    }
-    if (pointsRedeemed > 0) {
-      await pool.query('UPDATE users SET loyalty_points = loyalty_points + $1 WHERE id=$2', [pointsRedeemed, order.customer_id]);
-    }
-    if (cashback > 0) {
-      await pool.query('UPDATE users SET wallet_balance = GREATEST(0, wallet_balance - $1) WHERE id=$2', [cashback, order.customer_id]);
-    }
-    if (order.coupon_code) {
-      await pool.query('UPDATE coupons SET usage_count = GREATEST(0, usage_count - 1) WHERE code=$1', [order.coupon_code]);
-    }
-    await pool.query('UPDATE orders SET benefits_refunded=true WHERE id=$1', [order.id]);
-  } catch (e) { console.error('refundOrderBenefits error:', e.message); }
-}
-
-async function assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, addExcludeId = null) {
-  try {
-    const key = String(orderId);
-    if (!triedDrivers.has(key)) triedDrivers.set(key, new Set());
-    const tried = triedDrivers.get(key);
-    if (addExcludeId != null) tried.add(String(addExcludeId));
-
-    // الطلب ما زال يحتاج سائقاً؟ (توصيل + قيد الانتظار على سائق)
-    const { rows: ord } = await pool.query('SELECT status, order_type FROM orders WHERE id=$1', [orderId]);
-    if (!ord[0] || ord[0].status !== 'confirmed' || ord[0].order_type === 'pickup') { stopDispatch(orderId); return null; }
-
-    const safeLat = parseFloat(restaurantLat) || 31.9;
-    const safeLng = parseFloat(restaurantLng) || 35.2;
-    const params = [safeLat, safeLng];
-    let paramIdx = 3;
-
-    let q = `SELECT d.*, u.name, u.phone FROM drivers d
-             JOIN users u ON d.user_id=u.id
-             WHERE d.is_online=true AND d.is_busy=false`;
-    if (tried.size > 0) {
-      params.push([...tried]);
-      q += ` AND NOT (d.user_id::text = ANY($${paramIdx++}::text[]))`; // نص عشان يشتغل مع أي نوع معرّف
-    }
-    q += ` ORDER BY (
-      (d.current_lat - $1) * (d.current_lat - $1) +
-      (d.current_lng - $2) * (d.current_lng - $2)
-    ) ASC NULLS LAST LIMIT 1`;
-
-    const { rows: drivers } = await pool.query(q, params);
-
-    if (!drivers[0]) {
-      // ما في سائق متاح غير اللي جرّبناهم
-      if (tried.size > 0) {
-        // جرّبنا الكل ورفضوا/انتهت مهلتهم → نعيد الدورة من الأول (حتى يقبل حدا)
-        tried.clear();
-        setTimeout(() => assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, null), 12000);
-      } else {
-        // لا يوجد سائقون متصلون متاحون أصلاً → نعيد المحاولة لاحقاً (ربما يتصل سائق)
-        setTimeout(() => assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, null), 20000);
-      }
-      return null;
-    }
-
-    const driver = drivers[0];
-
-    // نسجّل السائق المعروض عليه أولاً ثم نرسل الإشعار (تجنّب سباق عند القبول)
-    await pool.query('UPDATE orders SET driver_id=$1 WHERE id=$2', [driver.user_id, orderId]);
-
-    notifyUser(io, driver.user_id, 'new_order_request', {
-      order_id: orderId,
-      restaurant_lat: restaurantLat,
-      restaurant_lng: restaurantLng
-    });
-    try {
-      const tokens = await getUserTokens(driver.user_id);
-      if (tokens.length) await sendFCM(tokens, '🛵 طلب توصيل جديد!', 'يوجد طلب جديد بانتظارك، اقبل الآن!', { type: 'new_order_request', order_id: String(orderId) }, 'com.wasaly.driver');
-    } catch (e) { console.error('FCM push to driver failed:', e.message); }
-
-    // مهلة عدم الرد → ننتقل للسائق التالي تلقائياً
-    setTimeout(async () => {
-      try {
-        const { rows } = await pool.query('SELECT status, driver_id FROM orders WHERE id=$1', [orderId]);
-        if (rows[0] && rows[0].status === 'confirmed' && String(rows[0].driver_id) === String(driver.user_id)) {
-          await pool.query('UPDATE orders SET driver_id=NULL WHERE id=$1', [orderId]);
-          assignDriverToOrder(io, orderId, restaurantLat, restaurantLng, driver.user_id);
-        }
-      } catch (e) { console.error('dispatch timeout error:', e.message); }
-    }, 45000);
-
-    return driver;
-  } catch (e) { console.error('assignDriver error:', e.message); return null; }
+async function setOrderNumber(client, id) {
+  const { rows } = await client.query(
+    `UPDATE orders SET order_number = 'WSL' || LPAD(id::text, 6, '0') WHERE id=$1 RETURNING *`, [id]);
+  return rows[0];
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  🧍📦 التوصيل الشخصي (راكب / طرد) — يعيد استخدام التوزيع + التتبّع
+//  🧍📦 التوصيل الشخصي (راكب / طرد)
 // ═══════════════════════════════════════════════════════════════
-function haversineKm(aLat, aLng, bLat, bLng) {
-  const R = 6371;
-  const dLat = (bLat - aLat) * Math.PI / 180;
-  const dLng = (bLng - aLng) * Math.PI / 180;
-  const s = Math.sin(dLat/2) ** 2 + Math.cos(aLat*Math.PI/180) * Math.cos(bLat*Math.PI/180) * Math.sin(dLng/2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
-}
 async function getPersonalConfig() {
   try {
     const { rows } = await pool.query("SELECT value FROM app_settings WHERE key='personal_delivery'");
     return rows[0] ? JSON.parse(rows[0].value) : null;
   } catch (e) { return null; }
 }
-// إعدادات الخدمة (لعرضها بالتطبيق) — التسعير يعتمد على مناطق التوصيل الجغرافية
+
 router.get('/personal/config', auth, async (req, res) => {
   const cfg = await getPersonalConfig();
   res.json({ success: true, data: cfg || { enabled: false } });
 });
 
-// تسعير فوري حسب المسافة + مناطق التوصيل (نفس أسعار الدليفري)
 router.post('/personal/quote', auth, async (req, res) => {
   try {
     const { pickup_lat, pickup_lng, dropoff_lat, dropoff_lng } = req.body;
     const cfg = await getPersonalConfig();
     if (!cfg || !cfg.enabled) return res.status(400).json({ success: false, message: 'الخدمة غير متاحة حالياً' });
-    const km = haversineKm(+pickup_lat, +pickup_lng, +dropoff_lat, +dropoff_lng);
-    if (!isFinite(km)) return res.status(400).json({ success: false, message: 'حدّد نقطة الاستلام والتسليم' });
-    const fare = await getDeliveryFee(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng);
-    res.json({ success: true, data: { distance_km: Math.round(km * 100) / 100, fare } });
-  } catch (e) { res.status(500).json({ success: false, message: 'حدث خطأ' }); }
+    if (!S.validCoord(pickup_lat, pickup_lng) || !S.validCoord(dropoff_lat, dropoff_lng)) {
+      return res.status(400).json({ success: false, message: 'حدّد نقطة الاستلام والتسليم' });
+    }
+    const km = S.haversineKm(+pickup_lat, +pickup_lng, +dropoff_lat, +dropoff_lng);
+    const fare = await S.getZoneFee(pool, km);
+    res.json({ success: true, data: { distance_km: round2(km), fare } });
+  } catch (e) { sendError(res, e, 'personal quote'); }
 });
 
-// إنشاء طلب شخصي + توزيع فوري على أقرب سائق
 router.post('/personal', auth, async (req, res) => {
   try {
     const {
-      service_type = 'parcel',
-      pickup_lat, pickup_lng, pickup_address,
+      service_type = 'parcel', pickup_lat, pickup_lng, pickup_address,
       dropoff_lat, dropoff_lng, delivery_address,
-      recipient_name, recipient_phone, parcel_desc, parcel_size, parcel_photo,
-      passengers, notes, payment_method = 'cash',
+      recipient_name, recipient_phone, parcel_desc, parcel_size, parcel_photo, passengers, notes,
     } = req.body;
-
     const cfg = await getPersonalConfig();
     if (!cfg || !cfg.enabled) return res.status(400).json({ success: false, message: 'الخدمة غير متاحة حالياً' });
-    if (!pickup_lat || !pickup_lng || !dropoff_lat || !dropoff_lng) {
+    if (!S.validCoord(pickup_lat, pickup_lng) || !S.validCoord(dropoff_lat, dropoff_lng)) {
       return res.status(400).json({ success: false, message: 'حدّد نقطة الاستلام والتسليم' });
     }
+    if (!['ride', 'parcel'].includes(service_type)) return res.status(400).json({ success: false, message: 'نوع الخدمة غير صحيح' });
+    const pax = Math.min(8, Math.max(1, parseInt(passengers) || 1));
+    const km = S.haversineKm(+pickup_lat, +pickup_lng, +dropoff_lat, +dropoff_lng);
+    const fare = await S.getZoneFee(pool, km);
 
-    const km = haversineKm(+pickup_lat, +pickup_lng, +dropoff_lat, +dropoff_lng);
-    // السعر حسب مناطق التوصيل الجغرافية (نفس أسعار الدليفري) — السائق أي وسيلة
-    const fare = await getDeliveryFee(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng);
-    const vehicle = null;
-    const orderNumber = generateOrderNumber();
+    const order = await S.withTransaction(async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO orders (order_number, customer_id, restaurant_id, delivery_address, delivery_lat, delivery_lng,
+          subtotal, delivery_fee, driver_fee, tip, discount, total, payment_method, payment_status, notes, order_type, status,
+          service_type, vehicle, pickup_lat, pickup_lng, pickup_address, recipient_name, recipient_phone,
+          parcel_desc, parcel_size, parcel_photo, passengers, distance_km, loyalty_points_earned)
+         VALUES ('', $1, NULL, $2, $3, $4, 0, $5::float8, $5::float8, 0, 0, $5::float8, 'cash', 'pending', $6, 'personal', 'confirmed',
+          $7, NULL, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 0) RETURNING id`,
+        [req.user.id, String(delivery_address || '').slice(0, 500), +dropoff_lat, +dropoff_lng, fare, String(notes || '').slice(0, 1000),
+         service_type, +pickup_lat, +pickup_lng, String(pickup_address || '').slice(0, 500),
+         String(recipient_name || '').slice(0, 100), String(recipient_phone || '').slice(0, 30), String(parcel_desc || '').slice(0, 500),
+         String(parcel_size || '').slice(0, 20), parcel_photo || '', pax, round2(km)]);
+      return setOrderNumber(client, rows[0].id);
+    });
 
-    const { rows } = await pool.query(
-      `INSERT INTO orders (order_number, customer_id, restaurant_id, delivery_address, delivery_lat, delivery_lng,
-        subtotal, delivery_fee, discount, total, payment_method, notes, order_type, status,
-        service_type, vehicle, pickup_lat, pickup_lng, pickup_address, recipient_name, recipient_phone,
-        parcel_desc, parcel_size, parcel_photo, passengers, distance_km)
-       VALUES ($1,$2,NULL,$3,$4,$5, 0,$6,0,$6,$7,$8,'personal','confirmed',
-        $9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
-      [orderNumber, req.user.id, delivery_address || '', dropoff_lat, dropoff_lng,
-       fare, payment_method, notes || '', service_type, vehicle, pickup_lat, pickup_lng, pickup_address || '',
-       recipient_name || '', recipient_phone || '', parcel_desc || '', parcel_size || '', parcel_photo || '',
-       passengers || 1, Math.round(km * 100) / 100]
-    );
-    const order = rows[0];
-
-    // توزيع فوري (نفس محرّك التوزيع) انطلاقاً من نقطة الاستلام
-    assignDriverToOrder(req.io, order.id, pickup_lat, pickup_lng).catch(() => {});
-
+    S.dispatchOrder(req.io, order.id).catch(() => {});
     res.json({ success: true, data: order });
-  } catch (e) {
-    console.error('personal order error:', e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { sendError(res, e, 'personal order'); }
 });
 
-// Place order
+// ═══════════════════════════════════════════════════════════════
+//  🧾 عرض سعر (نفس جسم POST /orders) — نفس دالة التسعير بالضبط
+// ═══════════════════════════════════════════════════════════════
+router.post('/quote', auth, async (req, res) => {
+  try {
+    const p = await S.priceOrder(pool, req.user.id, req.body, { quote: true });
+    res.json({ success: true, data: S.quoteView(p) });
+  } catch (e) { sendError(res, e, 'quote'); }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  🛒 إنشاء طلب — معاملة واحدة: قفل المستخدم + تسعير + خصم محفظة/نقاط ذرّي + كوبون + إدراج
+// ═══════════════════════════════════════════════════════════════
 router.post('/', auth, async (req, res) => {
   try {
-    const {
-      restaurant_id, address_id, items, payment_method = 'cash',
-      notes, coupon_code, delivery_address, delivery_lat, delivery_lng,
-      order_type = 'delivery', tip = 0,
-      redeem_points = 0, use_wallet = false
-    } = req.body;
-    const tipAmount = Math.max(0, parseFloat(tip) || 0);
+    const body = req.body || {};
+    let paymentMethod = ['cash', 'card'].includes(body.payment_method) ? body.payment_method : 'cash';
+    // البطاقة غير مفعّلة → التطبيق يخبر الزبون أن الطلب محفوظ للدفع عند الاستلام
+    if (paymentMethod === 'card' && !LAHZA_ENABLED()) paymentMethod = 'cash';
 
-    const { rows: restaurants } = await pool.query(
-      'SELECT * FROM restaurants WHERE id=$1 AND is_active=true', [restaurant_id]
-    );
-    if (!restaurants[0]) return res.status(400).json({ success: false, message: 'المطعم غير متاح' });
-    const restaurant = restaurants[0];
-    if (!restaurant.is_open) return res.status(400).json({ success: false, message: 'المطعم مغلق حالياً، لا يمكن الطلب الآن' });
+    const { order, priced } = await S.withTransaction(async (client) => {
+      const { rows: ur } = await client.query('SELECT id, wallet_balance, loyalty_points FROM users WHERE id=$1 FOR UPDATE', [req.user.id]);
+      const p = await S.priceOrder(client, req.user.id, body, { userRow: ur[0] || {} });
+      const useCoupon = p.coupon && !p.coupon_error;
+      const paymentStatus = p.total <= 0 ? 'paid' : 'pending';
+      const commissionPct = p.restaurant.commission_rate !== null && p.restaurant.commission_rate !== undefined ? num(p.restaurant.commission_rate) : 15;
+      const eta = new Date(Date.now() + (parseInt(p.restaurant.delivery_time_max) || 45) * 60 * 1000).toISOString();
+      const orderType = body.order_type === 'pickup' ? 'pickup' : 'delivery';
 
-    let subtotal = 0;
-    const orderItems = [];
-    for (const item of items) {
-      const { rows: menuItems } = await pool.query(
-        'SELECT * FROM menu_items WHERE id=$1 AND is_available=true', [item.id]
-      );
-      if (!menuItems[0]) return res.status(400).json({ success: false, message: `الصنف ${item.id} غير متاح` });
-      const mi = menuItems[0];
-      const basePrice = parseFloat(mi.discount_price || mi.price || 0);
-      const addonsPrice = (item.options || []).reduce((s, o) => s + parseFloat(o.price || 0), 0);
-      const itemPrice = basePrice + addonsPrice;
-      const itemTotal = itemPrice * item.quantity;
-      subtotal += itemTotal;
-      orderItems.push({ ...mi, quantity: item.quantity, options: item.options, notes: item.notes, subtotal: itemTotal, unitPrice: itemPrice });
-    }
+      const { rows } = await client.query(
+        `INSERT INTO orders (order_number, customer_id, restaurant_id, address_id, delivery_address, delivery_lat, delivery_lng,
+           payment_method, payment_status, subtotal, delivery_fee, driver_fee, discount, coupon_discount, first_order_discount,
+           points_value, free_delivery, tip, total, notes, coupon_code, estimated_delivery_time, loyalty_points_earned,
+           order_type, status, wallet_used, points_redeemed, cashback_given, commission_pct, distance_km)
+         VALUES ('', $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,'pending',$24,$25,0,$26,$27)
+         RETURNING id`,
+        [req.user.id, p.restaurant.id, orderType === 'delivery' && p.addressRow ? p.addressRow.id : null,
+         orderType === 'delivery' ? (p.delivery_address || '') : null,
+         p.delivery_lat, p.delivery_lng, paymentMethod, paymentStatus,
+         p.subtotal, p.delivery_fee, p.driver_fee, p.discount, useCoupon ? p.coupon_discount : 0, p.first_order_discount,
+         p.points_value, p.free_delivery, p.tip, p.total, String(body.notes || '').slice(0, 1000),
+         useCoupon ? p.coupon.code : null, eta, p.points_earned, orderType,
+         p.wallet_used, p.points_redeemed, commissionPct, p.distance_km]);
+      const orderId = rows[0].id;
+      const ord = await setOrderNumber(client, orderId);
 
-    if (subtotal < (restaurant.min_order || 0)) {
-      return res.status(400).json({ success: false, message: `الحد الأدنى للطلب ${restaurant.min_order}₪` });
-    }
-
-    let discount = 0;
-    if (coupon_code) {
-      const { rows: coupons } = await pool.query(
-        `SELECT * FROM coupons WHERE code=$1 AND is_active=true AND min_order <= $2
-         AND (expires_at IS NULL OR expires_at > NOW())
-         AND (usage_limit IS NULL OR usage_count < usage_limit)`,
-        [coupon_code, subtotal]
-      );
-      if (coupons[0]) {
-        const c = coupons[0];
-        if (c.type === 'percentage') discount = Math.min(subtotal * c.value / 100, c.max_discount || subtotal);
-        else if (c.type === 'fixed') discount = Math.min(c.value, subtotal);
-        await pool.query('UPDATE coupons SET usage_count = usage_count + 1 WHERE code=$1', [coupon_code]);
+      // أصناف الطلب (السعر = سعر الوحدة شامل الإضافات من قاعدة البيانات)
+      for (const l of p.lines) {
+        await client.query(
+          `INSERT INTO order_items (order_id, item_id, menu_item_id, name_ar, name_en, price, quantity, subtotal, options, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [orderId, l.menu_item.id, l.menu_item.id, l.menu_item.name_ar, l.menu_item.name_en || null,
+           l.unit_price, l.quantity, l.subtotal, JSON.stringify(l.options), l.notes]);
       }
-    }
 
-    let deliveryFee = 0;
-    if (order_type === 'delivery') {
-      deliveryFee = await getDeliveryFee(restaurant.lat, restaurant.lng, delivery_lat, delivery_lng);
-    }
-
-    // 🎁 خصم أول طلب — إذا ما إله أي طلب سابق
-    let firstOrderDiscount = 0;
-    try {
-      const { rows: prev } = await pool.query('SELECT COUNT(*)::int AS c FROM orders WHERE customer_id=$1', [req.user.id]);
-      if (prev[0] && prev[0].c === 0) {
-        firstOrderDiscount = Math.min(10, subtotal * 0.15); // 15% حتى 10₪
-        discount += firstOrderDiscount;
+      // 🏆 خصم النقاط ذرّياً
+      if (p.points_redeemed > 0) {
+        const { rows: pr } = await client.query(
+          'UPDATE users SET loyalty_points = loyalty_points - $1 WHERE id=$2 AND loyalty_points >= $1 RETURNING id', [p.points_redeemed, req.user.id]);
+        if (!pr[0]) throw new HttpError(409, 'رصيد النقاط غير كافٍ');
+        await S.optionalQuery(client, `INSERT INTO loyalty_transactions (user_id, points, type, description, order_id) VALUES ($1,$2,'redeemed',$3,$4)`,
+          [req.user.id, p.points_redeemed, `استبدال نقاط طلب #${ord.order_number}`, orderId]);
       }
-    } catch (e) {}
-
-    // 🚚 توصيل مجاني فوق 50₪
-    const FREE_DELIVERY_THRESHOLD = 50;
-    if (order_type === 'delivery' && subtotal >= FREE_DELIVERY_THRESHOLD) {
-      deliveryFee = 0;
-    }
-
-    // 🏆 استبدال نقاط الولاء (100 نقطة = 5₪)
-    let pointsRedeemed = 0, redeemValue = 0;
-    const wantRedeem = Math.max(0, parseInt(redeem_points) || 0);
-    if (wantRedeem > 0) {
-      const { rows: ur } = await pool.query('SELECT loyalty_points FROM users WHERE id=$1', [req.user.id]);
-      const available = parseInt(ur[0]?.loyalty_points || 0);
-      const usablePoints = Math.min(wantRedeem, available);
-      const maxValue = Math.max(0, subtotal + deliveryFee - discount);
-      redeemValue = Math.min(usablePoints * 0.05, maxValue);
-      pointsRedeemed = Math.round(redeemValue / 0.05);
-    }
-
-    const dueBeforeWallet = Math.max(0, subtotal + deliveryFee - discount - redeemValue) + tipAmount;
-
-    // 💳 دفع جزئي من المحفظة
-    let walletUsed = 0;
-    if (use_wallet) {
-      const { rows: uw } = await pool.query('SELECT wallet_balance FROM users WHERE id=$1', [req.user.id]);
-      const bal = parseFloat(uw[0]?.wallet_balance || 0);
-      walletUsed = Math.min(bal, dueBeforeWallet);
-    }
-
-    const total = Math.max(0, dueBeforeWallet - walletUsed);
-    // نقطة واحدة لكل ₪ (الاستبدال 100 نقطة=5₪ → استرجاع 5%). كان ×10 بالغلط = استرجاع 50%!
-    const pointsEarned = Math.max(0, Math.floor(subtotal - discount));
-    const orderNumber = generateOrderNumber();
-
-    const { rows: newOrders } = await pool.query(
-      `INSERT INTO orders (order_number, customer_id, restaurant_id, address_id, delivery_address,
-        delivery_lat, delivery_lng, payment_method, subtotal, delivery_fee, discount, total, notes,
-        coupon_code, estimated_delivery_time, loyalty_points_earned, order_type, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
-      [orderNumber, req.user.id, restaurant_id, address_id, delivery_address,
-       delivery_lat, delivery_lng, payment_method, subtotal, deliveryFee, discount, total, notes,
-       coupon_code, new Date(Date.now() + (restaurant.delivery_time_max || 45) * 60 * 1000).toISOString(),
-       pointsEarned, order_type, 'pending']
-    );
-    const order = newOrders[0];
-
-    for (const item of orderItems) {
-      await pool.query(
-        `INSERT INTO order_items (order_id, item_id, menu_item_id, name_ar, price, quantity, subtotal, options, notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [order.id, item.id, item.id, item.name_ar, item.unitPrice || item.discount_price || item.price,
-         item.quantity, item.subtotal, JSON.stringify(item.options || []), item.notes || '']
-      );
-    }
-
-    // آثار ثانوية (نقاط/محفظة/كاش باك) — ملفوفة بـ try/catch حتى لا تُفشِل الطلب أبداً
-    try {
-      // 🏆 خصم النقاط المستبدلة
-      if (pointsRedeemed > 0) {
-        await pool.query('UPDATE users SET loyalty_points = GREATEST(0, loyalty_points - $1) WHERE id=$2', [pointsRedeemed, req.user.id]);
+      // 💳 خصم المحفظة ذرّياً (لا يسمح بالسحب على المكشوف)
+      if (p.wallet_used > 0) {
+        const { rows: wr } = await client.query(
+          `UPDATE users SET wallet_balance = ROUND((wallet_balance::numeric - $1::numeric), 2)
+           WHERE id=$2 AND ROUND(COALESCE(wallet_balance,0)::numeric, 2) >= $1::numeric RETURNING id`, [p.wallet_used, req.user.id]);
+        if (!wr[0]) throw new HttpError(409, 'رصيد المحفظة غير كافٍ');
+        await client.query(`INSERT INTO wallet_transactions (user_id, type, amount, description) VALUES ($1,'debit',$2,$3)`,
+          [req.user.id, p.wallet_used, `دفع طلب #${ord.order_number}`]);
       }
-      // 💳 خصم المبلغ المستخدم من المحفظة + تسجيل الحركة
-      if (walletUsed > 0) {
-        await pool.query('UPDATE users SET wallet_balance = GREATEST(0, wallet_balance - $1) WHERE id=$2', [walletUsed, req.user.id]);
-        await pool.query(
-          `INSERT INTO wallet_transactions (user_id, type, amount, description) VALUES ($1,'debit',$2,$3)`,
-          [req.user.id, walletUsed, `دفع طلب #${orderNumber}`]
-        );
+      // 🎟️ الكوبون: عدّاد عام ذرّي + سجل استخدام للمستخدم
+      if (useCoupon) {
+        const { rows: cr } = await client.query(
+          `UPDATE coupons SET usage_count = COALESCE(usage_count,0) + 1
+           WHERE id=$1 AND (usage_limit IS NULL OR COALESCE(usage_count,0) < usage_limit) RETURNING id`, [p.coupon.id]);
+        if (!cr[0]) throw new HttpError(409, 'انتهى عدد استخدامات الكوبون');
+        await client.query('INSERT INTO coupon_usage (coupon_id, user_id, order_id) VALUES ($1,$2,$3)', [p.coupon.id, req.user.id, orderId]);
       }
-      // 💰 كاش باك 2% للمحفظة على كل طلب
-      const cashback = Math.round(subtotal * 0.02 * 100) / 100;
-      if (cashback > 0) {
-        await pool.query('UPDATE users SET wallet_balance = wallet_balance + $1 WHERE id=$2', [cashback, req.user.id]);
-        await pool.query(
-          `INSERT INTO wallet_transactions (user_id, type, amount, description) VALUES ($1,'credit',$2,$3)`,
-          [req.user.id, cashback, `كاش باك طلب #${orderNumber}`]
-        );
-      }
-      // خزّن ما استُخدم/مُنح حتى نسترجعه بدقّة عند الإلغاء
-      await pool.query('UPDATE orders SET wallet_used=$1, points_redeemed=$2, cashback_given=$3 WHERE id=$4',
-        [walletUsed || 0, pointsRedeemed || 0, cashback || 0, order.id]);
-    } catch (fxErr) {
-      console.error('post-order effects (non-fatal):', fxErr.message);
-    }
+      return { order: ord, priced: p };
+    });
 
-    // Notify restaurant owner (socket + push)
-    if (restaurant.owner_id) {
-      notifyUser(req.io, restaurant.owner_id, 'new_order', { order_id: order.id, order_number: orderNumber });
-      saveNotification(restaurant.owner_id, `طلب جديد #${orderNumber}`, 'new_order', { order_id: order.id });
-      try {
-        const tokens = await getUserTokens(restaurant.owner_id);
-        if (tokens.length) await sendFCM(tokens, '🛎️ طلب جديد!', `طلب #${orderNumber} ينتظر موافقتك`, { type: 'new_order', order_id: String(order.id) }, 'com.wasaly.restaurant');
-      } catch (e) { console.error('FCM push to restaurant failed:', e.message); }
-      // Web Push for restaurant portal (browser)
-      sendWebPush(restaurant.id, '🛎️ طلب جديد!', `طلب #${orderNumber} ينتظر موافقتك`, { order_id: order.id }).catch(() => {});
-    }
+    // 🔔 المطعم يُبلَّغ الآن — إلا طلبات البطاقة غير المدفوعة (تُطلق بعد التحقق من Lahza)
+    if (!S.isAwaitingCardPayment(order)) S.notifyRestaurantNewOrder(req.io, order).catch(() => {});
 
-    // ⭐ إشعار إضافي لو الزبون مميز عند هذا المطعم (غير قاتل)
-    try {
-      const { rows: vip } = await pool.query('SELECT 1 FROM vip_customers WHERE restaurant_id=$1 AND customer_id=$2', [String(restaurant_id), String(req.user.id)]);
-      if (vip[0] && restaurant.owner_id) {
-        const { rows: cu } = await pool.query('SELECT name FROM users WHERE id=$1', [req.user.id]);
-        const cName = cu[0]?.name || 'زبونك';
-        const msg = `⭐ زبونك المميز ${cName} طلب! جهّزله طلب مميز 🎁`;
-        saveNotification(restaurant.owner_id, msg, 'vip_order', { order_id: order.id });
-        notifyUser(req.io, restaurant.owner_id, 'vip_order', { order_id: order.id });
-        try { const t = await getUserTokens(restaurant.owner_id); if (t.length) await sendFCM(t, '⭐ زبون مميز طلب!', msg, { type: 'vip_order', order_id: String(order.id) }, 'com.wasaly.restaurant'); } catch {}
-        sendWebPush(restaurant.id, '⭐ زبون مميز طلب!', msg, { order_id: order.id }).catch(() => {});
-      }
-    } catch (e) { console.error('vip order notify:', e.message); }
-
-    res.status(201).json({ success: true, data: order });
-  } catch (e) {
-    console.error('POST /orders error:', e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+    res.status(201).json({ success: true, data: { ...order, coupon_error: priced.coupon_error || undefined } });
+  } catch (e) { sendError(res, e, 'POST /orders'); }
 });
 
 // Get user orders
@@ -410,26 +187,20 @@ router.get('/my', auth, async (req, res) => {
              FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
              WHERE o.customer_id=$1`;
     const params = [req.user.id];
-    if (status === 'active') {
-      q += ` AND o.status NOT IN ('delivered','cancelled')`;
-    } else if (status === 'past') {
-      q += ` AND o.status IN ('delivered','cancelled')`;
-    } else if (status) {
-      q += ` AND o.status=$2`; params.push(status);
-    }
-    q += ` ORDER BY o.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`;
+    if (status === 'active') q += ` AND o.status NOT IN ('delivered','cancelled')`;
+    else if (status === 'past') q += ` AND o.status IN ('delivered','cancelled')`;
+    else if (status) { q += ` AND o.status=$2`; params.push(status); }
+    q += ` ORDER BY o.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(safeLimit, safeOffset);
     const { rows } = await pool.query(q, params);
-    res.json({ success: true, data: rows });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+    res.json({ success: true, data: rows.map(r => ({ ...r, status_label: S.STATUS_LABELS[r.status] || r.status })) });
+  } catch (e) { sendError(res, e, 'GET /orders/my'); }
 });
 
 // Get order detail
 router.get('/:id', auth, async (req, res) => {
   try {
+    if (!S.isIntId(req.params.id)) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
     const { rows: orders } = await pool.query(
       `SELECT o.*, r.name_ar as restaurant_name, r.logo, r.lat as restaurant_lat, r.lng as restaurant_lng,
               r.phone as restaurant_phone, r.owner_id as restaurant_owner_id, u.name as driver_name, u.phone as driver_phone,
@@ -438,295 +209,280 @@ router.get('/:id', auth, async (req, res) => {
        FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
        LEFT JOIN users u ON o.driver_id=u.id LEFT JOIN drivers d ON d.user_id=o.driver_id
        LEFT JOIN users cu ON o.customer_id=cu.id
-       WHERE o.id=$1`,
-      [req.params.id]
-    );
-    if (!orders[0]) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
-    // 🔒 فحص الملكية — فقط صاحب الطلب، أو السائق المكلّف، أو صاحب المطعم، أو الإدارة
-    const _o = orders[0];
-    const _uid = String(req.user.id);
-    const _authorized = req.user.role === 'admin'
-      || String(_o.customer_id) === _uid
-      || (_o.driver_id && String(_o.driver_id) === _uid)
-      || (_o.restaurant_owner_id && String(_o.restaurant_owner_id) === _uid);
-    if (!_authorized) return res.status(403).json({ success: false, message: 'غير مصرح بعرض هذا الطلب' });
-    const { rows: items } = await pool.query('SELECT * FROM order_items WHERE order_id=$1', [req.params.id]);
-    res.json({ success: true, data: { ...orders[0], items } });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+       WHERE o.id=$1`, [req.params.id]);
+    const o = orders[0];
+    if (!o) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
+    const uid = String(req.user.id);
+    const isDriver = o.driver_id && String(o.driver_id) === uid;
+    const authorized = req.user.role === 'admin' || String(o.customer_id) === uid || isDriver
+      || (o.restaurant_owner_id && String(o.restaurant_owner_id) === uid);
+    if (!authorized) return res.status(403).json({ success: false, message: 'غير مصرح بعرض هذا الطلب' });
+    const { rows: items } = await pool.query('SELECT * FROM order_items WHERE order_id=$1 ORDER BY id', [req.params.id]);
+
+    const extra = {
+      tip: round2(num(o.tip)),
+      status_label: S.STATUS_LABELS[o.status] || o.status,
+      cash_to_collect: (o.payment_method !== 'card' && o.payment_status !== 'paid') ? round2(num(o.total)) : 0,
+    };
+    if (isDriver && !o.driver_assigned_at && o.driver_offer_expires_at) {
+      const exp = new Date(o.driver_offer_expires_at);
+      extra.offer_seconds = Math.max(0, Math.round((exp.getTime() - Date.now()) / 1000));
+      extra.expires_at = exp.toISOString();
+    }
+    res.json({ success: true, data: { ...o, ...extra, items } });
+  } catch (e) { sendError(res, e, 'GET /orders/:id'); }
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  حالة الطلب — آلة حالات بملكية وانتقالات صالحة فقط
+// ═══════════════════════════════════════════════════════════════
+const TRANSITIONS = {
+  pending: ['confirmed', 'cancelled'],
+  confirmed: ['preparing', 'ready', 'on_the_way', 'delivered', 'cancelled'],
+  preparing: ['ready', 'on_the_way', 'delivered', 'cancelled'],
+  ready: ['on_the_way', 'delivered', 'cancelled'],
+  on_the_way: ['delivered', 'cancelled'],
+  delivered: [],
+  cancelled: [],
+};
+function transitionError(order, to) {
+  const L = S.STATUS_LABELS;
+  return new HttpError(400, `لا يمكن تغيير حالة الطلب من "${L[order.status] || order.status}" إلى "${L[to] || to}"`);
+}
+function validTransition(order, to) {
+  if (!(TRANSITIONS[order.status] || []).includes(to)) return false;
+  const pickup = order.order_type === 'pickup';
+  if (to === 'on_the_way' && pickup) return false;
+  if (to === 'delivered' && !pickup && order.status !== 'on_the_way') return false;
+  return true;
+}
+
+async function loadOrderForUpdate(id) {
+  if (!S.isIntId(id)) return null;
+  const { rows } = await pool.query(
+    `SELECT o.*, r.owner_id AS restaurant_owner_id FROM orders o LEFT JOIN restaurants r ON r.id=o.restaurant_id WHERE o.id=$1`, [id]);
+  return rows[0] || null;
+}
+const isRestaurantRole = (role) => role === 'restaurant' || role === 'restaurant_owner';
+
+async function confirmOrder(io, order) {
+  if (S.isAwaitingCardPayment(order)) throw new HttpError(400, 'الطلب بانتظار تأكيد الدفع الإلكتروني');
+  const { rows } = await pool.query(
+    `UPDATE orders SET status='confirmed', restaurant_accepted_at=NOW(), updated_at=NOW() WHERE id=$1 AND status='pending' RETURNING *`, [order.id]);
+  const updated = rows[0];
+  if (!updated) throw transitionError(order, 'confirmed');
+  if (updated.order_type !== 'pickup') await S.dispatchOrder(io, updated.id);
+  await S.emitOrderStatus(io, updated, 'confirmed');
+  try { await Notify.orderConfirmed(io, updated.customer_id, updated.id); } catch (e) { console.error('notify confirm err:', e.message); }
+  return updated;
+}
 
 // Restaurant confirms order → find driver
 router.patch('/:id/confirm', auth, async (req, res) => {
   try {
-    const { rows: orders } = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
-    const order = orders[0];
+    const order = await loadOrderForUpdate(req.params.id);
     if (!order) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
-
-    // 🔒 فقط صاحب المطعم (أو الإدارة) يقدر يقبل الطلب
-    if (req.user.role !== 'admin') {
-      const { rows: rest } = await pool.query('SELECT owner_id FROM restaurants WHERE id=$1', [order.restaurant_id]);
-      if (!rest[0] || String(rest[0].owner_id) !== String(req.user.id)) {
-        return res.status(403).json({ success: false, message: 'غير مصرح' });
-      }
+    if (req.user.role !== 'admin' && !(order.restaurant_owner_id && String(order.restaurant_owner_id) === String(req.user.id))) {
+      return res.status(403).json({ success: false, message: 'غير مصرح' });
     }
-
-    await pool.query(
-      `UPDATE orders SET status='confirmed', restaurant_accepted_at=NOW(), updated_at=NOW() WHERE id=$1`,
-      [order.id]
-    );
-
-    if (order.order_type === 'delivery') {
-      const { rows: restaurants } = await pool.query('SELECT lat, lng FROM restaurants WHERE id=$1', [order.restaurant_id]);
-      const rest = restaurants[0];
-      await assignDriverToOrder(req.io, order.id, rest?.lat, rest?.lng);
-    }
-
-    notifyUser(req.io, order.customer_id, 'order_status', { order_id: order.id, status: 'confirmed' });
-    try { await Notify.orderConfirmed(req.io, order.customer_id, order.id); } catch (e) { console.error('notify confirm err:', e.message); }
-
+    if (order.status !== 'pending') throw transitionError(order, 'confirmed');
+    await confirmOrder(req.io, order);
     res.json({ success: true });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { sendError(res, e, 'confirm'); }
 });
 
-// Update order status
 router.patch('/:id/status', auth, async (req, res) => {
   try {
-    const { status } = req.body;
-
-    const { rows: orders } = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
-    const order = orders[0];
+    const status = String(req.body.status || '');
+    if (!Object.prototype.hasOwnProperty.call(TRANSITIONS, status) || status === 'pending') {
+      return res.status(400).json({ success: false, message: 'حالة غير صحيحة' });
+    }
+    const order = await loadOrderForUpdate(req.params.id);
     if (!order) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
 
-    // Role-based status permission check
     const role = req.user.role;
-    const isRestaurant = role === 'restaurant' || role === 'restaurant_owner';
-    const driverStatuses = ['on_the_way', 'delivered'];
-    const restaurantStatuses = ['confirmed', 'preparing', 'ready', 'cancelled'];
-    // طلبات الاستلام من المحل: لا يوجد سائق، فالمطعم ينهي الطلب بنفسه
-    if (order.order_type === 'pickup') restaurantStatuses.push('delivered');
-    if (role === 'driver' && !driverStatuses.includes(status)) {
-      return res.status(403).json({ success: false, message: 'غير مصرح لك بتغيير الحالة إلى هذه القيمة' });
-    }
-    if (isRestaurant && !restaurantStatuses.includes(status)) {
-      return res.status(403).json({ success: false, message: 'غير مصرح لك بتغيير الحالة إلى هذه القيمة' });
-    }
-    if (role !== 'admin' && role !== 'driver' && !isRestaurant) {
+    const uid = String(req.user.id);
+    let by = 'admin';
+    if (role === 'driver') {
+      by = 'driver';
+      if (!order.driver_id || String(order.driver_id) !== uid || !order.driver_assigned_at) {
+        return res.status(403).json({ success: false, message: 'هذا الطلب ليس مسنداً إليك' });
+      }
+      if (!['on_the_way', 'delivered'].includes(status)) {
+        return res.status(403).json({ success: false, message: 'غير مصرح لك بتغيير الحالة إلى هذه القيمة' });
+      }
+    } else if (isRestaurantRole(role)) {
+      by = 'restaurant';
+      if (!order.restaurant_owner_id || String(order.restaurant_owner_id) !== uid) {
+        return res.status(403).json({ success: false, message: 'غير مصرح — هذا الطلب ليس لمطعمك' });
+      }
+      const allowed = ['confirmed', 'preparing', 'ready', 'cancelled'];
+      if (order.order_type === 'pickup') allowed.push('delivered');
+      if (!allowed.includes(status)) return res.status(403).json({ success: false, message: 'غير مصرح لك بتغيير الحالة إلى هذه القيمة' });
+      if (status === 'cancelled' && order.status === 'on_the_way') throw transitionError(order, status);
+    } else if (role !== 'admin') {
       return res.status(403).json({ success: false, message: 'غير مصرح' });
     }
 
-    const timeFields = {
-      confirmed: 'restaurant_accepted_at',
-      picked_up: 'picked_up_at',
-      on_the_way: 'picked_up_at',
-      delivered: 'delivered_at',
-      cancelled: 'cancelled_at'
-    };
+    if (status === 'delivered' && order.status === 'delivered') return res.json({ success: true, already: true });
+    if (!validTransition(order, status)) throw transitionError(order, status);
 
-    let setClause = `status=$1, updated_at=NOW()`;
-    const params = [status, order.id];
-    if (timeFields[status]) {
-      setClause += `, ${timeFields[status]}=NOW()`;
+    if (status === 'confirmed') {
+      await confirmOrder(req.io, order);
+      return res.json({ success: true });
     }
-    // 🛡️ حماية من الدفع المزدوج: نطبّق آثار "تم التوصيل" مرة واحدة فقط (لو الطلب لسا مش مُسلّم)
-    const alreadyDelivered = order.status === 'delivered';
-    if (status === 'delivered' && !alreadyDelivered) {
-      setClause += `, actual_delivery_time=NOW(), payment_status='paid'`;
-      if (order.driver_id) {
-        await pool.query('UPDATE drivers SET is_busy=false WHERE user_id=$1', [order.driver_id]);
-        await pool.query('UPDATE drivers SET wallet_balance=wallet_balance+$1 WHERE user_id=$2', [order.delivery_fee || 0, order.driver_id]);
-      }
-    } else if (status === 'delivered' && alreadyDelivered) {
-      // الطلب مُسلّم مسبقاً — لا نكرّر الدفع ولا نغيّر شيئاً
-      return res.json({ success: true, already: true });
+    if (status === 'delivered') {
+      const r = await S.markDelivered(req.io, order.id, [order.status]);
+      if (!r.order) return res.status(409).json({ success: false, message: 'تغيّرت حالة الطلب، حدّث الصفحة' });
+      return res.json({ success: true });
+    }
+    if (status === 'cancelled') {
+      const c = await S.cancelOrder(req.io, order, by === 'restaurant' ? 'restaurant' : 'admin', req.body.reason, [order.status]);
+      if (!c) return res.status(409).json({ success: false, message: 'تغيّرت حالة الطلب، حدّث الصفحة' });
+      return res.json({ success: true });
     }
 
-    // إلغاء من المطعم/الأدمن → حرّر السائق واسترجع فوائد الزبون (مرة واحدة)
-    if (status === 'cancelled' && order.status !== 'cancelled') {
-      stopDispatch(order.id);
-      if (order.driver_id) await pool.query('UPDATE drivers SET is_busy=false WHERE user_id=$1', [order.driver_id]);
-      await refundOrderBenefits(order);
-    }
+    const stamp = status === 'on_the_way' ? ', picked_up_at=NOW()' : '';
+    const { rows } = await pool.query(
+      `UPDATE orders SET status=$1, updated_at=NOW()${stamp} WHERE id=$2 AND status=$3 RETURNING *`, [status, order.id, order.status]);
+    const updated = rows[0];
+    if (!updated) return res.status(409).json({ success: false, message: 'تغيّرت حالة الطلب، حدّث الصفحة' });
 
-    await pool.query(`UPDATE orders SET ${setClause} WHERE id=$2`, params);
-
-    notifyUser(req.io, order.customer_id, 'order_status', { order_id: order.id, status });
-    const nctx = { personal: order.order_type === 'personal', service: order.service_type };
+    await S.emitOrderStatus(req.io, updated, status);
+    const nctx = { personal: updated.order_type === 'personal', service: updated.service_type };
     try {
-      if (status === 'on_the_way') await Notify.orderOnTheWay(req.io, order.customer_id, order.id, nctx);
-      else if (status === 'delivered') await Notify.orderDelivered(req.io, order.customer_id, order.id, nctx);
-      else if (status === 'cancelled') await Notify.orderCancelled(req.io, order.customer_id, order.id, nctx);
-      else {
-        const msgs = { preparing: 'جاري تحضير طلبك 🍳' };
-        if (msgs[status]) saveNotification(order.customer_id, msgs[status], 'order_status', { order_id: order.id });
+      if (status === 'on_the_way') await Notify.orderOnTheWay(req.io, updated.customer_id, updated.id, nctx);
+      else if (status === 'preparing') saveNotification(updated.customer_id, 'جاري تحضير طلبك 🍳', 'order_status', { order_id: updated.id });
+      else if (status === 'ready') {
+        saveNotification(updated.customer_id, updated.order_type === 'pickup' ? 'طلبك جاهز للاستلام 🛍️' : 'طلبك جاهز وبانتظار السائق ✅', 'order_status', { order_id: updated.id });
+        if (updated.driver_id && updated.driver_assigned_at) {
+          S.pushTo(updated.driver_id, '✅ الطلب جاهز', `الطلب #${updated.order_number} جاهز للاستلام من المطعم`, { type: 'order_ready', order_id: String(updated.id) }, 'com.wasaly.driver');
+        }
       }
     } catch (e) { console.error('notify status err:', e.message); }
-
     res.json({ success: true });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { sendError(res, e, 'status'); }
 });
 
 // Driver accepts order
 router.post('/:id/accept', auth, async (req, res) => {
   try {
-    // Allow accepting if status is 'confirmed' OR already 'preparing' by this driver (idempotent retry)
-    const { rows: orders } = await pool.query(
-      "SELECT * FROM orders WHERE id=$1 AND driver_id=$2 AND status IN ('confirmed','preparing')",
-      [req.params.id, req.user.id]
-    );
-    if (!orders[0]) return res.status(400).json({ success: false, message: 'الطلب غير متاح' });
-
-    const order = orders[0];
-
-    // Only update if still 'confirmed' (avoid double-update)
-    if (order.status === 'confirmed') {
-      await pool.query(
-        `UPDATE orders SET status='preparing', driver_assigned_at=NOW(), updated_at=NOW() WHERE id=$1`,
-        [req.params.id]
-      );
-      await pool.query('UPDATE drivers SET is_busy=true WHERE user_id=$1', [req.user.id]);
-      stopDispatch(order.id); // وقف البحث عن سائق — صار الطلب لهذا السائق
-
-      // Notifications — don't let these fail the whole request
-      try {
-        notifyUser(req.io, order.customer_id, 'driver_assigned', { order_id: order.id, driver_id: req.user.id });
-        const { rows: driverInfo } = await pool.query(
-          'SELECT u.name, d.vehicle_type FROM users u JOIN drivers d ON d.user_id=u.id WHERE u.id=$1',
-          [req.user.id]
-        );
-        await Notify.driverAssigned(req.io, order.customer_id, driverInfo[0]?.name || 'السائق', order.id, { personal: order.order_type === 'personal', service: order.service_type });
-      } catch (notifErr) {
-        console.error('accept notification error (non-fatal):', notifErr.message);
-      }
+    if (!S.isIntId(req.params.id)) return res.status(400).json({ success: false, message: 'الطلب غير متاح' });
+    const { rows } = await pool.query(
+      `UPDATE orders SET driver_assigned_at=NOW(), updated_at=NOW(), driver_offer_expires_at=NULL,
+              status = CASE WHEN status='confirmed' THEN 'preparing' ELSE status END
+       WHERE id=$1 AND driver_id=$2 AND driver_assigned_at IS NULL AND status IN ('confirmed','preparing','ready')
+       RETURNING *`, [req.params.id, req.user.id]);
+    const order = rows[0];
+    if (!order) {
+      // إعادة محاولة من نفس السائق بعد قبول ناجح → نجاح (idempotent)
+      const { rows: mine } = await pool.query(
+        `SELECT id FROM orders WHERE id=$1 AND driver_id=$2 AND driver_assigned_at IS NOT NULL AND status IN ('confirmed','preparing','ready','on_the_way')`,
+        [req.params.id, req.user.id]);
+      if (mine[0]) return res.json({ success: true, order_id: mine[0].id, already: true });
+      return res.status(400).json({ success: false, message: 'الطلب غير متاح' });
     }
+    S.stopDispatch(order.id);
+    await pool.query('UPDATE drivers SET is_busy=true WHERE user_id=$1', [req.user.id]);
+
+    try {
+      notifyUser(req.io, order.customer_id, 'driver_assigned', { order_id: order.id, driver_id: req.user.id });
+      await S.emitOrderStatus(req.io, order, order.status);
+      const { rows: di } = await pool.query('SELECT u.name FROM users u WHERE u.id=$1', [req.user.id]);
+      await Notify.driverAssigned(req.io, order.customer_id, di[0]?.name || 'السائق', order.id, { personal: order.order_type === 'personal', service: order.service_type });
+    } catch (notifErr) { console.error('accept notification error (non-fatal):', notifErr.message); }
 
     res.json({ success: true, order_id: order.id });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { sendError(res, e, 'accept'); }
 });
 
-// Driver rejects order
+// Driver rejects order — فقط أثناء العرض وقبل القبول
 router.post('/:id/reject', auth, async (req, res) => {
   try {
-    const { rows: orders } = await pool.query(
-      "SELECT * FROM orders WHERE id=$1 AND driver_id=$2", [req.params.id, req.user.id]
-    );
-    if (!orders[0]) return res.status(400).json({ success: false, message: 'الطلب غير موجود' });
-
-    const order = orders[0];
-    await pool.query('UPDATE orders SET driver_id=NULL WHERE id=$1', [order.id]);
-
-    const { rows: restaurants } = await pool.query('SELECT lat, lng FROM restaurants WHERE id=$1', [order.restaurant_id]);
-    // ننتقل فوراً للسائق التالي (مع استبعاد اللي رفض)
-    assignDriverToOrder(req.io, order.id, restaurants[0]?.lat, restaurants[0]?.lng, req.user.id);
-
+    if (!S.isIntId(req.params.id)) return res.status(400).json({ success: false, message: 'الطلب غير موجود' });
+    const { rows } = await pool.query(
+      `UPDATE orders SET driver_id=NULL, driver_offer_expires_at=NULL
+       WHERE id=$1 AND driver_id=$2 AND driver_assigned_at IS NULL RETURNING id`, [req.params.id, req.user.id]);
+    if (!rows[0]) return res.status(400).json({ success: false, message: 'لا يمكن رفض هذا الطلب' });
+    S.dispatchOrder(req.io, rows[0].id, req.user.id).catch(() => {});
     res.json({ success: true });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { sendError(res, e, 'reject'); }
 });
 
-// Cancel order
+// Cancel order (customer)
 router.patch('/:id/cancel', auth, async (req, res) => {
   try {
-    const { reason } = req.body;
+    if (!S.isIntId(req.params.id)) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
     const { rows } = await pool.query('SELECT * FROM orders WHERE id=$1 AND customer_id=$2', [req.params.id, req.user.id]);
     const order = rows[0];
     if (!order) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
     if (!['pending', 'confirmed'].includes(order.status)) {
       return res.status(400).json({ success: false, message: 'لا يمكن إلغاء الطلب في هذه المرحلة' });
     }
-    await pool.query(
-      `UPDATE orders SET status='cancelled', cancel_reason=$1, cancelled_at=NOW() WHERE id=$2`,
-      [reason || '', order.id]
-    );
-    stopDispatch(order.id); // وقف البحث عن سائق — الطلب أُلغي
-    if (order.driver_id) {
-      await pool.query('UPDATE drivers SET is_busy=false WHERE user_id=$1', [order.driver_id]);
-    }
-    await refundOrderBenefits(order); // استرجاع المحفظة/النقاط/الكوبون للزبون
+    const c = await S.cancelOrder(req.io, order, 'customer', req.body.reason, ['pending', 'confirmed']);
+    if (!c) return res.status(400).json({ success: false, message: 'لا يمكن إلغاء الطلب في هذه المرحلة' });
     res.json({ success: true });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { sendError(res, e, 'cancel'); }
 });
 
 // Rate order
 router.post('/:id/rate', auth, async (req, res) => {
   try {
-    const { restaurant_rating, driver_rating, comment, images } = req.body;
+    const { comment, images } = req.body;
+    const clamp = (v) => { const n = parseInt(v); return Number.isFinite(n) ? Math.min(5, Math.max(1, n)) : null; };
+    const restaurantRating = clamp(req.body.restaurant_rating);
+    const driverRating = clamp(req.body.driver_rating);
+    const safeComment = comment ? String(comment).slice(0, 1000) : null;
+    if (!S.isIntId(req.params.id)) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
     const { rows: orders } = await pool.query(
-      "SELECT * FROM orders WHERE id=$1 AND customer_id=$2 AND status='delivered'",
-      [req.params.id, req.user.id]
-    );
+      "SELECT * FROM orders WHERE id=$1 AND customer_id=$2 AND status='delivered'", [req.params.id, req.user.id]);
     if (!orders[0]) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
     const order = orders[0];
 
-    await pool.query(
+    const { rows: ins } = await pool.query(
       `INSERT INTO reviews (order_id, customer_id, restaurant_id, driver_id, restaurant_rating, driver_rating, comment, images)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (order_id) DO NOTHING`,
-      [order.id, req.user.id, order.restaurant_id, order.driver_id, restaurant_rating, driver_rating, comment, JSON.stringify(images || [])]
-    );
-    await pool.query(
-      'UPDATE orders SET rating_restaurant=$1, rating_driver=$2, review_text=$3 WHERE id=$4',
-      [restaurant_rating, driver_rating, comment, order.id]
-    );
-    await pool.query(
-      `UPDATE restaurants SET
-        rating = (SELECT AVG(restaurant_rating) FROM reviews WHERE restaurant_id=$1 AND restaurant_rating IS NOT NULL),
-        total_reviews = (SELECT COUNT(*) FROM reviews WHERE restaurant_id=$1) WHERE id=$1`,
-      [order.restaurant_id]
-    );
-    // تحديث معدّل تقييم السائق (كان ناقص)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (order_id) DO NOTHING RETURNING id`,
+      [order.id, req.user.id, order.restaurant_id, order.driver_id, order.restaurant_id ? restaurantRating : null,
+       order.driver_id ? driverRating : null, safeComment, JSON.stringify(Array.isArray(images) ? images.slice(0, 5) : [])]);
+    if (!ins[0]) return res.json({ success: true, already: true }); // تقييم واحد فقط — لا إشعارات مكرّرة
+
+    await pool.query('UPDATE orders SET rating_restaurant=$1, rating_driver=$2, review_text=$3 WHERE id=$4',
+      [restaurantRating, driverRating, safeComment, order.id]);
+    if (order.restaurant_id) {
+      await pool.query(
+        `UPDATE restaurants SET
+          rating = COALESCE((SELECT ROUND(AVG(restaurant_rating)::numeric, 2) FROM reviews WHERE restaurant_id=$1 AND restaurant_rating BETWEEN 1 AND 5), 0),
+          total_reviews = (SELECT COUNT(*) FROM reviews WHERE restaurant_id=$1 AND restaurant_rating IS NOT NULL) WHERE id=$1`,
+        [order.restaurant_id]);
+    }
     if (order.driver_id) {
       await pool.query(
-        `UPDATE drivers SET
-          rating = COALESCE((SELECT AVG(driver_rating) FROM reviews WHERE driver_id=$1 AND driver_rating IS NOT NULL), 0)
-         WHERE user_id=$1`,
-        [order.driver_id]
-      );
+        `UPDATE drivers SET rating = COALESCE((SELECT ROUND(AVG(driver_rating)::numeric, 2) FROM reviews WHERE driver_id=$1 AND driver_rating BETWEEN 1 AND 5), 0)
+         WHERE user_id=$1`, [order.driver_id]);
     }
 
-    // 🔔 إشعارات التقييم للمطعم والسائق (غير قاتلة)
     const stars = (n) => '⭐'.repeat(Math.max(0, Math.min(5, parseInt(n) || 0)));
     try {
-      const { rows: rst } = await pool.query('SELECT owner_id FROM restaurants WHERE id=$1', [order.restaurant_id]);
-      const ownerId = rst[0]?.owner_id;
-      if (ownerId && restaurant_rating) {
-        const msg = `قيّمك زبون: ${stars(restaurant_rating)} (${restaurant_rating}/5)${comment ? ' — ' + comment : ''}`;
-        saveNotification(ownerId, msg, 'review', { order_id: order.id, rating: restaurant_rating });
-        notifyUser(req.io, ownerId, 'new_review', { order_id: order.id, rating: restaurant_rating, comment });
-        try { const t = await getUserTokens(ownerId); if (t.length) await sendFCM(t, '⭐ تقييم جديد', msg, { type: 'review' }, 'com.wasaly.restaurant'); } catch {}
+      const ownerId = await S.getOwnerId(order.restaurant_id);
+      if (ownerId && restaurantRating) {
+        const msg = `قيّمك زبون: ${stars(restaurantRating)} (${restaurantRating}/5)${safeComment ? ' — ' + safeComment : ''}`;
+        saveNotification(ownerId, msg, 'review', { order_id: order.id, rating: restaurantRating });
+        notifyUser(req.io, ownerId, 'new_review', { order_id: order.id, rating: restaurantRating, comment: safeComment });
+        try { const t = await getUserTokens(ownerId); if (t.length) await sendFCM(t, '⭐ تقييم جديد', msg, { type: 'review' }, 'com.wasaly.restaurant'); } catch { /* ignore */ }
         sendWebPush(order.restaurant_id, '⭐ تقييم جديد', msg, { order_id: order.id }).catch(() => {});
       }
     } catch (e) { console.error('review notify (restaurant):', e.message); }
     try {
-      if (order.driver_id && driver_rating) {
-        const msg = `قيّمك زبون: ${stars(driver_rating)} (${driver_rating}/5)${comment ? ' — ' + comment : ''}`;
-        saveNotification(order.driver_id, msg, 'review', { order_id: order.id, rating: driver_rating });
-        notifyUser(req.io, order.driver_id, 'new_review', { order_id: order.id, rating: driver_rating, comment });
-        try { const t = await getUserTokens(order.driver_id); if (t.length) await sendFCM(t, '⭐ تقييم جديد', msg, { type: 'review' }, 'com.wasaly.driver'); } catch {}
+      if (order.driver_id && driverRating) {
+        const msg = `قيّمك زبون: ${stars(driverRating)} (${driverRating}/5)${safeComment ? ' — ' + safeComment : ''}`;
+        saveNotification(order.driver_id, msg, 'review', { order_id: order.id, rating: driverRating });
+        notifyUser(req.io, order.driver_id, 'new_review', { order_id: order.id, rating: driverRating, comment: safeComment });
+        try { const t = await getUserTokens(order.driver_id); if (t.length) await sendFCM(t, '⭐ تقييم جديد', msg, { type: 'review' }, 'com.wasaly.driver'); } catch { /* ignore */ }
       }
     } catch (e) { console.error('review notify (driver):', e.message); }
 
     res.json({ success: true });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { sendError(res, e, 'rate'); }
 });
 
 module.exports = router;
-module.exports.assignDriverToOrder = assignDriverToOrder;

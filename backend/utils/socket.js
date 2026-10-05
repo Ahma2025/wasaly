@@ -1,69 +1,92 @@
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
 
+const ACTIVE = ['confirmed', 'preparing', 'ready', 'on_the_way'];
+const validCoord = (lat, lng) => {
+  const a = parseFloat(lat), b = parseFloat(lng);
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a) <= 90 && Math.abs(b) <= 180;
+};
+
 module.exports = (io) => {
-  io.use((socket, next) => {
-    const token = socket.handshake.auth.token;
+  // 🔒 المصادقة: توكن صالح + حساب نشط وغير محظور (كان يكفي التوكن فقط)
+  io.use(async (socket, next) => {
+    const token = socket.handshake.auth && socket.handshake.auth.token;
     if (!token) return next(new Error('No token'));
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      socket.userId = decoded.id;
-      socket.userRole = decoded.role;
+      const { rows } = await pool.query('SELECT id, role FROM users WHERE id=$1 AND is_active=true AND COALESCE(is_blocked,false)=false', [decoded.id]);
+      if (!rows[0]) return next(new Error('User not found'));
+      socket.userId = rows[0].id;
+      socket.userRole = rows[0].role;
       next();
     } catch {
       next(new Error('Invalid token'));
     }
   });
 
-  // كاش بالذاكرة: orderId → customerId (يوفّر SELECT على كل نبضة موقع)
-  const _orderCustomer = new Map();
-  // آخر وقت حفظنا فيه موقع السائق بقاعدة البيانات (تقليل الكتابة)
+  // كاش قصير: orderId → { customer_id, owner_id, driver_id, assigned, status } — يُحدَّث كل 30 ثانية
+  const _orderCache = new Map();
+  const CACHE_TTL = 30000;
+  async function getOrderInfo(orderId) {
+    const key = String(orderId);
+    const hit = _orderCache.get(key);
+    if (hit && Date.now() - hit.at < CACHE_TTL) return hit.info;
+    const { rows } = await pool.query(
+      `SELECT o.customer_id, o.driver_id, o.driver_assigned_at, o.status, r.owner_id
+       FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id WHERE o.id=$1`, [orderId]);
+    const info = rows[0] ? {
+      customer_id: rows[0].customer_id, owner_id: rows[0].owner_id, driver_id: rows[0].driver_id,
+      assigned: !!rows[0].driver_assigned_at, status: rows[0].status,
+    } : null;
+    if (_orderCache.size > 10000) _orderCache.clear();
+    _orderCache.set(key, { at: Date.now(), info });
+    return info;
+  }
+
   const _lastPersist = new Map();
-  const PERSIST_EVERY = 15000; // نكتب الموقع بالـ DB كل 15 ثانية فقط، والبثّ اللحظي للزبون كل نبضة
+  const PERSIST_EVERY = 15000;
 
   io.on('connection', (socket) => {
-    console.log(`Socket connected: user ${socket.userId} (${socket.userRole})`);
     socket.join(`user:${socket.userId}`);
 
-    // Driver sends live location with orderId
-    socket.on('driver:location', async ({ lat, lng, orderId }) => {
+    // موقع السائق الحي — فقط من السائق الذي *قبِل* هذا الطلب، وفقط لطلب نشط
+    socket.on('driver:location', async (payload) => {
       try {
-        // 1) البثّ اللحظي للزبون فورًا (بدون انتظار قاعدة البيانات)
-        if (orderId) {
-          let customerId = _orderCustomer.get(String(orderId));
-          if (customerId === undefined) {
-            const { rows } = await pool.query('SELECT customer_id FROM orders WHERE id=$1', [orderId]);
-            customerId = rows[0] ? rows[0].customer_id : null;
-            if (_orderCustomer.size > 10000) _orderCustomer.clear(); // حماية الذاكرة
-            _orderCustomer.set(String(orderId), customerId); // كاش
+        if (socket.userRole !== 'driver' || !payload) return;
+        const { lat, lng } = payload;
+        const orderId = payload.orderId ?? payload.order_id;
+        if (!validCoord(lat, lng)) return;
+        if (orderId && /^\d+$/.test(String(orderId))) {
+          const info = await getOrderInfo(orderId);
+          if (info && info.assigned && String(info.driver_id) === String(socket.userId) && ACTIVE.includes(info.status)) {
+            const out = { lat: +lat, lng: +lng, orderId: Number(orderId), order_id: Number(orderId) };
+            if (info.customer_id) io.to(`user:${info.customer_id}`).emit('driver:location', out);
+            if (info.owner_id) io.to(`user:${info.owner_id}`).emit('driver:location', out);
+          } else {
+            // ربما قُبل الطلب للتو — نُبطل الكاش (إن مضى عليه > 3 ثوانٍ) حتى تُعاد قراءته بالنبضة التالية
+            const hit = _orderCache.get(String(orderId));
+            if (hit && Date.now() - hit.at > 3000) _orderCache.delete(String(orderId));
           }
-          if (customerId) io.to(`user:${customerId}`).emit('driver:location', { lat, lng, orderId });
         }
-        // 2) حفظ الموقع بقاعدة البيانات كل 15 ثانية فقط (بدل كل نبضة)
         const now = Date.now();
         if (now - (_lastPersist.get(socket.userId) || 0) >= PERSIST_EVERY) {
           _lastPersist.set(socket.userId, now);
-          pool.query('UPDATE drivers SET current_lat=$1, current_lng=$2 WHERE user_id=$3',
-            [lat, lng, socket.userId]).catch(() => {});
+          if (_lastPersist.size > 20000) _lastPersist.clear();
+          pool.query('UPDATE drivers SET current_lat=$1, current_lng=$2 WHERE user_id=$3', [+lat, +lng, socket.userId]).catch(() => {});
         }
       } catch (e) {
         console.error('driver:location error:', e.message);
       }
     });
 
-    // Driver goes online/offline
-    socket.on('driver:status', async ({ isOnline }) => {
+    socket.on('driver:status', async (payload) => {
       try {
-        await pool.query(
-          'UPDATE drivers SET is_online=$1 WHERE user_id=$2',
-          [isOnline ? 1 : 0, socket.userId]
-        );
-      } catch {}
+        if (socket.userRole !== 'driver') return;
+        await pool.query('UPDATE drivers SET is_online=$1 WHERE user_id=$2', [!!(payload && payload.isOnline), socket.userId]);
+      } catch { /* ignore */ }
     });
 
-    socket.on('disconnect', () => {
-      console.log(`Socket disconnected: user ${socket.userId}`);
-    });
+    // ملاحظة: لا نجعل السائق offline عند انقطاع السوكِت — التطبيق بالخلفية يفقد السوكِت ويعتمد على FCM لاستقبال العروض
   });
 
   return io;

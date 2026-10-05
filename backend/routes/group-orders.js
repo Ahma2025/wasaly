@@ -50,6 +50,8 @@ router.get('/:code', auth, async (req, res) => {
     const { rows: g } = await pool.query('SELECT * FROM group_orders WHERE code=$1', [code]);
     if (!g[0]) return res.status(404).json({ success: false, message: 'المجموعة غير موجودة' });
     const group = g[0];
+    // من فتح المجموعة بالكود يصبح عضواً (يستطيع الإضافة لاحقاً بالمعرّف الرقمي)
+    pool.query('INSERT INTO group_order_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [group.id, String(req.user.id)]).catch(() => {});
     const { rows: items } = await pool.query(
       'SELECT * FROM group_order_items WHERE group_id=$1 ORDER BY created_at', [group.id]
     );
@@ -83,16 +85,34 @@ router.get('/:code', auth, async (req, res) => {
 // إضافة صنف للمجموعة
 router.post('/:id/items', auth, async (req, res) => {
   try {
-    const { menu_item_id, name, price, image, quantity = 1, options, notes } = req.body;
-    const { rows: g } = await pool.query('SELECT status FROM group_orders WHERE id=$1', [req.params.id]);
+    const { menu_item_id, name, price, image, quantity = 1, options, notes, code } = req.body;
+    if (!/^\d+$/.test(String(req.params.id))) return res.status(404).json({ success: false, message: 'المجموعة غير موجودة' });
+    const { rows: g } = await pool.query('SELECT id, status, code, host_id, restaurant_id FROM group_orders WHERE id=$1', [req.params.id]);
     if (!g[0]) return res.status(404).json({ success: false, message: 'المجموعة غير موجودة' });
+    // 🔒 الإضافة فقط لمن يعرف الكود أو هو مضيف/مشارك سابق (المعرّفات الرقمية متسلسلة وسهلة التخمين)
+    const knowsCode = code && String(code).toUpperCase() === String(g[0].code).toUpperCase();
+    let member = String(g[0].host_id) === String(req.user.id);
+    if (!member && !knowsCode) {
+      const { rows: p } = await pool.query('SELECT 1 FROM group_order_members WHERE group_id=$1 AND user_id=$2 UNION ALL SELECT 1 FROM group_order_items WHERE group_id=$1 AND user_id=$2 LIMIT 1', [g[0].id, String(req.user.id)]);
+      member = p.length > 0;
+    }
+    if (!member && !knowsCode) return res.status(403).json({ success: false, message: 'أدخل كود المجموعة للانضمام' });
     if (g[0].status !== 'open') return res.status(400).json({ success: false, message: 'المجموعة مقفلة، لا يمكن الإضافة' });
+    const qty = parseInt(quantity);
+    if (!Number.isInteger(qty) || qty < 1 || qty > 99) return res.status(400).json({ success: false, message: 'الكمية غير صحيحة' });
+    // السعر من قاعدة البيانات (السعر المرسَل للعرض فقط؛ الطلب الفعلي يُسعَّر بالسيرفر عند POST /orders)
+    let unitPrice = Math.max(0, parseFloat(price) || 0);
+    if (menu_item_id && /^\d+$/.test(String(menu_item_id))) {
+      const { rows: mi } = await pool.query('SELECT price, discount_price, restaurant_id FROM menu_items WHERE id=$1', [menu_item_id]);
+      if (!mi[0] || String(mi[0].restaurant_id) !== String(g[0].restaurant_id)) return res.status(400).json({ success: false, message: 'الصنف لا يتبع مطعم المجموعة' });
+      unitPrice = parseFloat(mi[0].discount_price) > 0 ? parseFloat(mi[0].discount_price) : (parseFloat(mi[0].price) || 0);
+    }
     const userName = req.user.name || 'مشارك';
     const { rows } = await pool.query(
       `INSERT INTO group_order_items (group_id, user_id, user_name, menu_item_id, name, price, image, quantity, options, notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [req.params.id, String(req.user.id), userName, String(menu_item_id || ''), name || '',
-       parseFloat(price) || 0, image || '', parseInt(quantity) || 1, JSON.stringify(options || []), notes || '']
+       unitPrice, image || '', qty, JSON.stringify(Array.isArray(options) ? options.slice(0, 40) : []), String(notes || '').slice(0, 500)]
     );
     await notifyGroup(req.io, req.params.id);
     res.status(201).json({ success: true, data: rows[0] });
@@ -119,11 +139,17 @@ router.delete('/:id/items/:itemId', auth, async (req, res) => {
 router.post('/:id/close', auth, async (req, res) => {
   try {
     const { status = 'ordered', order_id } = req.body;
-    const { rows: g } = await pool.query('SELECT host_id FROM group_orders WHERE id=$1', [req.params.id]);
+    if (!['ordered', 'cancelled'].includes(status)) return res.status(400).json({ success: false, message: 'حالة غير صحيحة' });
+    const { rows: g } = await pool.query('SELECT host_id, status FROM group_orders WHERE id=$1', [req.params.id]);
     if (!g[0]) return res.status(404).json({ success: false });
     if (String(g[0].host_id) !== String(req.user.id)) return res.status(403).json({ success: false, message: 'المضيف فقط يقدر يقفل المجموعة' });
-    await pool.query('UPDATE group_orders SET status=$1, order_id=$2 WHERE id=$3',
-      [status, order_id ? String(order_id) : null, req.params.id]);
+    if (g[0].status !== 'open') return res.status(400).json({ success: false, message: 'المجموعة مقفلة مسبقاً' });
+    let linkedOrder = null;
+    if (order_id && /^\d+$/.test(String(order_id))) {
+      const { rows: o } = await pool.query('SELECT id FROM orders WHERE id=$1 AND customer_id=$2', [order_id, req.user.id]);
+      linkedOrder = o[0] ? String(o[0].id) : null;
+    }
+    await pool.query("UPDATE group_orders SET status=$1, order_id=$2 WHERE id=$3 AND status='open'", [status, linkedOrder, req.params.id]);
     await notifyGroup(req.io, req.params.id, { status });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
