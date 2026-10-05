@@ -1,44 +1,60 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, RefreshControl, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { PopIn } from '../components/Anim';
 import EmptyState from '../components/EmptyState';
+import { GridSkeleton } from '../components/Skeleton';
 import { useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { useTheme } from '../context/ThemeContext';
+import { useHeaderTop } from '../components/GradientHeader';
+import { useTabBarInset } from '../components/FloatingTabBar';
 
 const { width } = Dimensions.get('window');
-const CARD_W = (width - 48) / 2;
+const CARD_W = (width - 46) / 2;
 
 const TYPES = [
-  { id: 'supermarket', label: 'سوبرماركت', icon: 'cart', color: '#2E7D32', bg: '#E8F5E9' },
-  { id: 'pharmacy',    label: 'صيدلية',    icon: 'medical', color: '#1565C0', bg: '#E3F2FD' },
-  { id: 'bakery',      label: 'مخبز',      icon: 'restaurant', color: '#F57F17', bg: '#FFF8E1' },
-  { id: 'grocery',     label: 'بقالة',     icon: 'storefront', color: '#6A1B9A', bg: '#F3E5F5' },
+  { id: 'all',         label: 'الكل',      icon: 'apps',       color: '#FF6B00' },
+  { id: 'supermarket', label: 'سوبرماركت', icon: 'cart',       color: '#2E9E44' },
+  { id: 'pharmacy',    label: 'صيدلية',    icon: 'medical',    color: '#2F7FE0' },
+  { id: 'bakery',      label: 'مخبز',      icon: 'restaurant', color: '#E89A0C' },
+  { id: 'grocery',     label: 'بقالة',     icon: 'storefront', color: '#8E44C9' },
 ];
+
+// تصنيف المتجر: market_type من السيرفر أولاً، ثم تخمين من الاسم
+const typeOf = (r) => {
+  if (r.market_type) return r.market_type;
+  const n = r.name_ar || '';
+  if (n.includes('صيدل') || n.includes('دواء')) return 'pharmacy';
+  if (n.includes('مخبز') || n.includes('خبز') || n.includes('فرن')) return 'bakery';
+  if (n.includes('بقال')) return 'grocery';
+  return 'supermarket';
+};
 
 function StoreCard({ r, onPress }) {
   const { colors: C } = useTheme();
   const sc = React.useMemo(() => makeSc(C), [C]);
   return (
-    <TouchableOpacity style={sc.wrap} onPress={onPress} activeOpacity={0.88}>
+    <TouchableOpacity style={sc.wrap} onPress={onPress} activeOpacity={0.88} accessibilityRole="button" accessibilityLabel={`${r.name_ar}${r.is_open ? '' : '، مغلق'}`}>
       <View style={sc.imgBox}>
-        <Image source={{ uri: r.cover_image || r.logo }} style={sc.img} resizeMode="cover" />
+        {(r.cover_image || r.logo)
+          ? <Image source={{ uri: r.cover_image || r.logo }} style={sc.img} resizeMode="cover" />
+          : <View style={[sc.img, { backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center' }]}><Text style={{ fontSize: 34 }}>🏪</Text></View>}
         {!r.is_open && <View style={sc.overlay}><Text style={sc.overlayTxt}>مغلق</Text></View>}
-        <View style={sc.logoCircle}>
-          <Image source={{ uri: r.logo }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-        </View>
+        {!!r.logo && (
+          <View style={sc.logoCircle}>
+            <Image source={{ uri: r.logo }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+          </View>
+        )}
       </View>
       <View style={sc.body}>
         <Text style={sc.name} numberOfLines={1}>{r.name_ar}</Text>
         <Text style={sc.addr} numberOfLines={1}>{r.address || r.city || ''}</Text>
         <View style={sc.meta}>
           <Ionicons name="time-outline" size={12} color={C.gray} />
-          <Text style={sc.metaTxt}>{r.delivery_time_min}-{r.delivery_time_max} د</Text>
-          <Text style={sc.sep}>·</Text>
-          <Ionicons name="bicycle-outline" size={12} color={C.gray} />
-          <Text style={sc.metaTxt}>{r.delivery_fee === 0 ? 'مجاني' : `${r.delivery_fee}₪`}</Text>
+          <Text style={sc.metaTxt}>{r.delivery_time_min || 20}-{r.delivery_time_max || 45} د</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -49,14 +65,18 @@ export default function MarketScreen() {
   const navigation = useNavigation();
   const { colors: C } = useTheme();
   const s = React.useMemo(() => makeS(C), [C]);
+  const headerTop = useHeaderTop(12);
+  const tabInset = useTabBarInset();
   const [stores, setStores] = useState([]);
-  const [selected, setSelected] = useState('supermarket');
+  const [selected, setSelected] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     (async () => {
       const cached = await readCache('market');
-      if (cached) setStores(cached);
+      if (cached) { setStores(cached); setLoading(false); }
       load();
     })();
   }, []);
@@ -66,107 +86,109 @@ export default function MarketScreen() {
       const r = await api.get('/restaurants?limit=60&store_type=market');
       const list = r.data || [];
       setStores(list);
+      setFailed(false);
       writeCache('market', list);
-    } catch (e) { console.error(e); }
+    } catch { setFailed(true); }
+    finally { setLoading(false); }
   };
 
-  // فلتر محلي حسب القسم المختار
-  const filtered = stores.filter(r => {
-    if (selected === 'supermarket') return !r.market_type || r.market_type === 'supermarket' || r.name_ar?.includes('ماركت') || r.name_ar?.includes('سوبر');
-    if (selected === 'pharmacy')    return r.market_type === 'pharmacy' || r.name_ar?.includes('صيدل') || r.name_ar?.includes('دواء');
-    if (selected === 'bakery')      return r.market_type === 'bakery'   || r.name_ar?.includes('مخبز') || r.name_ar?.includes('خبز');
-    if (selected === 'grocery')     return r.market_type === 'grocery'  || r.name_ar?.includes('بقال');
-    return true;
-  });
-  const displayList = filtered.length > 0 ? filtered : stores;
+  const counts = useMemo(() => {
+    const c = { all: stores.length };
+    stores.forEach(r => { const t = typeOf(r); c[t] = (c[t] || 0) + 1; });
+    return c;
+  }, [stores]);
+
+  // لا نعرض متاجر من نوع آخر لو القسم فاضي (كانت الصيدلية تعرض سوبرماركت)
+  const displayList = selected === 'all' ? stores : stores.filter(r => typeOf(r) === selected);
+  const selectedType = TYPES.find(t => t.id === selected);
 
   return (
     <View style={s.container}>
-      {/* Header */}
-      <View style={s.header}>
+      <LinearGradient colors={['#2F7FE0', '#1E5BB8', '#163F87']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[s.header, { paddingTop: headerTop }]}>
+        <LinearGradient colors={C.gradients.sheen} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={s.sheen} pointerEvents="none" />
         <View style={s.headerInner}>
+          <Ionicons name="storefront" size={24} color="#FFF" />
           <Text style={s.headerTitle}>الماركت</Text>
-          <Ionicons name="cart" size={24} color={C.primary} />
         </View>
-        <Text style={s.headerSub}>سوبرماركت · صيدليات · بقاليات</Text>
-      </View>
+        <Text style={s.headerSub}>سوبرماركت · صيدليات · مخابز · بقاليات — كلها بضغطة</Text>
+      </LinearGradient>
 
-      {/* تصنيف النوع */}
-      <View style={s.typesRow}>
-        {TYPES.map(t => (
-          <TouchableOpacity key={t.id} style={[s.typeBtn, selected === t.id && { backgroundColor: t.bg, borderColor: t.color }]}
-            onPress={() => setSelected(t.id)}>
-            <Ionicons name={t.icon} size={20} color={selected === t.id ? t.color : C.gray} />
-            <Text style={[s.typeLabel, selected === t.id && { color: t.color, fontWeight: '800' }]}>{t.label}</Text>
-          </TouchableOpacity>
-        ))}
+      <View style={s.typesWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.typesRow}>
+          {TYPES.map(t => {
+            const on = selected === t.id;
+            return (
+              <TouchableOpacity key={t.id} style={[s.typeBtn, on && { backgroundColor: t.color, borderColor: t.color }]} onPress={() => setSelected(t.id)}
+                accessibilityRole="tab" accessibilityState={{ selected: on }}>
+                <Ionicons name={t.icon} size={17} color={on ? '#FFF' : t.color} />
+                <Text style={[s.typeLabel, on && { color: '#FFF' }]}>{t.label}</Text>
+                {counts[t.id] > 0 && <View style={[s.countPill, on && { backgroundColor: 'rgba(255,255,255,0.3)' }]}><Text style={[s.countTxt, on && { color: '#FFF' }]}>{counts[t.id]}</Text></View>}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 110 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load().finally(() => setRefreshing(false)); }} tintColor={C.primary} />}>
+        contentContainerStyle={{ paddingBottom: tabInset + 24, paddingTop: 14 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load().finally(() => setRefreshing(false)); }} tintColor={C.primary} colors={[C.primary]} />}>
 
-        {/* بنر علوي */}
-        <View style={s.banner}>
-          <View style={s.bannerCircle1} />
-          <View style={s.bannerCircle2} />
-          <Ionicons name="cart" size={60} color="rgba(255,255,255,0.15)" style={{ position: 'absolute', left: 16, bottom: 8 }} />
-          <View>
-            <Text style={s.bannerTitle}>توصيل سريع لكل احتياجاتك 🛒</Text>
-            <Text style={s.bannerSub}>سوبرماركت، صيدليات، بقاليات — كلها بضغطة واحدة</Text>
+        {loading ? (
+          <GridSkeleton count={6} />
+        ) : displayList.length === 0 ? (
+          <View style={{ paddingVertical: 30 }}>
+            {failed && stores.length === 0 ? (
+              <EmptyState emoji="📡" title="تعذّر تحميل المتاجر" subtitle="تأكد من الإنترنت وحاول مرة ثانية" ctaLabel="إعادة المحاولة" onCta={() => { setLoading(true); load(); }} />
+            ) : stores.length === 0 ? (
+              <EmptyState emoji="🏪" title="ما في متاجر حاليًا" subtitle="عم نضيف متاجر جديدة، رجّع بعد شوي" />
+            ) : (
+              <EmptyState emoji="🔎" title={`ما في ${selectedType?.label || 'متاجر'} حالياً`} subtitle="جرّب قسم ثاني أو شوف كل المتاجر" ctaLabel="عرض الكل" onCta={() => setSelected('all')} />
+            )}
           </View>
-        </View>
-
-        <Text style={s.listTitle}>{TYPES.find(t => t.id === selected)?.label || 'المتاجر'} المتاحة</Text>
-
-        <View style={s.grid}>
-          {displayList.map((r, i) => (
-            <PopIn key={r.id} delay={Math.min(i, 8) * 55}>
-              <StoreCard r={r} onPress={() => navigation.navigate('Restaurant', { restaurantId: r.id })} />
-            </PopIn>
-          ))}
-        </View>
-
-        {displayList.length === 0 && (
-          <View style={{ paddingVertical: 40 }}>
-            <EmptyState emoji="🏪" title="ما في متاجر حاليًا" subtitle="رجّع بعدين، عم نضيف متاجر جديدة" />
-          </View>
+        ) : (
+          <>
+            <Text style={s.listTitle}>{selected === 'all' ? 'كل المتاجر' : `${selectedType?.label} المتاحة`} ({displayList.length})</Text>
+            <View style={s.grid}>
+              {displayList.map((r, i) => (
+                <PopIn key={r.id} delay={Math.min(i, 8) * 55}>
+                  <StoreCard r={r} onPress={() => navigation.navigate('Restaurant', { restaurantId: r.id })} />
+                </PopIn>
+              ))}
+            </View>
+          </>
         )}
-        <View style={{ height: 30 }} />
       </ScrollView>
     </View>
   );
 }
 
 const makeSc = (C) => StyleSheet.create({
-  wrap: { width: CARD_W, backgroundColor: C.white, borderRadius: 18, overflow: 'hidden', elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8 },
+  wrap: { width: CARD_W, backgroundColor: C.card, borderRadius: 18, overflow: 'hidden', ...C.shadow.soft },
   imgBox: { width: '100%', height: 110, position: 'relative' },
   img: { width: '100%', height: '100%' },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.48)', justifyContent: 'center', alignItems: 'center' },
   overlayTxt: { color: '#FFF', fontWeight: '800', fontSize: 14 },
-  logoCircle: { position: 'absolute', bottom: -13, left: 10, width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: C.card, overflow: 'hidden', backgroundColor: C.card },
+  logoCircle: { position: 'absolute', bottom: -13, right: 10, width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: C.card, overflow: 'hidden', backgroundColor: C.card },
   body: { paddingHorizontal: 10, paddingTop: 16, paddingBottom: 10 },
-  name: { fontSize: 13, fontWeight: '800', color: C.text, textAlign: 'right' },
-  addr: { fontSize: 11, color: C.gray, marginTop: 2, textAlign: 'right' },
+  name: { fontSize: 13.5, fontWeight: '800', color: C.text, textAlign: 'right' },
+  addr: { fontSize: 11.5, color: C.gray, marginTop: 2, textAlign: 'right' },
   meta: { flexDirection: 'row-reverse', alignItems: 'center', marginTop: 5, gap: 3 },
-  metaTxt: { fontSize: 11, color: C.text, fontWeight: '600' },
-  sep: { color: C.gray },
+  metaTxt: { fontSize: 11.5, color: C.text, fontWeight: '600' },
 });
 
 const makeS = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  header: { backgroundColor: C.white, paddingTop: 54, paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: C.line },
-  headerInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
-  headerTitle: { fontSize: 22, fontWeight: '900', color: C.text },
-  headerSub: { fontSize: 12, color: C.gray, textAlign: 'right', marginTop: 3 },
-  typesRow: { flexDirection: 'row-reverse', paddingHorizontal: 12, paddingVertical: 12, gap: 8, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.line },
-  typeBtn: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 10, borderRadius: 14, backgroundColor: C.bg, borderWidth: 1.5, borderColor: 'transparent' },
-  typeLabel: { fontSize: 11, fontWeight: '600', color: C.gray },
-  banner: { margin: 16, borderRadius: 20, backgroundColor: '#1565C0', padding: 20, overflow: 'hidden', justifyContent: 'flex-end' },
-  bannerCircle1: { position: 'absolute', width: 160, height: 160, borderRadius: 80, backgroundColor: 'rgba(255,255,255,0.1)', top: -50, left: -30 },
-  bannerCircle2: { position: 'absolute', width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(255,255,255,0.07)', bottom: -20, right: 20 },
-  bannerTitle: { color: '#FFF', fontSize: 17, fontWeight: '900', textAlign: 'right' },
-  bannerSub: { color: 'rgba(255,255,255,0.85)', fontSize: 12, textAlign: 'right', marginTop: 5 },
+  header: { paddingHorizontal: 20, paddingBottom: 22, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden', ...C.shadow.card },
+  sheen: { position: 'absolute', top: 0, left: 0, right: 0, height: 80 },
+  headerInner: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8 },
+  headerTitle: { fontSize: 23, fontWeight: '900', color: '#FFF' },
+  headerSub: { fontSize: 12.5, color: 'rgba(255,255,255,0.9)', textAlign: 'right', marginTop: 4, fontWeight: '600' },
+  typesWrap: { marginTop: 12 },
+  typesRow: { flexDirection: 'row-reverse', paddingHorizontal: 14, gap: 8 },
+  typeBtn: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 14, borderRadius: 999, backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border },
+  typeLabel: { fontSize: 13, fontWeight: '800', color: C.text },
+  countPill: { minWidth: 20, height: 20, borderRadius: 10, backgroundColor: C.inputBg, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+  countTxt: { fontSize: 11, fontWeight: '900', color: C.sub },
   listTitle: { fontSize: 17, fontWeight: '900', color: C.text, textAlign: 'right', paddingHorizontal: 16, marginBottom: 12 },
   grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16 },
 });

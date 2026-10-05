@@ -4,3 +4,6 @@ import App from './App';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>);
+
+// إخفاء شاشة البداية فور أول رسم للتطبيق
+requestAnimationFrame(() => setTimeout(() => window.__hideSplash && window.__hideSplash(), 150));

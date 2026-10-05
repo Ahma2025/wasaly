@@ -1,117 +1,72 @@
 import api from './api';
 import { Capacitor } from '@capacitor/core';
+import { APP_BASE, LOGO_URL } from './config';
 
-// ─── Firebase Web SDK push (works in Capacitor WebView too) ──────────────
-async function setupFirebaseWebPush() {
-  try {
-    const { initializeApp, getApps } = await import('firebase/app');
-    const { getMessaging, getToken, onMessage } = await import('firebase/messaging');
+// القناة التي يرسل عليها السيرفر (channel_id: 'wasaly_default')
+export const CHANNEL_ID = 'wasaly_default';
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyAXX_V5q5zxFKu_WDbTAJ8I1WQCZ5OqEkY",
-      projectId: "wasaly-delivery-app",
-      messagingSenderId: "573612310538",
-      appId: "1:573612310538:android:6642b6d4053bd85e5f9ff3"
-    };
+let nativeListeners = [];
 
-    const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-    const messaging = getMessaging(app);
-
-    // Register service worker for background messages
-    let swReg = null;
-    if ('serviceWorker' in navigator) {
-      try {
-        swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-      } catch (e) {
-        console.warn('[PUSH] SW register failed:', e.message);
-      }
-    }
-
-    const VAPID_KEY = 'BCQrhUZ-lWBkuu8mHowPLLIeV7gQUCBOTCOHZN2QtrW-QWflj2DPVnHg5BiXSYsDwWpFzkvfT2TJBchFeMunJTI';
-
-    // Request notification permission
-    let permission = Notification.permission;
-    if (permission === 'default') {
-      permission = await Notification.requestPermission();
-    }
-    if (permission !== 'granted') {
-      console.warn('[PUSH] Permission denied');
-      return;
-    }
-
-    const token = await getToken(messaging, {
-      vapidKey: VAPID_KEY,
-      serviceWorkerRegistration: swReg || undefined
-    });
-
-    if (token) {
-      console.log('[PUSH] Firebase Web token received');
-      await api.post('/users/fcm-token', { token });
-      console.log('[PUSH] Token saved OK');
-    }
-
-    // Handle foreground messages
-    onMessage(messaging, (payload) => {
-      if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification(payload.notification?.title || 'وصلّي', {
-          body: payload.notification?.body || '',
-          icon: '/logo.png',
-          requireInteraction: true,
-          dir: 'rtl'
-        });
-      }
-    });
-
-  } catch (e) {
-    console.error('[PUSH] Firebase Web SDK error:', e.message);
-    // Fallback: try native Capacitor push
-    await setupNativePush().catch(() => {});
-  }
-}
-
-// ─── Native Capacitor push ────────────────────────────────────────────────
-async function setupNativePush() {
+// ─── إشعارات أندرويد/iOS الأصلية (FCM / APNs) ─────────────────────────────
+async function setupNativePush({ onReceive, onAction } = {}) {
   try {
     const { PushNotifications } = await import('@capacitor/push-notifications');
 
-    // Send debug status to backend so we can see it in logs
-    const dbg = async (msg) => {
-      try { await api.post('/debug-push', { msg }); } catch {}
-    };
+    // قناة عالية الأهمية (importance 5) حتى يظهر الإشعار منبثقًا مع صوت
+    if (Capacitor.getPlatform() === 'android') {
+      try {
+        await PushNotifications.createChannel({
+          id: CHANNEL_ID,
+          name: 'طلبات جديدة',
+          description: 'تنبيهات الطلبات الجديدة وتحديثاتها',
+          importance: 5,
+          visibility: 1,
+          vibration: true,
+          lights: true,
+          lightColor: '#FF6B00',
+        });
+      } catch (e) { console.warn('[push] createChannel failed', e); }
+    }
 
-    await dbg('setupNativePush started');
-
-    const perm = await PushNotifications.requestPermissions();
-    await dbg(`permission: ${JSON.stringify(perm)}`);
-
+    let perm = await PushNotifications.checkPermissions();
+    if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') {
+      perm = await PushNotifications.requestPermissions();
+    }
     if (perm.receive !== 'granted') {
-      await dbg('permission not granted, exit');
+      console.warn('[push] permission not granted');
       return;
     }
 
-    PushNotifications.addListener('registration', async (token) => {
-      await dbg(`token received: ${token.value?.slice(0,20)}... len=${token.value?.length}`);
-      try {
-        await api.post('/users/fcm-token', { token: token.value });
-        await dbg('token saved OK');
-      } catch (e) {
-        await dbg(`token save failed: ${e.message}`);
-      }
-    });
-
-    PushNotifications.addListener('registrationError', async (err) => {
-      await dbg(`registrationError: ${JSON.stringify(err)}`);
-    });
+    await teardownNativeListeners();
+    nativeListeners.push(await PushNotifications.addListener('registration', async (token) => {
+      try { await api.post('/users/fcm-token', { token: token.value }); }
+      catch (e) { console.warn('[push] token save failed', e?.message); }
+    }));
+    nativeListeners.push(await PushNotifications.addListener('registrationError', (err) => {
+      console.warn('[push] registration error', err);
+    }));
+    // إشعار وصل والتطبيق مفتوح → نحدّث الطلبات ونعرض تنبيهًا داخليًا
+    nativeListeners.push(await PushNotifications.addListener('pushNotificationReceived', (n) => {
+      try { onReceive && onReceive(n); } catch {}
+    }));
+    // ضغط المستخدم على الإشعار → صفحة الطلبات
+    nativeListeners.push(await PushNotifications.addListener('pushNotificationActionPerformed', (a) => {
+      try { onAction && onAction(a); } catch {}
+    }));
 
     await PushNotifications.register();
-    await dbg('register() called');
-
   } catch (e) {
-    try { await api.post('/debug-push', { msg: `setupNativePush error: ${e.message}` }); } catch {}
+    console.warn('[push] native setup error', e?.message || e);
   }
 }
 
-// ─── Browser Web Push (desktop) ───────────────────────────────────────────
+async function teardownNativeListeners() {
+  const list = nativeListeners;
+  nativeListeners = [];
+  for (const l of list) { try { await l.remove(); } catch {} }
+}
+
+// ─── إشعارات الويب (متصفح الكمبيوتر) ─────────────────────────────────────
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -119,13 +74,15 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 async function setupWebPush() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
   try {
-    const reg = await navigator.serviceWorker.register('/sw.js');
-    const permission = await Notification.requestPermission();
+    const reg = await navigator.serviceWorker.register(APP_BASE + 'sw.js', { scope: APP_BASE });
+    let permission = Notification.permission;
+    if (permission === 'default') permission = await Notification.requestPermission();
     if (permission !== 'granted') return;
 
     const vapidData = await api.get('/webpush/vapid-public-key');
+    if (!vapidData?.publicKey) return;
     const subscription = await reg.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(vapidData.publicKey)
@@ -133,38 +90,41 @@ async function setupWebPush() {
 
     const restaurant = JSON.parse(localStorage.getItem('restaurant') || '{}');
     if (restaurant.id) {
-      await api.post('/webpush/subscribe', {
-        subscription: subscription.toJSON(),
-        restaurant_id: restaurant.id
-      });
-      console.log('[PUSH] Web push subscription saved');
+      await api.post('/webpush/subscribe', { subscription: subscription.toJSON(), restaurant_id: restaurant.id });
     }
   } catch (e) {
-    console.error('[PUSH] Web push error:', e.message);
+    console.warn('[push] web push error', e?.message || e);
   }
 }
 
-// ─── Main entry ────────────────────────────────────────────────────────────
-export async function setupBrowserNotifications() {
+// ─── نقطة الدخول ──────────────────────────────────────────────────────────
+export async function setupPush(handlers = {}) {
+  if (Capacitor.isNativePlatform()) await setupNativePush(handlers);
+  else await setupWebPush();
+}
+
+export async function teardownPush() {
   if (Capacitor.isNativePlatform()) {
-    // On iOS/Android Capacitor: use native APNs/FCM directly
-    // This gives raw APNs token on iOS which our backend handles directly
-    await setupNativePush();
-  } else {
-    await setupWebPush();
+    await teardownNativeListeners();
+    try {
+      const { PushNotifications } = await import('@capacitor/push-notifications');
+      await PushNotifications.removeAllDeliveredNotifications();
+    } catch {}
   }
 }
 
-export function showBrowserNotification(title, body, data = {}) {
+// إشعار نظام من داخل الصفحة (متصفح الكمبيوتر فقط — في التطبيق يصل إشعار FCM من السيرفر)
+export function showBrowserNotification(title, body, data = {}, onClick) {
+  if (Capacitor.isNativePlatform()) return;
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   try {
     const n = new Notification(title, {
-      body, icon: '/logo.png', badge: '/logo.png',
+      body, icon: LOGO_URL, badge: LOGO_URL,
       tag: `order-${data.order_id || Date.now()}`,
-      requireInteraction: true, dir: 'rtl',
+      requireInteraction: true, dir: 'rtl', lang: 'ar',
     });
-    n.onclick = () => { window.focus(); n.close(); };
+    n.onclick = () => { window.focus(); n.close(); onClick && onClick(); };
   } catch (e) {
-    console.error('showBrowserNotification error:', e);
+    console.warn('showBrowserNotification error', e);
   }
 }

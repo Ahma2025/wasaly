@@ -1,141 +1,188 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { FiUserPlus, FiTruck, FiShoppingBag } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
-import toast from 'react-hot-toast';
+import { currentAdmin } from '../utils/session';
+import { normalizePhone } from '../utils/format';
+import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, useConfirm } from '../components/ui';
 
+const PAGE = 50;
 const roleLabel = { customer: 'زبون', restaurant: 'مطعم', restaurant_owner: 'صاحب مطعم', driver: 'سائق', admin: 'مدير' };
 const roleColor = {
-  customer: 'bg-blue-100 text-blue-700',
-  restaurant: 'bg-green-100 text-green-700',
-  restaurant_owner: 'bg-green-100 text-green-700',
-  driver: 'bg-orange-100 text-orange-700',
-  admin: 'bg-purple-100 text-purple-700'
+  customer: 'bg-blue-50 text-blue-700 ring-blue-200',
+  restaurant: 'bg-green-50 text-green-700 ring-green-200',
+  restaurant_owner: 'bg-green-50 text-green-700 ring-green-200',
+  driver: 'bg-orange-50 text-orange-700 ring-orange-200',
+  admin: 'bg-violet-50 text-violet-700 ring-violet-200',
 };
+const isBlocked = (u) => u.is_blocked === true || u.is_blocked === 1 || u.is_blocked === '1';
+const EMPTY_FORM = { name: '', phone: '', password: '', role: 'customer', city: '' };
 
 export default function Users() {
-  const [users, setUsers] = useState(readCache('adm_users') || []);
+  const navigate = useNavigate();
+  const confirm = useConfirm();
+  const me = currentAdmin();
+  const cached = readCache('adm_users');
+  const [users, setUsers] = useState(cached || []);
+  const [total, setTotal] = useState(null);
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('');
-  const [loading, setLoading] = useState(!readCache('adm_users'));
+  const [loading, setLoading] = useState(!cached);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: '', phone: '', password: '', role: 'driver', city: '' });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [creating, setCreating] = useState(false);
-  const searchTimer = useRef(null);
+  const timer = useRef(null);
+  const reqId = useRef(0);
 
-  useEffect(() => {
-    clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => fetchUsers(), 400);
-    return () => clearTimeout(searchTimer.current);
+  const fetchUsers = useCallback(async ({ append = false, offset = 0 } = {}) => {
+    const id = ++reqId.current;
+    if (append) setLoadingMore(true); else setRefreshing(true);
+    try {
+      const params = { search: search || undefined, role: role || undefined, limit: PAGE, offset };
+      const r = await api.get('/admin/users', { params });
+      let rows = r.data || [];
+      // توافق مع الخادم القديم: «مطاعم» تشمل restaurant + restaurant_owner
+      if (role === 'restaurant' && !rows.some(u => u.role === 'restaurant_owner')) {
+        try {
+          const r2 = await api.get('/admin/users', { params: { ...params, role: 'restaurant_owner' } });
+          const extra = (r2.data || []).filter(x => !rows.some(u => u.id === x.id));
+          rows = [...rows, ...extra];
+        } catch { /* ignore */ }
+      }
+      if (id !== reqId.current) return;
+      setUsers(prev => {
+        const next = append ? [...prev, ...rows.filter(x => !prev.some(p => p.id === x.id))] : rows;
+        if (!search && !role && !append) writeCache('adm_users', next);
+        return next;
+      });
+      setHasMore(rows.length >= PAGE);
+      if (!search && !role && r.total != null) setTotal(parseInt(r.total));
+    } catch (e) { if (id === reqId.current && e?.status !== 401 && e?.status !== 403) toast.error('خطأ في تحميل المستخدمين'); }
+    finally { if (id === reqId.current) { setLoading(false); setRefreshing(false); setLoadingMore(false); } }
   }, [search, role]);
 
-  const fetchUsers = async () => {
-    setLoading(true);
-    try {
-      const data = await api.get('/admin/users', { params: { search, role, limit: 50 } });
-      setUsers(data.data || []); writeCache('adm_users', data.data || []);
-    } catch { toast.error('خطأ في تحميل المستخدمين'); }
-    finally { setLoading(false); }
-  };
+  useEffect(() => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => fetchUsers(), 350);
+    return () => clearTimeout(timer.current);
+  }, [fetchUsers]);
 
-  const toggleBlock = async (id) => {
+  const toggleBlock = async (u) => {
+    const blocked = isBlocked(u);
+    const ok = await confirm({
+      title: blocked ? 'رفع الحظر' : 'حظر المستخدم',
+      message: blocked ? `سيتمكّن ${u.name || 'المستخدم'} من استخدام التطبيق مجدداً.` : `لن يتمكّن ${u.name || 'المستخدم'} (${u.phone}) من تسجيل الدخول أو الطلب.`,
+      confirmText: blocked ? 'رفع الحظر' : 'حظر',
+      danger: !blocked,
+    });
+    if (!ok) return;
     try {
-      const data = await api.patch(`/admin/users/${id}/block`);
-      setUsers(prev => prev.map(u => u.id === id ? { ...u, is_blocked: data.is_blocked } : u));
-      toast.success('تم التحديث');
-    } catch { toast.error('خطأ'); }
+      const data = await api.patch(`/admin/users/${u.id}/block`);
+      setUsers(prev => prev.map(x => (x.id === u.id ? { ...x, is_blocked: data.is_blocked ?? !blocked } : x)));
+      toast.success(blocked ? 'تم رفع الحظر' : 'تم الحظر');
+    } catch (e) { toast.error(e?.message || 'خطأ'); }
   };
 
   const createUser = async (e) => {
     e.preventDefault();
-    if (!form.name || !form.phone || !form.password) return toast.error('أدخل جميع البيانات');
+    if (!form.name.trim() || !form.phone.trim()) return toast.error('أدخل الاسم ورقم الهاتف');
+    if (!form.password || form.password.length < 6) return toast.error('كلمة المرور 6 أحرف على الأقل');
+    if (form.role === 'admin') {
+      const ok = await confirm({ title: 'إنشاء حساب مدير', message: 'حساب المدير يملك صلاحيات كاملة على المنصّة. متأكد؟', confirmText: 'إنشاء مدير' });
+      if (!ok) return;
+    }
     setCreating(true);
     try {
-      await api.post('/auth/admin/create-user', form);
+      await api.post('/auth/admin/create-user', { ...form, phone: normalizePhone(form.phone) });
       toast.success('تم إنشاء الحساب بنجاح');
       setShowCreate(false);
-      setForm({ name: '', phone: '', password: '', role: 'driver', city: '' });
+      setForm(EMPTY_FORM);
       fetchUsers();
-    } catch (e) {
-      toast.error(e.message || 'حدث خطأ');
-    } finally { setCreating(false); }
+    } catch (err) { toast.error(err?.message || 'حدث خطأ'); }
+    finally { setCreating(false); }
   };
 
+  const canBlock = (u) => u.role !== 'admin' && String(u.id) !== String(me?.id);
+
   return (
-    <div className="space-y-4 p-4" dir="rtl">
-      <div className="flex justify-between items-center">
-        <h1 className="text-xl font-bold text-gray-900">المستخدمون</h1>
-        <button onClick={() => setShowCreate(!showCreate)}
-          className="bg-orange-500 text-white px-4 py-2 rounded-xl font-bold text-sm">
-          + إنشاء حساب
-        </button>
-      </div>
+    <div className="space-y-4 p-4 animate-fade-up">
+      <PageHeader icon="👥" title="المستخدمون" subtitle={total != null ? `${total} مستخدم مسجّل` : 'إدارة الحسابات'}
+        action={<PrimaryBtn onClick={() => setShowCreate(true)} className="flex items-center gap-1.5"><FiUserPlus /> حساب</PrimaryBtn>} />
 
-      {showCreate && (
-        <form onSubmit={createUser} className="bg-white rounded-2xl border shadow-sm p-4 space-y-3">
-          <h2 className="font-bold text-base text-gray-800">إنشاء حساب جديد</h2>
-          <select className="w-full border rounded-xl px-3 py-2.5 text-sm bg-white" value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}>
-            <option value="driver">مندوب توصيل</option>
-            <option value="restaurant">صاحب مطعم</option>
-          </select>
-          <input className="w-full border rounded-xl px-3 py-2.5 text-sm" placeholder="الاسم الكامل *" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required />
-          <input className="w-full border rounded-xl px-3 py-2.5 text-sm" placeholder="رقم الهاتف *" value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} required />
-          <input className="w-full border rounded-xl px-3 py-2.5 text-sm" type="password" placeholder="كلمة المرور *" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))} required />
-          <input className="w-full border rounded-xl px-3 py-2.5 text-sm" placeholder="المدينة" value={form.city} onChange={e => setForm(p => ({ ...p, city: e.target.value }))} />
-          <div className="flex gap-2">
-            <button type="submit" disabled={creating} className="flex-1 bg-orange-500 text-white py-2.5 rounded-xl font-bold text-sm disabled:opacity-60">
-              {creating ? 'جاري الإنشاء...' : 'إنشاء'}
-            </button>
-            <button type="button" onClick={() => setShowCreate(false)} className="flex-1 border py-2.5 rounded-xl font-bold text-sm text-gray-600">
-              إلغاء
-            </button>
-          </div>
-        </form>
-      )}
+      <SearchInput value={search} onChange={setSearch} placeholder="ابحث بالاسم أو الهاتف…" loading={refreshing && !!search} />
+      <Chips value={role} onChange={setRole} options={[
+        ['', 'الكل'], ['customer', 'زبائن'], ['restaurant', 'مطاعم'], ['driver', 'سائقون'], ['admin', 'مدراء'],
+      ]} />
 
-      {/* Filters */}
-      <div className="flex gap-2">
-        <input placeholder="🔍 بحث..." className="border rounded-xl px-3 py-2 flex-1 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" value={search} onChange={e => setSearch(e.target.value)} />
-        <select className="border rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400" value={role} onChange={e => setRole(e.target.value)}>
-          <option value="">الكل</option>
-          <option value="customer">زبائن</option>
-          <option value="restaurant">مطاعم</option>
-          <option value="driver">مناديب</option>
-          <option value="admin">مدراء</option>
-        </select>
-      </div>
-
-      {/* Cards List */}
-      <div className="space-y-2">
-        {loading ? (
-          [...Array(5)].map((_, i) => <div key={i} className="h-20 bg-white rounded-2xl border animate-pulse" />)
-        ) : users.length === 0 ? (
-          <div className="text-center py-12 text-gray-400">لا يوجد مستخدمون</div>
-        ) : <div className="space-y-2 stagger">{users.map(user => (
-          <div key={user.id} className="bg-white rounded-2xl shadow-soft hover-lift p-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 flex-1 min-w-0">
-              <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center font-bold text-orange-600 text-lg flex-shrink-0">
-                {user.name?.[0] || '?'}
-              </div>
-              <div className="min-w-0">
-                <p className="font-semibold text-gray-900 text-sm truncate">{user.name}</p>
-                <p className="text-xs text-gray-400 font-mono">{user.phone}</p>
-                <div className="flex gap-1 mt-1 flex-wrap">
-                  <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${roleColor[user.role] || 'bg-gray-100 text-gray-700'}`}>
-                    {roleLabel[user.role] || user.role}
-                  </span>
-                  <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${user.is_blocked ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                    {user.is_blocked ? 'محظور' : 'نشط'}
-                  </span>
+      {loading && users.length === 0 ? <ListSkeleton rows={5} />
+        : users.length === 0 ? <EmptyState icon="👥" title="لا يوجد مستخدمون" hint={search ? 'جرّب بحثاً آخر' : undefined} />
+        : (
+          <div className={`space-y-2 ${refreshing ? 'opacity-70' : ''}`}>
+            {users.map(u => {
+              const blocked = isBlocked(u);
+              const self = String(u.id) === String(me?.id);
+              return (
+                <div key={u.id} className="card p-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-11 h-11 rounded-2xl bg-orange-50 flex items-center justify-center font-black text-orange-600 text-lg flex-shrink-0">
+                      {u.name?.[0] || '؟'}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-bold text-gray-900 text-sm truncate">{u.name || 'بدون اسم'} {self && <span className="text-[10px] text-orange-500">(أنت)</span>}</p>
+                      <p className="text-xs text-gray-400 tabular-nums" dir="ltr" style={{ textAlign: 'right' }}>{u.phone}</p>
+                      <div className="flex gap-1 mt-1 flex-wrap">
+                        <Badge className={roleColor[u.role] || 'bg-gray-100 text-gray-700 ring-gray-200'}>{roleLabel[u.role] || u.role}</Badge>
+                        <Badge className={blocked ? 'bg-red-50 text-red-600 ring-red-200' : 'bg-green-50 text-green-600 ring-green-200'}>{blocked ? 'محظور' : 'نشط'}</Badge>
+                      </div>
+                    </div>
+                  </div>
+                  {canBlock(u) && (
+                    <button onClick={() => toggleBlock(u)}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold flex-shrink-0 ${blocked ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                      {blocked ? 'رفع الحظر' : 'حظر'}
+                    </button>
+                  )}
                 </div>
-              </div>
-            </div>
-            <button onClick={() => toggleBlock(user.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex-shrink-0 ${user.is_blocked ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
-              {user.is_blocked ? 'رفع الحظر' : 'حظر'}
-            </button>
+              );
+            })}
           </div>
-        ))}</div>}
-      </div>
+        )}
+
+      {hasMore && <LoadMore shown={users.length} total={total && !search && !role ? total : Infinity} loading={loadingMore}
+        onMore={() => fetchUsers({ append: true, offset: users.length })} />}
+
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="إنشاء حساب جديد" subtitle="زبون أو مدير">
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          <button onClick={() => { setShowCreate(false); navigate('/drivers?new=1'); }} className="rounded-2xl bg-violet-50 text-violet-700 p-3 text-right">
+            <FiTruck className="text-lg mb-1" />
+            <p className="font-black text-sm">سائق جديد</p>
+            <p className="text-[10px] text-violet-500 leading-snug">من صفحة السائقين (مع بيانات المركبة)</p>
+          </button>
+          <button onClick={() => { setShowCreate(false); navigate('/restaurants?new=1'); }} className="rounded-2xl bg-green-50 text-green-700 p-3 text-right">
+            <FiShoppingBag className="text-lg mb-1" />
+            <p className="font-black text-sm">مطعم / متجر جديد</p>
+            <p className="text-[10px] text-green-600 leading-snug">من صفحة المطاعم (ينشئ المتجر وحساب صاحبه)</p>
+          </button>
+        </div>
+        <form onSubmit={createUser} className="space-y-3">
+          <Field label="نوع الحساب">
+            <select className="inp" value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}>
+              <option value="customer">زبون</option>
+              <option value="admin">مدير</option>
+            </select>
+          </Field>
+          <Field label="الاسم الكامل *"><input className="inp" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} /></Field>
+          <Field label="رقم الهاتف *"><input className="inp" inputMode="tel" dir="ltr" style={{ textAlign: 'right' }} placeholder="05XXXXXXXX" value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} /></Field>
+          <Field label="كلمة المرور *" hint="(6 أحرف على الأقل)"><PasswordInput value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))} /></Field>
+          <Field label="المدينة"><input className="inp" value={form.city} onChange={e => setForm(p => ({ ...p, city: e.target.value }))} /></Field>
+          <button type="submit" disabled={creating} className="w-full btn-lux py-3 disabled:opacity-60">{creating ? 'جاري الإنشاء…' : 'إنشاء الحساب'}</button>
+        </form>
+      </Modal>
     </div>
   );
 }

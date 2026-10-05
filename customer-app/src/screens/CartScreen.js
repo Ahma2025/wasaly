@@ -1,207 +1,313 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, Keyboard } from 'react-native';
 import PressableScale from '../components/PressableScale';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import * as Location from 'expo-location';
-import { useCart } from '../context/CartContext';
-import { useAuth } from '../context/AuthContext';
+import { useCart, linePrice } from '../context/CartContext';
 import api from '../utils/api';
+import { readCache, writeCache } from '../utils/cache';
+import { startCardPayment } from '../utils/payments';
 import { useTheme } from '../context/ThemeContext';
+import { useHeaderTop } from '../components/GradientHeader';
+import { useTabBarInset } from '../components/FloatingTabBar';
+import { FREE_DELIVERY_THRESHOLD, POINT_VALUE, DEFAULT_DELIVERY_FEE } from '../config';
+
+const money = (v) => `${(Number(v) || 0).toFixed(2)}₪`;
+const num = (v, d = 0) => { const n = parseFloat(v); return Number.isFinite(n) ? n : d; };
+const addrLabel = (a) => a?.label || (a?.title && a.title !== a.address ? a.title : '') || 'عنوان';
 
 export default function CartScreen() {
   const navigation = useNavigation();
   const { colors: COLORS } = useTheme();
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
-  const { items, total, count, removeItem, addItem, clearCart, restaurantId, restaurantName, updateItemNote } = useCart();
-  const { user } = useAuth();
+  const headerTop = useHeaderTop(10);
+  const tabInset = useTabBarInset();
+  const { items, total, count, removeItem, incrementItem, clearCart, restaurantId, restaurantName, updateItemNote, groupOrder } = useCart();
 
-  const [deliveryType, setDeliveryType] = useState('delivery'); // 'delivery' | 'pickup'
+  const [deliveryType, setDeliveryTypeRaw] = useState('delivery'); // 'delivery' | 'pickup'
   const [addresses, setAddresses] = useState([]);
-  const [selectedAddress, setSelectedAddress] = useState(null);
+  const [selectedAddressId, setSelectedAddressId] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [notes, setNotes] = useState('');
   const [tip, setTip] = useState(0);
   const [leaveAtDoor, setLeaveAtDoor] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [placing, setPlacing] = useState(false);
   const submittingRef = useRef(false);
-  const [deliveryFee, setDeliveryFee] = useState(0);
-  const [calculatingFee, setCalculatingFee] = useState(false);
-  const [userLocation, setUserLocation] = useState(null);
   const [restaurantInfo, setRestaurantInfo] = useState(null);
   const [couponInput, setCouponInput] = useState('');
-  const [couponCode, setCouponCode] = useState(null);
-  const [couponDiscount, setCouponDiscount] = useState(0);
-  const [couponLoading, setCouponLoading] = useState(false);
-  const [couponMsg, setCouponMsg] = useState('');
+  const [couponCode, setCouponCode] = useState(null);      // الكود المُطبّق (يُعاد التحقق منه مع كل تغيير)
+  const [localCoupon, setLocalCoupon] = useState({ discount: 0, error: '' });
+  const [couponChecking, setCouponChecking] = useState(false);
   const [loyaltyPoints, setLoyaltyPoints] = useState(0);
   const [walletBalance, setWalletBalance] = useState(0);
   const [usePoints, setUsePoints] = useState(false);
   const [useWallet, setUseWallet] = useState(false);
-  const [schedule, setSchedule] = useState('now');
-  const SCHEDULE_OPTS = [
-    { k: 'now', l: 'الآن ⚡' },
-    { k: '1h', l: 'خلال ساعة' },
-    { k: '2h', l: 'بعد ساعتين' },
-    { k: 'eve', l: 'مساءً 🌙' },
-  ];
-  const scheduleLabel = { '1h': 'خلال ساعة', '2h': 'بعد ساعتين', eve: 'مساءً' }[schedule];
+  const [isFirstOrder, setIsFirstOrder] = useState(false);
+  const [localFee, setLocalFee] = useState(null);
+  const [feeLoading, setFeeLoading] = useState(false);
+  // تسعير السيرفر
+  const [quote, setQuote] = useState(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState('');
+  const quoteSupported = useRef(true);
+  const quoteSeq = useRef(0);
 
-  useEffect(() => {
-    api.get('/users/profile').then(d => {
-      setLoyaltyPoints(parseInt(d.data?.loyalty_points || 0));
-      setWalletBalance(parseFloat(d.data?.wallet_balance || 0));
-    }).catch(() => {});
+  const selectedAddress = addresses.find(a => String(a.id) === String(selectedAddressId)) || null;
+
+  const setDeliveryType = (t) => {
+    setDeliveryTypeRaw(t);
+    if (t === 'pickup') { setTip(0); setLeaveAtDoor(false); } // البقشيش وملاحظة الباب للتوصيل فقط
+  };
+
+  // ── تحديث المحفظة/النقاط/العناوين عند كل دخول للتبويب (التبويب يبقى مركّب) ──
+  const refreshProfile = useCallback(async () => {
+    try {
+      const d = await api.get('/users/profile');
+      setLoyaltyPoints(parseInt(d.data?.loyalty_points || 0, 10) || 0);
+      setWalletBalance(num(d.data?.wallet_balance));
+      writeCache('profile', d.data);
+    } catch {}
   }, []);
 
-  const applyCoupon = async () => {
-    const code = couponInput.trim();
-    if (!code) return;
-    Keyboard.dismiss();
-    setCouponLoading(true); setCouponMsg('');
-    try {
-      const res = await api.post('/coupons/validate', { code, subtotal: total });
-      const d = parseFloat(res.data?.discount || 0);
-      setCouponCode(code); setCouponDiscount(d);
-      setCouponMsg(`✅ تم تطبيق خصم ${d.toFixed(2)}₪`);
-    } catch (e) {
-      setCouponCode(null); setCouponDiscount(0);
-      setCouponMsg('❌ ' + (e.message || 'الكوبون غير صالح'));
-    } finally { setCouponLoading(false); }
-  };
-  const removeCoupon = () => { setCouponCode(null); setCouponDiscount(0); setCouponInput(''); setCouponMsg(''); };
-
-  useEffect(() => { getUserLocation(); fetchRestaurantInfo(); }, []);
-  useFocusEffect(useCallback(() => { fetchAddresses(); }, []));
-
-  useEffect(() => {
-    if (deliveryType === 'delivery' && userLocation && restaurantInfo) {
-      calculateDeliveryFee();
-    } else if (deliveryType === 'pickup') {
-      setDeliveryFee(0);
-    }
-  }, [deliveryType, userLocation, restaurantInfo]);
-
-  const fetchRestaurantInfo = async () => {
-    if (!restaurantId) return;
-    try {
-      const data = await api.get(`/restaurants/${restaurantId}`);
-      setRestaurantInfo(data.data);
-    } catch {}
-  };
-
-  const getUserLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        setUserLocation(loc.coords);
-      }
-    } catch {}
-  };
-
-  const calculateDeliveryFee = async () => {
-    if (!userLocation || !restaurantInfo?.lat) return;
-    setCalculatingFee(true);
-    try {
-      const data = await api.get(`/delivery-zones/calculate?lat1=${restaurantInfo.lat}&lng1=${restaurantInfo.lng}&lat2=${userLocation.latitude}&lng2=${userLocation.longitude}`);
-      setDeliveryFee(parseFloat(data.data?.fee || 5));
-    } catch {
-      setDeliveryFee(5);
-    } finally {
-      setCalculatingFee(false);
-    }
-  };
-
-  const fetchAddresses = async () => {
+  const fetchAddresses = useCallback(async () => {
+    const cached = await readCache('addresses');
+    const apply = (list) => {
+      setAddresses(list);
+      setSelectedAddressId(prev => {
+        if (prev && list.some(a => String(a.id) === String(prev))) return prev;
+        const def = list.find(a => a.is_default) || list[0];
+        return def ? def.id : null;
+      });
+    };
+    if (cached) apply(cached);
     try {
       const data = await api.get('/users/addresses');
       const list = data.data || [];
-      setAddresses(list);
-      const def = list.find(a => a.is_default) || list[0];
-      if (def) setSelectedAddress(def);
+      apply(list);
+      writeCache('addresses', list);
     } catch {}
+  }, []);
+
+  const checkFirstOrder = useCallback(async () => {
+    try {
+      const d = await api.get('/orders/my?limit=1');
+      setIsFirstOrder((d.data || []).length === 0);
+    } catch {}
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    refreshProfile(); fetchAddresses(); checkFirstOrder();
+  }, [refreshProfile, fetchAddresses, checkFirstOrder]));
+
+  // ── معلومات المطعم تُجلب من جديد كلما تغيّر مطعم السلة ──
+  useEffect(() => {
+    let alive = true;
+    setRestaurantInfo(null);
+    if (!restaurantId) return;
+    (async () => {
+      const cached = await readCache('rest_' + restaurantId);
+      if (alive && cached?.restaurant) setRestaurantInfo(cached.restaurant);
+      try {
+        const data = await api.get(`/restaurants/${restaurantId}`);
+        if (alive) setRestaurantInfo(data.data);
+      } catch {}
+    })();
+    return () => { alive = false; };
+  }, [restaurantId]);
+
+  // لو تفرّغت السلة نصفّر الاختيارات المؤقتة
+  useEffect(() => {
+    if (items.length === 0) { setQuote(null); setCouponCode(null); setLocalCoupon({ discount: 0, error: '' }); setUsePoints(false); setUseWallet(false); }
+  }, [items.length]);
+
+  // ── جسم الطلب (نفس الشكل لـ /orders/quote و /orders) ──
+  const buildBody = useCallback(() => {
+    const body = {
+      restaurant_id: restaurantId,
+      items: items.map(i => ({
+        id: i.id,
+        quantity: i.quantity,
+        notes: i.notes || '',
+        // ids حتى يسعّر السيرفر الإضافات من قاعدة البيانات (السعر للتوافق فقط)
+        options: (i.addons || i.selectedOptions || []).map(a => ({
+          ...(a.id != null ? { id: a.id } : {}),
+          ...(a.option_id != null ? { option_id: a.option_id } : {}),
+          name: a.name,
+          price: num(a.price),
+          ...(a.group ? { group: a.group } : {}),
+        })),
+      })),
+      payment_method: paymentMethod,
+      coupon_code: couponCode || undefined,
+      redeem_points: usePoints ? loyaltyPoints : 0,
+      use_wallet: useWallet,
+      notes: [notes.trim(), deliveryType === 'delivery' && leaveAtDoor ? '🚪 اترك الطلب على الباب' : ''].filter(Boolean).join(' — '),
+      tip: deliveryType === 'delivery' ? (num(tip)) : 0,
+      order_type: deliveryType,
+    };
+    if (deliveryType === 'delivery' && selectedAddress) {
+      body.address_id = selectedAddress.id;
+      body.delivery_address = selectedAddress.address;
+      body.delivery_lat = selectedAddress.lat;
+      body.delivery_lng = selectedAddress.lng;
+    }
+    return body;
+  }, [restaurantId, items, paymentMethod, couponCode, usePoints, loyaltyPoints, useWallet, notes, deliveryType, leaveAtDoor, tip, selectedAddress]);
+
+  const quoteKey = JSON.stringify([
+    items.map(i => [i._key, i.quantity]), restaurantId, deliveryType, selectedAddress?.id, selectedAddress?.lat, selectedAddress?.lng,
+    couponCode, deliveryType === 'delivery' ? tip : 0, usePoints, loyaltyPoints, useWallet, walletBalance,
+  ]);
+
+  // ── POST /orders/quote (مؤجّل) عند أي تغيير مؤثر على السعر ──
+  useEffect(() => {
+    if (!items.length || !restaurantId || !quoteSupported.current) return;
+    if (deliveryType === 'delivery' && !selectedAddress) { setQuote(null); return; }
+    const seq = ++quoteSeq.current;
+    setQuoteLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.post('/orders/quote', buildBody());
+        if (seq !== quoteSeq.current) return;
+        if (r?.data && typeof r.data === 'object' && r.data.total != null) { setQuote(r.data); setQuoteError(''); }
+        else { setQuote(null); }
+      } catch (e) {
+        if (seq !== quoteSeq.current) return;
+        if (e?.status === 404) quoteSupported.current = false; // سيرفر قديم → حساب محلي
+        else setQuoteError(e?.status && e.status < 500 ? (e.message || '') : '');
+        setQuote(null);
+      } finally {
+        if (seq === quoteSeq.current) setQuoteLoading(false);
+      }
+    }, 450);
+    return () => clearTimeout(t);
+  }, [quoteKey]);
+
+  const usingLocal = !quote;
+
+  // ── احتياطي: رسوم التوصيل من إحداثيات العنوان المختار (مش GPS الهاتف) ──
+  useEffect(() => {
+    if (!usingLocal || deliveryType !== 'delivery') return;
+    const rl = restaurantInfo?.lat, rg = restaurantInfo?.lng, al = selectedAddress?.lat, ag = selectedAddress?.lng;
+    if (!rl || !rg || !al || !ag) { setLocalFee(DEFAULT_DELIVERY_FEE); return; } // نفس افتراض السيرفر
+    let alive = true;
+    setFeeLoading(true);
+    api.get(`/delivery-zones/calculate?lat1=${rl}&lng1=${rg}&lat2=${al}&lng2=${ag}`)
+      .then(d => { if (alive) setLocalFee(num(d.data?.fee, DEFAULT_DELIVERY_FEE) || DEFAULT_DELIVERY_FEE); })
+      .catch(() => { if (alive) setLocalFee(DEFAULT_DELIVERY_FEE); })
+      .finally(() => { if (alive) setFeeLoading(false); });
+    return () => { alive = false; };
+  }, [usingLocal, deliveryType, restaurantInfo?.lat, restaurantInfo?.lng, selectedAddress?.lat, selectedAddress?.lng]);
+
+  // ── احتياطي: إعادة التحقق من الكوبون مع كل تغيير بالمجموع ──
+  useEffect(() => {
+    if (!usingLocal || !couponCode) { setLocalCoupon({ discount: 0, error: '' }); return; }
+    let alive = true;
+    setCouponChecking(true);
+    const t = setTimeout(() => {
+      api.post('/coupons/validate', { code: couponCode, subtotal: total })
+        .then(res => { if (alive) setLocalCoupon({ discount: num(res.data?.discount), error: '' }); })
+        .catch(e => { if (alive) setLocalCoupon({ discount: 0, error: e?.message || 'الكوبون غير صالح' }); })
+        .finally(() => { if (alive) setCouponChecking(false); });
+    }, 400);
+    return () => { alive = false; clearTimeout(t); };
+  }, [usingLocal, couponCode, total]);
+
+  // ── الأرقام المعروضة: من السيرفر إن توفرت، وإلا حساب محلي مطابق لمنطق السيرفر ──
+  const summary = useMemo(() => {
+    if (quote) {
+      const q = quote;
+      const minOrder = num(q.min_order, num(restaurantInfo?.min_order));
+      return {
+        subtotal: num(q.subtotal, total),
+        deliveryFee: deliveryType === 'delivery' ? num(q.delivery_fee) : 0,
+        freeDelivery: !!q.free_delivery,
+        firstOrderDiscount: num(q.first_order_discount),
+        couponDiscount: num(q.coupon_discount),
+        couponError: q.coupon_error || '',
+        pointsValue: num(q.points_value),
+        tip: num(q.tip),
+        walletUsed: num(q.wallet_used),
+        total: num(q.total),
+        minOrder,
+        meetsMin: q.meets_min_order != null ? !!q.meets_min_order : num(q.subtotal, total) >= minOrder,
+        distanceKm: q.distance_km,
+        source: 'server',
+      };
+    }
+    const subtotal = total;
+    const isDel = deliveryType === 'delivery';
+    const freeDelivery = isDel && subtotal >= FREE_DELIVERY_THRESHOLD;
+    const deliveryFee = isDel ? (freeDelivery ? 0 : num(localFee, DEFAULT_DELIVERY_FEE)) : 0;
+    const firstOrderDiscount = isFirstOrder ? Math.min(10, subtotal * 0.15) : 0;
+    const couponDiscount = couponCode ? localCoupon.discount : 0;
+    const discount = couponDiscount + firstOrderDiscount;
+    const pointsValue = usePoints ? Math.min(loyaltyPoints * POINT_VALUE, Math.max(0, subtotal + deliveryFee - discount)) : 0;
+    const tipAmt = isDel ? num(tip) : 0;
+    const due = Math.max(0, subtotal + deliveryFee - discount - pointsValue) + tipAmt;
+    const walletUsed = useWallet ? Math.min(walletBalance, due) : 0;
+    const minOrder = num(restaurantInfo?.min_order);
+    return {
+      subtotal, deliveryFee, freeDelivery, firstOrderDiscount, couponDiscount, couponError: couponCode ? localCoupon.error : '',
+      pointsValue, tip: tipAmt, walletUsed, total: Math.max(0, due - walletUsed), minOrder, meetsMin: subtotal >= minOrder, source: 'local',
+    };
+  }, [quote, total, deliveryType, localFee, isFirstOrder, couponCode, localCoupon, usePoints, loyaltyPoints, tip, useWallet, walletBalance, restaurantInfo?.min_order]);
+
+  const calculating = quoteLoading || (usingLocal && (feeLoading || couponChecking));
+  const needsAddress = deliveryType === 'delivery' && !selectedAddress;
+  const belowMin = !summary.meetsMin && summary.minOrder > 0;
+  const restaurantClosed = restaurantInfo && restaurantInfo.is_open === false;
+  const canOrder = !placing && !belowMin && !needsAddress && !restaurantClosed && items.length > 0;
+
+  const applyCoupon = () => {
+    const code = couponInput.trim().toUpperCase();
+    if (!code) return;
+    Keyboard.dismiss();
+    setCouponCode(code);
+  };
+  const removeCoupon = () => { setCouponCode(null); setCouponInput(''); setLocalCoupon({ discount: 0, error: '' }); };
+
+  const confirmClear = () => {
+    Alert.alert('إفراغ السلة', 'بدك تحذف كل الأصناف من السلة؟', [
+      { text: 'إلغاء', style: 'cancel' },
+      { text: 'إفراغ', style: 'destructive', onPress: clearCart },
+    ]);
   };
 
   const placeOrder = async () => {
     if (submittingRef.current) return;
+    if (needsAddress) return Alert.alert('عنوان التوصيل', 'الرجاء اختيار أو إضافة عنوان التوصيل');
+    if (belowMin) return Alert.alert('الحد الأدنى للطلب', `الحد الأدنى لهذا المطعم ${money(summary.minOrder)}`);
+    if (restaurantClosed) return Alert.alert('المطعم مغلق', 'المطعم مغلق حالياً، جرّب لاحقاً');
+    if (items.length === 0) return;
     submittingRef.current = true;
-    if (deliveryType === 'delivery' && !selectedAddress) {
-      submittingRef.current = false;
-      return Alert.alert('خطأ', 'الرجاء تحديد عنوان التوصيل');
-    }
-    if (items.length === 0) { submittingRef.current = false; return; }
-
-    setLoading(true);
+    setPlacing(true);
+    const group = groupOrder;
+    const method = paymentMethod;
     try {
-      const orderItems = items.map(i => ({
-        id: i.id,
-        quantity: i.quantity,
-        price: parseFloat(i.discount_price || i.price),
-        options: i.addons || i.selectedOptions || [],
-        notes: i.notes || ''
-      }));
-
-      const body = {
-        restaurant_id: restaurantId,
-        items: orderItems,
-        payment_method: paymentMethod,
-        coupon_code: couponCode || undefined,
-        redeem_points: usePoints ? Math.round(redeemValue / 0.05) : 0,
-        use_wallet: useWallet,
-        notes: [notes, leaveAtDoor ? '🚪 اترك الطلب على الباب' : '', scheduleLabel ? `⏰ توصيل مجدول: ${scheduleLabel}` : ''].filter(Boolean).join(' — '),
-        tip: parseFloat(tip) || 0,
-        total_amount: finalTotal,
-        order_type: deliveryType,
-      };
-
-      if (deliveryType === 'delivery' && selectedAddress) {
-        body.address_id = selectedAddress.id;
-        body.delivery_address = selectedAddress.address;
-        body.delivery_lat = selectedAddress.lat;
-        body.delivery_lng = selectedAddress.lng;
-        body.delivery_fee = deliveryFee;
-      }
-
-      const data = await api.post('/orders', body);
+      const data = await api.post('/orders', buildBody());
       const orderId = data.data?.id || data.id;
       clearCart();
-
-      // الدفع بالبطاقة → افتح صفحة Lahza الآمنة
-      if (paymentMethod === 'card') {
-        try {
-          const initRes = await api.post('/payments/lahza/init', { order_id: orderId });
-          if (initRes.authorization_url) {
-            navigation.replace('PaymentWebView', {
-              authorizationUrl: initRes.authorization_url,
-              reference: initRes.reference,
-              orderId,
-            });
-            return;
-          }
-          Alert.alert('الدفع بالبطاقة', 'تعذّر بدء الدفع الإلكتروني. طلبك محفوظ ويمكنك الدفع عند الاستلام.');
-        } catch (err) {
-          Alert.alert('الدفع بالبطاقة', err.message || 'الدفع الإلكتروني غير متاح حالياً. طلبك محفوظ للدفع عند الاستلام.');
-        }
+      setNotes(''); setTip(0); setLeaveAtDoor(false); setCouponCode(null); setCouponInput(''); setUsePoints(false); setUseWallet(false);
+      // الطلب الجماعي يُقفل فقط بعد نجاح إنشاء الطلب
+      if (group?.id) api.post(`/group-orders/${group.id}/close`, { status: 'ordered', order_id: orderId }).catch(() => {});
+      refreshProfile();
+      if (method === 'card') {
+        await startCardPayment(navigation, orderId);
+      } else {
+        // navigate (مش replace) حتى يبقى Main وتبويباته تحت شاشة التتبع
+        navigation.navigate('OrderTracking', { orderId, fromCheckout: true });
       }
-
-      navigation.replace('OrderTracking', { orderId });
     } catch (e) {
-      Alert.alert('خطأ', e.message || 'فشل في إتمام الطلب');
+      Alert.alert('تعذّر إتمام الطلب', e?.message || 'فشل في إتمام الطلب، حاول مرة أخرى');
     } finally {
-      setLoading(false);
+      setPlacing(false);
       submittingRef.current = false;
     }
   };
 
-  // توصيل مجاني فوق 50₪ (مطابق للسيرفر) — نعكسه بالعرض حتى يطابق المبلغ المخصوم فعلياً
-  const effectiveDeliveryFee = (deliveryType === 'delivery' && total >= 50) ? 0 : deliveryFee;
-  const goodsTotal = (deliveryType === 'delivery' ? total + effectiveDeliveryFee : total) - couponDiscount;
-  const redeemValue = usePoints ? Math.min(loyaltyPoints * 0.05, Math.max(0, goodsTotal)) : 0;
-  const dueBeforeWallet = Math.max(0, goodsTotal - redeemValue) + (parseFloat(tip) || 0);
-  const walletUsed = useWallet ? Math.min(walletBalance, dueBeforeWallet) : 0;
-  const finalTotal = Math.max(0, dueBeforeWallet - walletUsed);
+  const goHome = () => navigation.navigate('Main', { screen: 'الرئيسية' });
 
   if (items.length === 0) {
     return (
@@ -209,7 +315,7 @@ export default function CartScreen() {
         <View style={styles.emptyIconWrap}><Text style={{ fontSize: 58 }}>🛒</Text></View>
         <Text style={styles.emptyTitle}>سلّتك فاضية</Text>
         <Text style={styles.emptySub}>استكشف أشهى المطاعم وابدأ طلبك الآن</Text>
-        <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate('Main', { screen: 'الرئيسية' })} style={styles.shopBtn}>
+        <TouchableOpacity activeOpacity={0.9} onPress={goHome} style={styles.shopBtn} accessibilityRole="button">
           <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.shopBtnGrad}>
             <Text style={styles.shopBtnText}>تصفّح المطاعم</Text>
           </LinearGradient>
@@ -218,192 +324,224 @@ export default function CartScreen() {
     );
   }
 
+  const SummaryRow = ({ label, value, green, bold }) => (
+    <View style={styles.summaryRow}>
+      <Text style={[styles.summaryLabel, green && { color: COLORS.green }, bold && styles.totalLabel]}>{label}</Text>
+      <Text style={[styles.summaryVal, green && { color: COLORS.green }, bold && styles.totalVal]}>{value}</Text>
+    </View>
+  );
+
+  const subtotalForBars = summary.subtotal;
+
   return (
     <View style={styles.container}>
-      <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}><Ionicons name="arrow-back" size={22} color="#FFF" /></TouchableOpacity>
-        <Text style={styles.title}>سلة الطلبات ({count})</Text>
-        <TouchableOpacity onPress={clearCart} style={styles.headerBtn}><Ionicons name="trash-outline" size={20} color="#FFF" /></TouchableOpacity>
+      <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.header, { paddingTop: headerTop }]}>
+        <TouchableOpacity onPress={goHome} style={styles.headerBtn} accessibilityRole="button" accessibilityLabel="رجوع للرئيسية">
+          <Ionicons name="arrow-forward" size={22} color="#FFF" />
+        </TouchableOpacity>
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text style={styles.title}>سلّتي ({count})</Text>
+          {!!restaurantName && <Text style={styles.headerSub} numberOfLines={1}>{restaurantName}</Text>}
+        </View>
+        <TouchableOpacity onPress={confirmClear} style={styles.headerBtn} accessibilityRole="button" accessibilityLabel="إفراغ السلة">
+          <Ionicons name="trash-outline" size={20} color="#FFF" />
+        </TouchableOpacity>
       </LinearGradient>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        contentContainerStyle={{ paddingBottom: 20 }}>
-        {/* Items */}
+        contentContainerStyle={{ paddingBottom: tabInset + 110 }}>
+
+        {!!groupOrder?.code && (
+          <View style={[styles.infoBanner, { backgroundColor: COLORS.tint, borderColor: COLORS.tintBorder }]}>
+            <Ionicons name="people" size={18} color={COLORS.primary} />
+            <Text style={styles.infoBannerTxt}>طلب جماعي ({groupOrder.code}) — المجموعة تُقفل بعد تأكيد الطلب</Text>
+          </View>
+        )}
+
+        {restaurantClosed && (
+          <View style={[styles.infoBanner, { backgroundColor: COLORS.dangerBg, borderColor: COLORS.dangerBorder }]}>
+            <Ionicons name="lock-closed" size={18} color={COLORS.red} />
+            <Text style={[styles.infoBannerTxt, { color: COLORS.red }]}>المطعم مغلق حالياً — ما بنقدر نرسل الطلب الآن</Text>
+          </View>
+        )}
+
+        {/* الأصناف */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🧾 طلباتك</Text>
           {items.map(item => (
             <View key={item._key} style={styles.itemRow}>
-              <View style={styles.qtyControl}>
-                <TouchableOpacity onPress={() => removeItem(item._key)} style={styles.qtyBtn}><Text style={[styles.qtyBtnText, { color: COLORS.primary }]}>−</Text></TouchableOpacity>
-                <Text style={styles.qty}>{item.quantity}</Text>
-                <TouchableOpacity onPress={() => addItem(item, { id: restaurantId })} style={[styles.qtyBtn, { backgroundColor: COLORS.primary }]}><Text style={styles.qtyBtnText}>+</Text></TouchableOpacity>
-              </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.itemName}>{item.name_ar || item.name}</Text>
                 {item.addons?.length > 0 && (
                   <Text style={styles.itemOptions}>{item.addons.map(a => a.name).join(' • ')}</Text>
                 )}
-                <Text style={styles.itemPrice}>{
-                  ((parseFloat(item.discount_price || item.price || 0) + (item.addons || []).reduce((s,a) => s + parseFloat(a.price||0), 0)) * item.quantity).toFixed(2)
-                }₪</Text>
+                <Text style={styles.itemPrice}>{money(linePrice(item) * item.quantity)}</Text>
                 <TextInput
                   style={styles.itemNoteInput}
                   placeholder="ملاحظة (بدون بصل، حار زيادة...)"
-                  placeholderTextColor={COLORS.gray}
+                  placeholderTextColor={COLORS.faint}
                   value={item.notes || ''}
                   onChangeText={(t) => updateItemNote(item._key, t)}
+                  textAlign="right"
+                  maxLength={200}
                 />
+              </View>
+              <View style={styles.qtyControl}>
+                <TouchableOpacity onPress={() => incrementItem(item._key)} style={[styles.qtyBtn, { backgroundColor: COLORS.primary, borderColor: COLORS.primary }]}
+                  accessibilityRole="button" accessibilityLabel={`زيادة ${item.name_ar}`} disabled={item.quantity >= 99}>
+                  <Ionicons name="add" size={17} color="#FFF" />
+                </TouchableOpacity>
+                <Text style={styles.qty}>{item.quantity}</Text>
+                <TouchableOpacity onPress={() => removeItem(item._key)} style={styles.qtyBtn} accessibilityRole="button" accessibilityLabel={`إنقاص ${item.name_ar}`}>
+                  <Ionicons name={item.quantity === 1 ? 'trash-outline' : 'remove'} size={16} color={COLORS.primary} />
+                </TouchableOpacity>
               </View>
             </View>
           ))}
+          <TouchableOpacity style={styles.addMoreBtn} onPress={() => restaurantId && navigation.navigate('Restaurant', { restaurantId })}>
+            <Ionicons name="add-circle-outline" size={18} color={COLORS.primary} />
+            <Text style={styles.addMoreTxt}>أضف أصناف أخرى</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* شريط الحد الأدنى للطلب */}
-        {!!restaurantInfo?.min_order && total < restaurantInfo.min_order && (
-          <View style={[styles.freeDelivCard, { backgroundColor: '#FFF9E6', borderColor: '#FFE9A8' }]}>
-            <Text style={styles.freeDelivText}>الحد الأدنى للطلب <Text style={{ fontWeight: '900' }}>{restaurantInfo.min_order}₪</Text> — أضف <Text style={{ fontWeight: '900', color: COLORS.primary }}>{(restaurantInfo.min_order - total).toFixed(2)}₪</Text> للمتابعة</Text>
-            <View style={styles.freeDelivBar}>
-              <View style={[styles.freeDelivFill, { backgroundColor: '#FFB800', width: `${Math.min(100, (total / restaurantInfo.min_order) * 100)}%` }]} />
+        {/* الحد الأدنى للطلب */}
+        {belowMin && (
+          <View style={[styles.progressCard, { backgroundColor: COLORS.warnBg, borderColor: COLORS.warnBorder }]}>
+            <Text style={styles.progressText}>الحد الأدنى للطلب <Text style={{ fontWeight: '900' }}>{money(summary.minOrder)}</Text> — أضف <Text style={{ fontWeight: '900', color: COLORS.primary }}>{money(summary.minOrder - subtotalForBars)}</Text> للمتابعة</Text>
+            <View style={[styles.progressBar, { backgroundColor: COLORS.warnBorder }]}>
+              <View style={[styles.progressFill, { backgroundColor: COLORS.warnFill, width: `${Math.min(100, (subtotalForBars / summary.minOrder) * 100)}%` }]} />
             </View>
           </View>
         )}
 
-        {/* شريط تقدّم التوصيل المجاني */}
+        {/* التوصيل المجاني */}
         {deliveryType === 'delivery' && (
-          <View style={styles.freeDelivCard}>
-            {total >= 50 ? (
+          <View style={[styles.progressCard, { backgroundColor: COLORS.tint, borderColor: COLORS.tintBorder }]}>
+            {(summary.freeDelivery || subtotalForBars >= FREE_DELIVERY_THRESHOLD) ? (
               <Text style={styles.freeDelivDone}>🎉 مبروك! حصلت على توصيل مجاني</Text>
             ) : (
               <>
-                <Text style={styles.freeDelivText}>أضف <Text style={{ fontWeight: '900', color: COLORS.primary }}>{(50 - total).toFixed(2)}₪</Text> واحصل على توصيل مجاني 🚚</Text>
-                <View style={styles.freeDelivBar}>
-                  <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.freeDelivFill, { width: `${Math.min(100, (total / 50) * 100)}%` }]} />
+                <Text style={styles.progressText}>أضف <Text style={{ fontWeight: '900', color: COLORS.primary }}>{money(FREE_DELIVERY_THRESHOLD - subtotalForBars)}</Text> واحصل على توصيل مجاني 🚚</Text>
+                <View style={[styles.progressBar, { backgroundColor: COLORS.tintBorder }]}>
+                  <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 1, y: 0 }} end={{ x: 0, y: 0 }} style={[styles.progressFill, { width: `${Math.min(100, (subtotalForBars / FREE_DELIVERY_THRESHOLD) * 100)}%` }]} />
                 </View>
               </>
             )}
           </View>
         )}
 
-        {/* Delivery Type */}
+        {/* طريقة الاستلام */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🚚 طريقة الاستلام</Text>
           <View style={styles.toggleRow}>
-            <TouchableOpacity
-              style={[styles.toggleBtn, deliveryType === 'delivery' && styles.toggleBtnActive]}
-              onPress={() => setDeliveryType('delivery')}
-            >
-              <Ionicons name="bicycle-outline" size={20} color={deliveryType === 'delivery' ? '#FFF' : COLORS.gray} />
-              <Text style={[styles.toggleText, deliveryType === 'delivery' && { color: '#FFF' }]}>توصيل لموقعي</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.toggleBtn, deliveryType === 'pickup' && styles.toggleBtnActive]}
-              onPress={() => setDeliveryType('pickup')}
-            >
-              <Ionicons name="storefront-outline" size={20} color={deliveryType === 'pickup' ? '#FFF' : COLORS.gray} />
-              <Text style={[styles.toggleText, deliveryType === 'pickup' && { color: '#FFF' }]}>استلام من المحل</Text>
-            </TouchableOpacity>
+            {[
+              { k: 'delivery', l: 'توصيل لعنواني', i: 'bicycle-outline' },
+              { k: 'pickup', l: 'استلام من المحل', i: 'storefront-outline' },
+            ].map(o => {
+              const on = deliveryType === o.k;
+              return (
+                <TouchableOpacity key={o.k} style={[styles.toggleBtn, on && styles.toggleBtnActive]} onPress={() => setDeliveryType(o.k)}
+                  accessibilityRole="radio" accessibilityState={{ selected: on }}>
+                  <Ionicons name={o.i} size={20} color={on ? '#FFF' : COLORS.gray} />
+                  <Text style={[styles.toggleText, on && { color: '#FFF' }]}>{o.l}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
-          {deliveryType === 'delivery' && (
+          {deliveryType === 'delivery' ? (
             <View style={styles.feeBox}>
               <Ionicons name="location-outline" size={16} color={COLORS.primary} />
-              <Text style={styles.feeLabel}>رسوم التوصيل لموقعك:</Text>
-              {calculatingFee
-                ? <ActivityIndicator size="small" color={COLORS.primary} />
-                : effectiveDeliveryFee === 0
-                  ? <Text style={[styles.feeValue, { color: COLORS.green }]}>مجاني 🎉</Text>
-                  : <Text style={styles.feeValue}>{effectiveDeliveryFee}₪</Text>
-              }
+              <Text style={styles.feeLabel}>رسوم التوصيل {selectedAddress ? `إلى «${addrLabel(selectedAddress)}»` : ''}</Text>
+              {needsAddress
+                ? <Text style={[styles.feeValue, { fontSize: 13, color: COLORS.gray }]}>اختر عنوان</Text>
+                : calculating && summary.deliveryFee === 0 && !summary.freeDelivery
+                  ? <ActivityIndicator size="small" color={COLORS.primary} />
+                  : summary.deliveryFee === 0
+                    ? <Text style={[styles.feeValue, { color: COLORS.green }]}>مجاني 🎉</Text>
+                    : <Text style={styles.feeValue}>{money(summary.deliveryFee)}</Text>}
             </View>
-          )}
-
-          {deliveryType === 'pickup' && (
-            <View style={styles.pickupBox}>
+          ) : (
+            <View style={[styles.feeBox, { backgroundColor: COLORS.successBg }]}>
               <Ionicons name="checkmark-circle" size={18} color={COLORS.green} />
-              <Text style={styles.pickupText}>ستستلم طلبك من المطعم — توصيل مجاني</Text>
+              <Text style={[styles.feeLabel, { color: COLORS.successText, fontWeight: '700' }]}>ستستلم طلبك من المطعم — بدون رسوم توصيل</Text>
             </View>
           )}
         </View>
 
-        {/* Address (only for delivery) */}
+        {/* عنوان التوصيل */}
         {deliveryType === 'delivery' && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>📍 عنوان التوصيل</Text>
-            {addresses.map(addr => (
-              <TouchableOpacity
-                key={addr.id}
-                style={[styles.addrOption, selectedAddress?.id === addr.id && styles.addrOptionActive]}
-                onPress={() => setSelectedAddress(addr)}
-              >
-                <Ionicons name="location" size={18} color={selectedAddress?.id === addr.id ? COLORS.primary : COLORS.gray} />
-                <View style={{ flex: 1, marginLeft: 8 }}>
-                  <Text style={styles.addrTitle}>{addr.title || addr.label || 'عنوان'}</Text>
-                  <Text style={styles.addrText} numberOfLines={1}>{addr.address}</Text>
-                </View>
-                {selectedAddress?.id === addr.id && <Ionicons name="checkmark-circle" size={20} color={COLORS.primary} />}
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={styles.addAddrBtn} onPress={() => navigation.navigate('AddAddress')}>
+            <View style={styles.cardHead}>
+              <Text style={styles.cardTitle}>📍 عنوان التوصيل</Text>
+              {addresses.length > 0 && (
+                <TouchableOpacity onPress={() => navigation.navigate('Addresses')}><Text style={styles.linkTxt}>إدارة</Text></TouchableOpacity>
+              )}
+            </View>
+            {addresses.map(addr => {
+              const on = String(selectedAddressId) === String(addr.id);
+              return (
+                <TouchableOpacity key={addr.id} style={[styles.option, on && styles.optionActive]} onPress={() => setSelectedAddressId(addr.id)}
+                  accessibilityRole="radio" accessibilityState={{ selected: on }}>
+                  <Ionicons name={on ? 'radio-button-on' : 'radio-button-off'} size={20} color={on ? COLORS.primary : COLORS.gray} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.addrTitle}>{addrLabel(addr)}{addr.is_default ? '  · افتراضي' : ''}</Text>
+                    <Text style={styles.addrText} numberOfLines={1}>{addr.address}</Text>
+                  </View>
+                  <Ionicons name={addrLabel(addr).includes('عمل') ? 'briefcase-outline' : addrLabel(addr).includes('منزل') ? 'home-outline' : 'location-outline'} size={18} color={on ? COLORS.primary : COLORS.gray} />
+                </TouchableOpacity>
+              );
+            })}
+            {needsAddress && <Text style={styles.warnTxt}>أضف عنوان التوصيل حتى نقدر نحسب الرسوم ونرسل طلبك</Text>}
+            <TouchableOpacity style={styles.addMoreBtn} onPress={() => navigation.navigate('AddAddress')}>
               <Ionicons name="add-circle-outline" size={18} color={COLORS.primary} />
-              <Text style={styles.addAddrText}>إضافة عنوان جديد</Text>
+              <Text style={styles.addMoreTxt}>إضافة عنوان جديد</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Payment */}
+        {/* الدفع */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>💳 طريقة الدفع</Text>
           {[
             { id: 'cash', label: 'كاش عند الاستلام', icon: 'cash-outline' },
-            { id: 'card', label: 'بطاقة ائتمان', icon: 'card-outline' }
-          ].map(pm => (
-            <TouchableOpacity
-              key={pm.id}
-              style={[styles.payOption, paymentMethod === pm.id && styles.payOptionActive]}
-              onPress={() => setPaymentMethod(pm.id)}
-            >
-              <Ionicons name={pm.icon} size={20} color={paymentMethod === pm.id ? COLORS.primary : COLORS.gray} />
-              <Text style={[styles.payLabel, paymentMethod === pm.id && { color: COLORS.primary, fontWeight: '700' }]}>{pm.label}</Text>
-              <Ionicons name={paymentMethod === pm.id ? 'radio-button-on' : 'radio-button-off'} size={20} color={paymentMethod === pm.id ? COLORS.primary : COLORS.gray} />
-            </TouchableOpacity>
-          ))}
+            { id: 'card', label: 'بطاقة ائتمان (دفع آمن)', icon: 'card-outline' },
+          ].map(pm => {
+            const on = paymentMethod === pm.id;
+            return (
+              <TouchableOpacity key={pm.id} style={[styles.option, on && styles.optionActive]} onPress={() => setPaymentMethod(pm.id)}
+                accessibilityRole="radio" accessibilityState={{ selected: on }}>
+                <Ionicons name={on ? 'radio-button-on' : 'radio-button-off'} size={20} color={on ? COLORS.primary : COLORS.gray} />
+                <Text style={[styles.payLabel, on && { color: COLORS.primary, fontWeight: '800' }]}>{pm.label}</Text>
+                <Ionicons name={pm.icon} size={20} color={on ? COLORS.primary : COLORS.gray} />
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
-        {/* بقشيش السائق + اترك على الباب */}
+        {/* خيارات التوصيل (للتوصيل فقط) */}
         {deliveryType === 'delivery' && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>🛵 خيارات التوصيل</Text>
-            <Text style={styles.tipLabel}>بقشيش للسائق (اختياري)</Text>
-            <View style={styles.tipRow}>
+            <Text style={styles.tipLabel}>بقشيش للسائق (اختياري — يروح كامل للسائق)</Text>
+            <View style={styles.chipsRow}>
               {[0, 2, 5, 10].map(v => (
-                <TouchableOpacity key={v} onPress={() => setTip(v)} style={[styles.tipChip, tip === v && styles.tipChipOn]}>
-                  <Text style={[styles.tipChipTxt, tip === v && { color: '#FFF' }]}>{v === 0 ? 'بدون' : `${v}₪`}</Text>
+                <TouchableOpacity key={v} onPress={() => setTip(v)} style={[styles.chip, tip === v && styles.chipOn]} accessibilityRole="radio" accessibilityState={{ selected: tip === v }}>
+                  <Text style={[styles.chipTxt, tip === v && { color: '#FFF' }]}>{v === 0 ? 'بدون' : `${v}₪`}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity style={styles.doorRow} onPress={() => setLeaveAtDoor(v => !v)}>
+            <TouchableOpacity style={styles.checkRow} onPress={() => setLeaveAtDoor(v => !v)} accessibilityRole="checkbox" accessibilityState={{ checked: leaveAtDoor }}>
               <Ionicons name={leaveAtDoor ? 'checkbox' : 'square-outline'} size={22} color={COLORS.primary} />
-              <Text style={styles.doorText}>اترك الطلب على الباب 🚪</Text>
+              <Text style={styles.checkText}>اترك الطلب على الباب 🚪</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* وقت التوصيل */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>🕐 وقت التوصيل</Text>
-          <View style={styles.tipRow}>
-            {SCHEDULE_OPTS.map(o => (
-              <TouchableOpacity key={o.k} onPress={() => setSchedule(o.k)} style={[styles.tipChip, schedule === o.k && styles.tipChipOn]}>
-                <Text style={[styles.tipChipTxt, schedule === o.k && { color: '#FFF' }, { fontSize: 12 }]}>{o.l}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        {/* Notes */}
+        {/* ملاحظات */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>📝 ملاحظات للمطعم</Text>
           <TextInput
@@ -413,38 +551,41 @@ export default function CartScreen() {
             onChangeText={setNotes}
             multiline
             numberOfLines={3}
-            placeholderTextColor={COLORS.gray}
+            placeholderTextColor={COLORS.faint}
+            textAlign="right"
+            maxLength={300}
           />
         </View>
 
-        {/* Loyalty + Wallet */}
+        {/* النقاط والمحفظة */}
         {(loyaltyPoints >= 100 || walletBalance > 0) && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>🏆 نقاطي ومحفظتي</Text>
             {loyaltyPoints >= 100 && (
-              <TouchableOpacity style={styles.useRow} onPress={() => setUsePoints(v => !v)}>
+              <TouchableOpacity style={styles.checkRow} onPress={() => setUsePoints(v => !v)} accessibilityRole="checkbox" accessibilityState={{ checked: usePoints }}>
                 <Ionicons name={usePoints ? 'checkbox' : 'square-outline'} size={22} color={COLORS.primary} />
-                <Text style={styles.useText}>استخدم نقاطي ({loyaltyPoints} نقطة ≈ {(loyaltyPoints * 0.05).toFixed(1)}₪)</Text>
+                <Text style={styles.checkText}>استخدم نقاطي ({loyaltyPoints} نقطة ≈ {(loyaltyPoints * POINT_VALUE).toFixed(1)}₪)</Text>
               </TouchableOpacity>
             )}
             {walletBalance > 0 && (
-              <TouchableOpacity style={styles.useRow} onPress={() => setUseWallet(v => !v)}>
+              <TouchableOpacity style={styles.checkRow} onPress={() => setUseWallet(v => !v)} accessibilityRole="checkbox" accessibilityState={{ checked: useWallet }}>
                 <Ionicons name={useWallet ? 'checkbox' : 'square-outline'} size={22} color={COLORS.primary} />
-                <Text style={styles.useText}>ادفع من محفظتي ({walletBalance.toFixed(2)}₪)</Text>
+                <Text style={styles.checkText}>ادفع من محفظتي (رصيدك {money(walletBalance)})</Text>
               </TouchableOpacity>
             )}
-            <Text style={styles.cashbackHint}>💰 بتربح كاش باك 2% على هالطلب</Text>
           </View>
         )}
 
-        {/* Coupon */}
+        {/* كود الخصم */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🎟️ كود الخصم</Text>
           {couponCode ? (
-            <View style={styles.couponApplied}>
-              <Ionicons name="pricetag" size={18} color={COLORS.green} />
-              <Text style={styles.couponAppliedTxt}>{couponCode} — خصم {couponDiscount.toFixed(2)}₪</Text>
-              <TouchableOpacity onPress={removeCoupon}><Ionicons name="close-circle" size={22} color={COLORS.gray} /></TouchableOpacity>
+            <View style={[styles.couponApplied, summary.couponError ? { backgroundColor: COLORS.dangerBg, borderColor: COLORS.dangerBorder } : null]}>
+              <Ionicons name={summary.couponError ? 'alert-circle' : 'pricetag'} size={18} color={summary.couponError ? COLORS.red : COLORS.green} />
+              <Text style={[styles.couponAppliedTxt, summary.couponError && { color: COLORS.red }]}>
+                {couponCode} — {summary.couponError ? summary.couponError : calculating ? 'جاري التحقق…' : `خصم ${money(summary.couponDiscount)}`}
+              </Text>
+              <TouchableOpacity onPress={removeCoupon} accessibilityLabel="إزالة الكوبون"><Ionicons name="close-circle" size={22} color={COLORS.gray} /></TouchableOpacity>
             </View>
           ) : (
             <View style={styles.couponRow}>
@@ -454,141 +595,140 @@ export default function CartScreen() {
                 value={couponInput}
                 onChangeText={setCouponInput}
                 autoCapitalize="characters"
-                placeholderTextColor={COLORS.gray}
+                placeholderTextColor={COLORS.faint}
+                textAlign="right"
+                onSubmitEditing={applyCoupon}
+                returnKeyType="done"
               />
-              <TouchableOpacity style={styles.couponBtn} onPress={applyCoupon} disabled={couponLoading}>
-                {couponLoading ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.couponBtnTxt}>تطبيق</Text>}
+              <TouchableOpacity style={[styles.couponBtn, !couponInput.trim() && { opacity: 0.5 }]} onPress={applyCoupon} disabled={!couponInput.trim()}>
+                <Text style={styles.couponBtnTxt}>تطبيق</Text>
               </TouchableOpacity>
             </View>
           )}
-          {!!couponMsg && <Text style={[styles.couponMsg, { color: couponCode ? COLORS.green : COLORS.red }]}>{couponMsg}</Text>}
         </View>
 
-        {/* Summary */}
+        {/* الملخص */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>🧮 ملخص الطلب</Text>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>المجموع الفرعي</Text>
-            <Text style={styles.summaryVal}>{total.toFixed(2)}₪</Text>
+          <View style={styles.cardHead}>
+            <Text style={styles.cardTitle}>🧮 ملخص الطلب</Text>
+            {calculating && <ActivityIndicator size="small" color={COLORS.primary} />}
           </View>
-          {couponDiscount > 0 && (
-            <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: COLORS.green }]}>خصم الكوبون</Text>
-              <Text style={[styles.summaryVal, { color: COLORS.green }]}>-{couponDiscount.toFixed(2)}₪</Text>
-            </View>
+          <SummaryRow label="المجموع الفرعي" value={money(summary.subtotal)} />
+          {deliveryType === 'delivery' && (
+            <SummaryRow label="رسوم التوصيل" value={needsAddress ? '—' : (summary.deliveryFee === 0 ? 'مجاني' : money(summary.deliveryFee))} green={!needsAddress && summary.deliveryFee === 0} />
           )}
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>رسوم التوصيل</Text>
-            <Text style={[styles.summaryVal, deliveryType === 'pickup' && { color: COLORS.green }]}>
-              {deliveryType === 'pickup' ? 'مجاني' : `${deliveryFee}₪`}
+          {summary.firstOrderDiscount > 0 && <SummaryRow label="🎁 خصم أول طلب" value={`-${money(summary.firstOrderDiscount)}`} green />}
+          {summary.couponDiscount > 0 && <SummaryRow label="خصم الكوبون" value={`-${money(summary.couponDiscount)}`} green />}
+          {summary.pointsValue > 0 && <SummaryRow label="خصم النقاط" value={`-${money(summary.pointsValue)}`} green />}
+          {summary.tip > 0 && <SummaryRow label="بقشيش السائق" value={money(summary.tip)} />}
+          {summary.walletUsed > 0 && <SummaryRow label="من المحفظة" value={`-${money(summary.walletUsed)}`} green />}
+          <View style={styles.divider} />
+          <SummaryRow label="الإجمالي" value={money(summary.total)} bold />
+          {summary.subtotal > 0 && (
+            <Text style={styles.cashbackHint}>💰 بتربح كاش باك ≈ {money(summary.subtotal * 0.02)} لمحفظتك على هالطلب</Text>
+          )}
+          {!!quoteError && <Text style={styles.warnTxt}>{quoteError}</Text>}
+          {summary.source === 'local' && !quoteSupported.current && (
+            <Text style={styles.estimateHint}>الأرقام تقديرية — المبلغ النهائي يحدده النظام عند التأكيد</Text>
+          )}
+        </View>
+      </ScrollView>
+
+      <View style={[styles.footer, { bottom: tabInset + 10 }]} pointerEvents="box-none">
+        {(belowMin || needsAddress) && (
+          <View style={[styles.footerHint, { backgroundColor: COLORS.card, borderColor: COLORS.border }]}>
+            <Ionicons name="information-circle" size={16} color={COLORS.primary} />
+            <Text style={styles.footerHintTxt}>
+              {needsAddress ? 'اختر عنوان التوصيل للمتابعة' : `أضف ${money(summary.minOrder - summary.subtotal)} للوصول للحد الأدنى`}
             </Text>
           </View>
-          {parseFloat(tip) > 0 && (
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>بقشيش السائق</Text>
-              <Text style={styles.summaryVal}>{parseFloat(tip || 0).toFixed(2)}₪</Text>
-            </View>
-          )}
-          {redeemValue > 0 && (
-            <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: COLORS.green }]}>خصم النقاط</Text>
-              <Text style={[styles.summaryVal, { color: COLORS.green }]}>-{redeemValue.toFixed(2)}₪</Text>
-            </View>
-          )}
-          {walletUsed > 0 && (
-            <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: COLORS.green }]}>من المحفظة</Text>
-              <Text style={[styles.summaryVal, { color: COLORS.green }]}>-{walletUsed.toFixed(2)}₪</Text>
-            </View>
-          )}
-          <View style={[styles.summaryRow, { borderTopWidth: 1, borderTopColor: '#F0F0F0', paddingTop: 10, marginTop: 4 }]}>
-            <Text style={[styles.summaryLabel, { fontWeight: '800', fontSize: 16, color: COLORS.text }]}>الإجمالي</Text>
-            <Text style={[styles.summaryVal, { fontWeight: '900', fontSize: 18, color: COLORS.primary }]}>{finalTotal.toFixed(2)}₪</Text>
-          </View>
-        </View>
-
-        <View style={{ height: 190 }} />
-      </ScrollView>
-      <PressableScale style={[styles.orderBtn, loading && { opacity: 0.7 }]} onPress={placeOrder} disabled={loading}>
-        <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.orderBtnGrad}>
-          {loading
-            ? <ActivityIndicator color="#FFF" />
-            : <Text style={styles.orderBtnText}>تأكيد الطلب • {finalTotal.toFixed(2)}₪</Text>
-          }
-        </LinearGradient>
-      </PressableScale>
+        )}
+        <PressableScale style={[styles.orderBtn, !canOrder && { opacity: 0.55 }]} onPress={placeOrder} disabled={!canOrder}
+          accessibilityRole="button" accessibilityLabel={`تأكيد الطلب ${money(summary.total)}`}>
+          <LinearGradient colors={canOrder ? COLORS.gradients.sunset : [COLORS.gray, COLORS.faint]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.orderBtnGrad}>
+            {placing
+              ? <ActivityIndicator color="#FFF" />
+              : <Text style={styles.orderBtnText}>{paymentMethod === 'card' ? 'تأكيد والدفع' : 'تأكيد الطلب'} • {money(summary.total)}</Text>}
+          </LinearGradient>
+        </PressableScale>
+      </View>
     </View>
   );
 }
 
-const makeStyles = (COLORS) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingTop: 54, paddingBottom: 18, borderBottomLeftRadius: 26, borderBottomRightRadius: 26, ...COLORS.shadow.float },
+const makeStyles = (C) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
+  header: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingBottom: 18, borderBottomLeftRadius: 26, borderBottomRightRadius: 26, ...C.shadow.float },
   headerBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 18, fontWeight: '900', color: '#FFF' },
-  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16, backgroundColor: COLORS.bg },
-  emptyIconWrap: { width: 120, height: 120, borderRadius: 40, backgroundColor: COLORS.tint, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  emptyTitle: { fontSize: 22, fontWeight: '900', color: COLORS.text },
-  emptySub: { fontSize: 14, color: COLORS.gray, fontWeight: '600', marginTop: -6, textAlign: 'center', paddingHorizontal: 40 },
-  shopBtn: { borderRadius: 18, overflow: 'hidden', marginTop: 6, ...COLORS.shadow.float },
+  headerSub: { fontSize: 12, color: 'rgba(255,255,255,0.9)', fontWeight: '600', marginTop: 2 },
+  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16, backgroundColor: C.bg },
+  emptyIconWrap: { width: 120, height: 120, borderRadius: 40, backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  emptyTitle: { fontSize: 22, fontWeight: '900', color: C.text },
+  emptySub: { fontSize: 14, color: C.gray, fontWeight: '600', marginTop: -6, textAlign: 'center', paddingHorizontal: 40 },
+  shopBtn: { borderRadius: 18, overflow: 'hidden', marginTop: 6, ...C.shadow.float },
   shopBtnGrad: { paddingHorizontal: 30, paddingVertical: 15, borderRadius: 18 },
   shopBtnText: { color: '#FFF', fontWeight: '900', fontSize: 15 },
-  card: { backgroundColor: COLORS.card, margin: 12, marginBottom: 0, borderRadius: 20, padding: 16, ...COLORS.shadow.soft },
-  cardTitle: { fontSize: 14, fontWeight: '800', color: COLORS.text, marginBottom: 12 },
-  itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.line, gap: 12 },
-  qtyControl: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  qtyBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: COLORS.tint, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFE0CC' },
-  qtyBtnText: { color: '#FFF', fontWeight: '900', fontSize: 17, lineHeight: 21 },
-  qty: { fontSize: 15, fontWeight: '700', color: COLORS.text, minWidth: 20, textAlign: 'center' },
-  itemName: { fontSize: 14, fontWeight: '600', color: COLORS.text },
-  itemOptions: { fontSize: 11, color: COLORS.gray, marginTop: 2 },
-  itemNoteInput: { marginTop: 6, borderWidth: 1, borderColor: COLORS.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, fontSize: 12, color: COLORS.text, backgroundColor: COLORS.inputBg },
-  freeDelivCard: { backgroundColor: COLORS.tint, margin: 12, marginBottom: 0, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#FFE0CC' },
-  freeDelivText: { fontSize: 13, color: COLORS.text, textAlign: 'center', marginBottom: 8 },
-  freeDelivDone: { fontSize: 13, color: COLORS.green, fontWeight: '800', textAlign: 'center' },
-  freeDelivBar: { height: 8, backgroundColor: '#FFE0CC', borderRadius: 4, overflow: 'hidden' },
-  freeDelivFill: { height: '100%', backgroundColor: COLORS.primary, borderRadius: 4 },
-  tipLabel: { fontSize: 13, color: COLORS.gray, marginBottom: 8 },
-  tipRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  tipChip: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.inputBg },
-  tipChipOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  tipChipTxt: { fontSize: 14, fontWeight: '800', color: COLORS.text },
-  doorRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 4 },
-  doorText: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
-  itemPrice: { fontSize: 13, color: COLORS.primary, fontWeight: '700', marginTop: 2 },
-  toggleRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  toggleBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.inputBg },
-  toggleBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  toggleText: { fontSize: 13, fontWeight: '700', color: COLORS.gray },
-  feeBox: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.tint, borderRadius: 10, padding: 10 },
-  feeLabel: { flex: 1, fontSize: 13, color: COLORS.text },
-  feeValue: { fontSize: 16, fontWeight: '900', color: COLORS.primary },
-  pickupBox: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.sec, borderRadius: 10, padding: 10 },
-  pickupText: { fontSize: 13, color: COLORS.green, fontWeight: '600', flex: 1 },
-  addrOption: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border, marginBottom: 8 },
-  addrOptionActive: { borderColor: COLORS.primary, backgroundColor: COLORS.tint },
-  addrTitle: { fontSize: 13, fontWeight: '700', color: COLORS.text },
-  addrText: { fontSize: 12, color: COLORS.gray, marginTop: 1 },
-  addAddrBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 8 },
-  addAddrText: { color: COLORS.primary, fontWeight: '700', fontSize: 13 },
-  payOption: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 13, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border, marginBottom: 8 },
-  payOptionActive: { borderColor: COLORS.primary, backgroundColor: COLORS.tint },
-  payLabel: { flex: 1, fontSize: 14, color: COLORS.text },
-  notesInput: { borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 12, padding: 12, minHeight: 75, textAlignVertical: 'top', fontSize: 14, color: COLORS.text, backgroundColor: COLORS.inputBg },
-  couponRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  couponInput: { flex: 1, borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, color: COLORS.text, backgroundColor: COLORS.inputBg, letterSpacing: 1 },
-  couponBtn: { backgroundColor: COLORS.primary, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', minWidth: 78 },
+  infoBanner: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, margin: 12, marginBottom: 0, borderRadius: 14, padding: 12, borderWidth: 1 },
+  infoBannerTxt: { flex: 1, fontSize: 13, fontWeight: '700', color: C.text, textAlign: 'right' },
+  card: { backgroundColor: C.card, margin: 12, marginBottom: 0, borderRadius: 20, padding: 16, ...C.shadow.soft },
+  cardHead: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between' },
+  cardTitle: { fontSize: 14.5, fontWeight: '800', color: C.text, marginBottom: 12, textAlign: 'right' },
+  linkTxt: { color: C.primary, fontWeight: '800', fontSize: 13, marginBottom: 12 },
+  itemRow: { flexDirection: 'row-reverse', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.line, gap: 12 },
+  qtyControl: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8 },
+  qtyBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: C.tint, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: C.tintBorder },
+  qty: { fontSize: 15, fontWeight: '800', color: C.text, minWidth: 22, textAlign: 'center' },
+  itemName: { fontSize: 14, fontWeight: '700', color: C.text, textAlign: 'right' },
+  itemOptions: { fontSize: 11.5, color: C.gray, marginTop: 2, textAlign: 'right' },
+  itemPrice: { fontSize: 13, color: C.primary, fontWeight: '800', marginTop: 3, textAlign: 'right' },
+  itemNoteInput: { marginTop: 6, borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, fontSize: 12, color: C.text, backgroundColor: C.inputBg },
+  addMoreBtn: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, paddingTop: 10 },
+  addMoreTxt: { color: C.primary, fontWeight: '800', fontSize: 13 },
+  progressCard: { margin: 12, marginBottom: 0, borderRadius: 14, padding: 12, borderWidth: 1 },
+  progressText: { fontSize: 13, color: C.text, textAlign: 'center', marginBottom: 8 },
+  freeDelivDone: { fontSize: 13, color: C.green, fontWeight: '800', textAlign: 'center' },
+  progressBar: { height: 8, borderRadius: 4, overflow: 'hidden', flexDirection: 'row-reverse' },
+  progressFill: { height: '100%', borderRadius: 4 },
+  toggleRow: { flexDirection: 'row-reverse', gap: 8, marginBottom: 10 },
+  toggleBtn: { flex: 1, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.inputBg },
+  toggleBtnActive: { backgroundColor: C.primary, borderColor: C.primary },
+  toggleText: { fontSize: 13, fontWeight: '700', color: C.gray },
+  feeBox: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, backgroundColor: C.tint, borderRadius: 10, padding: 10 },
+  feeLabel: { flex: 1, fontSize: 13, color: C.text, textAlign: 'right' },
+  feeValue: { fontSize: 16, fontWeight: '900', color: C.primary },
+  option: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: C.border, marginBottom: 8 },
+  optionActive: { borderColor: C.primary, backgroundColor: C.tint },
+  addrTitle: { fontSize: 13.5, fontWeight: '800', color: C.text, textAlign: 'right' },
+  addrText: { fontSize: 12, color: C.gray, marginTop: 1, textAlign: 'right' },
+  payLabel: { flex: 1, fontSize: 14, color: C.text, textAlign: 'right' },
+  tipLabel: { fontSize: 13, color: C.gray, marginBottom: 8, textAlign: 'right' },
+  chipsRow: { flexDirection: 'row-reverse', gap: 8, marginBottom: 12 },
+  chip: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.inputBg },
+  chipOn: { backgroundColor: C.primary, borderColor: C.primary },
+  chipTxt: { fontSize: 14, fontWeight: '800', color: C.text },
+  checkRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  checkText: { fontSize: 14, color: C.text, fontWeight: '700', flex: 1, textAlign: 'right' },
+  notesInput: { borderWidth: 1.5, borderColor: C.border, borderRadius: 12, padding: 12, minHeight: 75, textAlignVertical: 'top', fontSize: 14, color: C.text, backgroundColor: C.inputBg },
+  couponRow: { flexDirection: 'row-reverse', gap: 8, alignItems: 'center' },
+  couponInput: { flex: 1, borderWidth: 1.5, borderColor: C.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, color: C.text, backgroundColor: C.inputBg, letterSpacing: 1 },
+  couponBtn: { backgroundColor: C.primary, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', minWidth: 78 },
   couponBtnTxt: { color: '#FFF', fontWeight: '800', fontSize: 14 },
-  couponApplied: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#EDFFF3', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#C3F5D8' },
-  couponAppliedTxt: { flex: 1, fontSize: 14, fontWeight: '700', color: '#1A5C33' },
-  couponMsg: { fontSize: 12, fontWeight: '700', marginTop: 8 },
-  useRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
-  useText: { fontSize: 14, fontWeight: '700', color: COLORS.text, flex: 1 },
-  cashbackHint: { fontSize: 12, color: COLORS.primary, fontWeight: '700', marginTop: 4 },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  summaryLabel: { fontSize: 14, color: COLORS.gray },
-  summaryVal: { fontSize: 14, fontWeight: '600', color: COLORS.text },
-  orderBtn: { position: 'absolute', bottom: 100, left: 16, right: 16, borderRadius: 20, overflow: 'hidden', zIndex: 30, elevation: 12, shadowColor: COLORS.primary, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 10 } },
+  couponApplied: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, backgroundColor: C.successBg, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: C.successBorder },
+  couponAppliedTxt: { flex: 1, fontSize: 14, fontWeight: '700', color: C.successText, textAlign: 'right' },
+  summaryRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: 8 },
+  summaryLabel: { fontSize: 14, color: C.gray },
+  summaryVal: { fontSize: 14, fontWeight: '700', color: C.text },
+  totalLabel: { fontWeight: '900', fontSize: 16, color: C.text },
+  totalVal: { fontWeight: '900', fontSize: 18, color: C.primary },
+  divider: { height: 1, backgroundColor: C.line, marginVertical: 6 },
+  cashbackHint: { fontSize: 12, color: C.primary, fontWeight: '700', marginTop: 4, textAlign: 'right' },
+  estimateHint: { fontSize: 11.5, color: C.faint, fontWeight: '600', marginTop: 6, textAlign: 'right' },
+  warnTxt: { fontSize: 12.5, color: C.red, fontWeight: '700', marginTop: 6, textAlign: 'right' },
+  footer: { position: 'absolute', left: 16, right: 16, zIndex: 30 },
+  footerHint: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, alignSelf: 'center', borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6, marginBottom: 8, ...C.shadow.soft },
+  footerHintTxt: { fontSize: 12.5, color: C.text, fontWeight: '700' },
+  orderBtn: { borderRadius: 20, overflow: 'hidden', elevation: 12, shadowColor: C.primary, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 10 } },
   orderBtnGrad: { padding: 18, alignItems: 'center', borderRadius: 20 },
   orderBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16, letterSpacing: 0.3 },
 });

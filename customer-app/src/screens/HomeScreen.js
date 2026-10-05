@@ -1,22 +1,25 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Image, RefreshControl, Dimensions, StatusBar, Animated, Pressable, LayoutAnimation, Platform, UIManager, ActivityIndicator
+  Image, RefreshControl, Dimensions, Animated, Pressable, LayoutAnimation, Platform, UIManager, Alert, Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import * as Location from 'expo-location';
 import BannerSlider from '../components/BannerSlider';
-import SkeletonCard from '../components/SkeletonCard';
 import { Skeleton, GridSkeleton } from '../components/Skeleton';
 import SupportButton from '../components/SupportButton';
-import { FadeIn, PopIn, Press } from '../components/Anim';
+import { FadeIn, PopIn } from '../components/Anim';
+import { Press } from '../components/Anim';
 import EmptyState from '../components/EmptyState';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+import { useHeaderTop } from '../components/GradientHeader';
+import { useTabBarInset } from '../components/FloatingTabBar';
+import { addressLabel } from './AddressesScreen';
 
 // تحية حسب الوقت
 const greetingText = () => {
@@ -83,7 +86,8 @@ function CollapsibleSection({ title, icon, bg, children, defaultOpen = true }) {
 
   return (
     <View style={[cs.wrap, { backgroundColor: bg }]}>
-      <TouchableOpacity style={cs.head} onPress={toggle} activeOpacity={0.75}>
+      <TouchableOpacity style={cs.head} onPress={toggle} activeOpacity={0.75}
+        accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={title}>
         {/* يسار: سهم */}
         <Animated.View style={{ transform: [{ rotate: arrowRotate }] }}>
           <Ionicons name="chevron-down" size={20} color={C.primary} />
@@ -112,16 +116,18 @@ function RCard({ r, onPress }) {
           <View style={rc.badge}><Text style={rc.badgeTxt}>خصم {r.discount_percent || r.discount}%</Text></View>
         )}
         {!r.is_open && <View style={rc.overlay}><Text style={rc.overlayTxt}>مغلق</Text></View>}
-        <View style={rc.logoCircle}>
-          <Image source={{ uri: r.logo }} style={rc.logoImg} resizeMode="cover" />
-        </View>
+        {!!r.logo && (
+          <View style={rc.logoCircle}>
+            <Image source={{ uri: r.logo }} style={rc.logoImg} resizeMode="cover" />
+          </View>
+        )}
       </View>
       <View style={rc.body}>
         <Text style={rc.name} numberOfLines={1}>{r.name_ar}</Text>
         <Text style={rc.addr} numberOfLines={1}>{r.address || r.city || ''}</Text>
         <View style={rc.meta}>
           <Ionicons name="star" size={12} color="#FFB800" />
-          <Text style={rc.metaTxt}>{parseFloat(r.rating || 0).toFixed(1)}</Text>
+          <Text style={rc.metaTxt}>{(Number(r.rating) || 0).toFixed(1)}</Text>
           <Text style={rc.sep}>·</Text>
           <Ionicons name="time-outline" size={12} color={C.gray} />
           <Text style={rc.metaTxt}>{r.delivery_time_min}-{r.delivery_time_max} د</Text>
@@ -143,9 +149,9 @@ function HCard({ r, onPress }) {
         {!r.is_open && <View style={hc.closed}><Text style={hc.closedTxt}>مغلق</Text></View>}
         <View style={hc.ratePill}>
           <Ionicons name="star" size={10} color="#FFB800" />
-          <Text style={hc.rateTxt}>{parseFloat(r.rating || 0).toFixed(1)}</Text>
+          <Text style={hc.rateTxt}>{(Number(r.rating) || 0).toFixed(1)}</Text>
         </View>
-        <View style={hc.logoDot}><Image source={{ uri: r.logo }} style={hc.logoImg} /></View>
+        {!!r.logo && <View style={hc.logoDot}><Image source={{ uri: r.logo }} style={hc.logoImg} /></View>}
       </View>
       <Text style={hc.name} numberOfLines={1}>{r.name_ar}</Text>
       <Text style={hc.time} numberOfLines={1}>{r.delivery_time_min}-{r.delivery_time_max} دقيقة</Text>
@@ -185,6 +191,9 @@ export default function HomeScreen() {
   const { colors: C } = useTheme();
   const { user } = useAuth();
   const s = React.useMemo(() => makeS(C), [C]);
+  const headerTop = useHeaderTop(10);
+  const tabInset = useTabBarInset();
+  const [defaultAddr, setDefaultAddr] = useState(null);
   const [banners, setBanners]       = useState([]);
   const [categories, setCategories] = useState([]);
   const [restaurants, setRestaurants] = useState([]);
@@ -192,7 +201,6 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('recommended');
   const [openOnly, setOpenOnly] = useState(false);
-  const [freeDelivOnly, setFreeDelivOnly] = useState(false);
   const [userLoc, setUserLoc] = useState(null);
   const [recentRests, setRecentRests] = useState([]);
   const suggestedRef = useRef(null);
@@ -212,18 +220,56 @@ export default function HomeScreen() {
     })();
   }, []);
 
-  // موقع المستخدم لترتيب "الأقرب إليك"
-  useEffect(() => {
+  // العنوان الافتراضي للشريط العلوي — يتحدّث عند كل رجوع للرئيسية
+  useFocusEffect(useCallback(() => {
+    let alive = true;
     (async () => {
+      const pick = (list) => (list || []).find(a => a.is_default) || (list || [])[0] || null;
+      const cached = await readCache('addresses');
+      if (alive && cached) setDefaultAddr(pick(cached));
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          setUserLoc({ lat: loc.coords.latitude, lng: loc.coords.longitude });
-        }
+        const d = await api.get('/users/addresses');
+        if (!alive) return;
+        setDefaultAddr(pick(d.data));
+        writeCache('addresses', d.data || []);
       } catch {}
     })();
-  }, []);
+    return () => { alive = false; };
+  }, []));
+
+  // موقع المستخدم لترتيب "الأقرب إليك" — بدون طلب إذن مزعج عند الفتح (فقط لو مسموح مسبقاً)
+  const fetchUserLoc = async (ask) => {
+    try {
+      const perm = ask ? await Location.requestForegroundPermissionsAsync() : await Location.getForegroundPermissionsAsync();
+      if (perm.status !== 'granted') return { denied: true, canAskAgain: perm.canAskAgain };
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const c = { lat: loc.coords.latitude, lng: loc.coords.longitude };
+      setUserLoc(c);
+      return { loc: c };
+    } catch { return { error: true }; }
+  };
+  useEffect(() => { fetchUserLoc(false); }, []);
+
+  const chooseSort = async (k) => {
+    if (k === 'nearest' && !userLoc) {
+      const r = await fetchUserLoc(true);
+      if (!r.loc) {
+        Alert.alert('الموقع غير متاح', 'حتى نرتّب المطاعم حسب الأقرب لك، فعّل إذن الموقع للتطبيق.', [
+          { text: 'إلغاء', style: 'cancel' },
+          { text: 'الإعدادات', onPress: () => Linking.openSettings().catch(() => {}) },
+        ]);
+        return;
+      }
+    }
+    setSortBy(k);
+  };
+
+  const onBannerPress = (a) => {
+    if (!a) return;
+    if (a.type === 'url') { Linking.openURL(a.url).catch(() => {}); return; }
+    if (a.type === 'tab') { navigation.navigate(a.screen); return; }
+    navigation.navigate(a.screen, a.params);
+  };
 
   const load = async () => {
     try {
@@ -273,13 +319,12 @@ export default function HomeScreen() {
   const sorted = React.useMemo(() => {
     let arr = [...restaurants];
     if (openOnly) arr = arr.filter(r => r.is_open);
-    if (freeDelivOnly) arr = arr.filter(r => Number(r.delivery_fee) === 0);
     if (sortBy === 'rating') arr.sort((a, b) => (b.rating || 0) - (a.rating || 0));
     else if (sortBy === 'fastest') arr.sort((a, b) => (a.delivery_time_min || 99) - (b.delivery_time_min || 99));
     else if (sortBy === 'nearest' && userLoc) arr.sort((a, b) =>
       distKm(userLoc.lat, userLoc.lng, a.lat, a.lng) - distKm(userLoc.lat, userLoc.lng, b.lat, b.lng));
     return arr;
-  }, [restaurants, sortBy, openOnly, freeDelivOnly, userLoc]);
+  }, [restaurants, sortBy, openOnly, userLoc]);
 
   const surpriseMe = () => {
     const pool = restaurants.filter(r => r.is_open);
@@ -304,113 +349,110 @@ export default function HomeScreen() {
     }
   }, [suggested.length]);
 
+  const locText = defaultAddr ? `${addressLabel(defaultAddr)} · ${defaultAddr.address || ''}` : 'أضف عنوان التوصيل';
+  const noMatches = restaurants.length > 0 && sorted.length === 0;
+
+  const Header = (
+    <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[s.header, { paddingTop: headerTop }]}>
+      <LinearGradient colors={C.gradients.sheen} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={s.sheen} pointerEvents="none" />
+      <View style={s.headerRow}>
+        <TouchableOpacity onPress={() => navigation.navigate('بحث')} style={s.iconBtn} accessibilityRole="button" accessibilityLabel="بحث">
+          <Ionicons name="search-outline" size={22} color="#FFF" />
+        </TouchableOpacity>
+        <TouchableOpacity style={s.locBtn} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel={`عنوان التوصيل: ${locText}`}
+          onPress={() => navigation.navigate(defaultAddr ? 'Addresses' : 'AddAddress', defaultAddr ? undefined : { makeDefault: true })}>
+          <Ionicons name="location" size={17} color="#FFF" />
+          <View style={{ flexShrink: 1, alignItems: 'flex-end' }}>
+            <Text style={s.locCaption}>التوصيل إلى</Text>
+            <Text style={s.locTxt} numberOfLines={1}>{locText}</Text>
+          </View>
+          <Ionicons name="chevron-down" size={15} color="rgba(255,255,255,0.85)" />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={s.iconBtn} accessibilityRole="button" accessibilityLabel="الإشعارات">
+          <Ionicons name="notifications-outline" size={22} color="#FFF" />
+        </TouchableOpacity>
+      </View>
+      <View style={s.greetWrap}>
+        <Text style={s.greetHi}>{greetingText()}{user?.name ? ` ${String(user.name).split(' ')[0]}` : ''} 👋</Text>
+        <Text style={s.greetSub}>شو نفسك تاكل اليوم؟</Text>
+      </View>
+    </LinearGradient>
+  );
+
   if (loading) return (
-    <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: 56 }}>
-      <View style={{ paddingHorizontal: 16 }}>
-        <Skeleton w={'50%'} h={16} style={{ alignSelf: 'center', marginBottom: 16 }} />
-        <Skeleton w={'100%'} h={190} r={22} style={{ marginBottom: 16 }} />
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      {Header}
+      <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+        <Skeleton w={'100%'} h={176} r={24} style={{ marginBottom: 16 }} />
         <View style={{ flexDirection: 'row-reverse', gap: 14, marginBottom: 18 }}>
-          {[0,1,2,3].map(i => <View key={i} style={{ alignItems: 'center', gap: 6 }}><Skeleton w={64} h={64} r={32} /><Skeleton w={44} h={9} /></View>)}
+          {[0, 1, 2, 3].map(i => <View key={i} style={{ alignItems: 'center', gap: 6 }}><Skeleton w={64} h={64} r={24} /><Skeleton w={44} h={9} /></View>)}
         </View>
       </View>
-      <GridSkeleton count={6} />
+      <GridSkeleton count={4} />
     </View>
+  );
+
+  const CtaCard = ({ colors, emoji, title, sub, onPress }) => (
+    <TouchableOpacity activeOpacity={0.9} onPress={onPress} style={{ marginHorizontal: 16, marginBottom: 12 }} accessibilityRole="button" accessibilityLabel={title}>
+      <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.cta}>
+        <Text style={{ fontSize: 26 }}>{emoji}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={s.ctaTitle}>{title}</Text>
+          <Text style={s.ctaSub}>{sub}</Text>
+        </View>
+        <Ionicons name="chevron-back" size={20} color="#FFF" />
+      </LinearGradient>
+    </TouchableOpacity>
   );
 
   return (
     <View style={s.container}>
-      <StatusBar barStyle={C.mode === 'dark' ? 'light-content' : 'dark-content'} backgroundColor={C.white} />
-
-      {/* Header فخم بتدرّج لوني */}
-      <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={s.iconBtn}>
-            <Ionicons name="notifications-outline" size={23} color="#FFF" />
-          </TouchableOpacity>
-          <TouchableOpacity style={s.locBtn} onPress={() => navigation.navigate('AddAddress')} activeOpacity={0.85}>
-            <Ionicons name="chevron-down" size={15} color="rgba(255,255,255,0.85)" />
-            <Text style={s.locTxt} numberOfLines={1}>حدد موقعك</Text>
-            <Ionicons name="location" size={17} color="#FFF" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation.navigate('بحث')} style={s.iconBtn}>
-            <Ionicons name="search-outline" size={23} color="#FFF" />
-          </TouchableOpacity>
-        </View>
-        {/* تحية شخصية */}
-        <View style={s.greetWrap}>
-          <Text style={s.greetHi}>{greetingText()}{user?.name ? ` ${String(user.name).split(' ')[0]}` : ''} 👋</Text>
-          <Text style={s.greetSub}>شو نفسك تاكل اليوم؟</Text>
-        </View>
-      </LinearGradient>
+      {Header}
 
       <ScrollView showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}>
+        contentContainerStyle={{ paddingBottom: tabInset + 30 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}>
 
-        {/* Banner */}
-        <BannerSlider banners={banners} />
+        <BannerSlider banners={banners} onPressBanner={onBannerPress} />
 
-        {/* تصنيفات */}
-        <View style={{ backgroundColor: C.white, paddingTop: 18, paddingBottom: 18 }}>
-          <View style={s.catHeader}>
-            <Text style={s.catTitle}>اطلب حسب التصنيف</Text>
-            <Text style={s.catEmoji}>🍴</Text>
+        {categories.length > 0 && (
+          <View style={{ paddingTop: 14, paddingBottom: 18 }}>
+            <View style={s.catHeader}>
+              <Text style={s.catTitle}>اطلب حسب التصنيف</Text>
+              <Text style={s.catEmoji}>🍴</Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 16 }}>
+              {categories.map((cat, i) => (
+                <FadeIn key={cat.id} delay={i * 45} from={10}>
+                  <Press style={s.quickCat} onPress={() => navigation.navigate('Category', { categoryId: cat.id, categoryName: cat.name_ar })}>
+                    <LinearGradient colors={[C.sec, C.tint]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.quickCircle}>
+                      <View style={s.quickInner}>
+                        <Text style={{ fontSize: 30 }}>{cat.icon || '🍽️'}</Text>
+                      </View>
+                    </LinearGradient>
+                    <Text style={s.quickLbl} numberOfLines={1}>{cat.name_ar}</Text>
+                  </Press>
+                </FadeIn>
+              ))}
+            </ScrollView>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 16 }}>
-            {categories.map((cat, i) => (
-              <FadeIn key={cat.id} delay={i * 45} from={10}>
-                <Press style={s.quickCat} onPress={() => navigation.navigate('Category', { categoryId: cat.id, categoryName: cat.name_ar })}>
-                  <LinearGradient colors={[C.sec, C.tint]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.quickCircle}>
-                    <View style={s.quickInner}>
-                      <Text style={{ fontSize: 30 }}>{cat.icon || '🍽️'}</Text>
-                    </View>
-                  </LinearGradient>
-                  <Text style={s.quickLbl} numberOfLines={1}>{cat.name_ar}</Text>
-                </Press>
-              </FadeIn>
-            ))}
-          </ScrollView>
-        </View>
+        )}
 
-        {/* 👥 طلب جماعي */}
-        <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate('GroupOrder')} style={{ marginHorizontal: 16, marginBottom: 12 }}>
-          <LinearGradient colors={C.gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 18, padding: 15, ...C.shadow.float }}>
-            <Text style={{ fontSize: 24 }}>🧑‍🤝‍🧑</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 15 }}>اطلبوا سوا — كسر الحساب</Text>
-              <Text style={{ color: '#FFF', opacity: 0.9, fontSize: 11, marginTop: 2 }}>عندك كود مجموعة؟ انضم واطلبوا مع بعض</Text>
-            </View>
-            <Ionicons name="chevron-back" size={20} color="#FFF" />
-          </LinearGradient>
-        </TouchableOpacity>
-
-        <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate('PersonalDelivery')} style={{ marginHorizontal: 16, marginBottom: 12 }}>
-          <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 18, padding: 15, ...C.shadow.float }}>
-            <Text style={{ fontSize: 24 }}>📦</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 15 }}>طلب شخصي — راكب أو طرد</Text>
-              <Text style={{ color: '#FFF', opacity: 0.9, fontSize: 11, marginTop: 2 }}>وصّل طرد أو اطلب سائق يوصّلك · السعر حسب المسافة</Text>
-            </View>
-            <Ionicons name="chevron-back" size={20} color="#FFF" />
-          </LinearGradient>
-        </TouchableOpacity>
+        <CtaCard colors={C.gradients.brand} emoji="🧑‍🤝‍🧑" title="اطلبوا سوا — كل واحد يشوف حسابه" sub="عندك كود مجموعة؟ انضم واطلبوا مع بعض" onPress={() => navigation.navigate('GroupOrder')} />
+        <CtaCard colors={C.gradients.sunset} emoji="📦" title="طلب شخصي — راكب أو طرد" sub="وصّل طرد أو اطلب سائق يوصّلك · السعر حسب المسافة" onPress={() => navigation.navigate('PersonalDelivery')} />
 
         <View style={s.divider} />
 
         {/* فرز المطاعم + فاجئني + المفتوحة الآن */}
-        <View style={{ backgroundColor: C.white, paddingVertical: 10 }}>
+        <View style={{ backgroundColor: C.card, paddingVertical: 10 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 8 }}>
-            <TouchableOpacity onPress={surpriseMe} style={[s.sortChip, { backgroundColor: '#FFF0E8', borderColor: C.primary }]}>
+            <TouchableOpacity onPress={surpriseMe} style={[s.sortChip, { backgroundColor: C.tint, borderColor: C.primary }]}>
               <Text style={[s.sortChipTxt, { color: C.primary }]}>فاجئني 🎲</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setOpenOnly(v => !v)} style={[s.sortChip, openOnly && s.sortChipOn]}>
+            <TouchableOpacity onPress={() => setOpenOnly(v => !v)} style={[s.sortChip, openOnly && s.sortChipOn]} accessibilityState={{ selected: openOnly }}>
               <Text style={[s.sortChipTxt, openOnly && s.sortChipTxtOn]}>المفتوحة الآن 🟢</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setFreeDelivOnly(v => !v)} style={[s.sortChip, freeDelivOnly && s.sortChipOn]}>
-              <Text style={[s.sortChipTxt, freeDelivOnly && s.sortChipTxtOn]}>توصيل مجاني 🚚</Text>
             </TouchableOpacity>
             {[
               { k: 'recommended', l: 'مقترح ✨' },
@@ -418,19 +460,25 @@ export default function HomeScreen() {
               { k: 'rating', l: 'الأعلى تقييماً ⭐' },
               { k: 'fastest', l: 'الأسرع توصيلاً 🛵' },
             ].map(opt => (
-              <TouchableOpacity key={opt.k} onPress={() => setSortBy(opt.k)}
-                style={[s.sortChip, sortBy === opt.k && s.sortChipOn]}>
+              <TouchableOpacity key={opt.k} onPress={() => chooseSort(opt.k)}
+                style={[s.sortChip, sortBy === opt.k && s.sortChipOn]} accessibilityState={{ selected: sortBy === opt.k }}>
                 <Text style={[s.sortChipTxt, sortBy === opt.k && s.sortChipTxtOn]}>{opt.l}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
         </View>
 
-        {/* اطلب مرة أخرى */}
+        {noMatches && (
+          <View style={{ paddingVertical: 30 }}>
+            <EmptyState emoji="🔎" title="ما في مطاعم بهالفلتر" subtitle="جرّب تلغي فلتر «المفتوحة الآن» أو رجّع بعد شوي"
+              ctaLabel="إلغاء الفلاتر" onCta={() => { setOpenOnly(false); setSortBy('recommended'); }} />
+          </View>
+        )}
+
         {recentRests.length > 0 && (
           <>
             <View style={s.divider} />
-            <CollapsibleSection title="اطلب مرة أخرى" icon="repeat" bg={C.white}>
+            <CollapsibleSection title="اطلب مرة أخرى" icon="repeat" bg={C.card}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 4 }}>
                 {recentRests.map(r => <HCard key={r.id} r={r} onPress={() => go(r.id)} />)}
@@ -439,9 +487,8 @@ export default function HomeScreen() {
           </>
         )}
 
-        {/* مطاعم مقترحة */}
         {suggested.length > 0 && (
-          <CollapsibleSection title="مطاعم مقترحة" icon="sparkles" bg={C.sec}>
+          <CollapsibleSection title={sortBy === 'nearest' ? 'الأقرب إليك' : 'مطاعم مقترحة'} icon="sparkles" bg={C.sec}>
             <ScrollView
               ref={suggestedRef}
               horizontal
@@ -452,23 +499,22 @@ export default function HomeScreen() {
           </CollapsibleSection>
         )}
 
-        <View style={s.divider} />
-
-        {/* الأعلى تقييماً */}
-        {topRated.length > 0 && (
-          <CollapsibleSection title="الأعلى تقييماً" icon="star" bg={C.white}>
-            <SectionGrid list={topRated} onPress={go} />
-          </CollapsibleSection>
+        {topRated.length > 0 && !noMatches && (
+          <>
+            <View style={s.divider} />
+            <CollapsibleSection title="الأعلى تقييماً" icon="star" bg={C.card}>
+              <SectionGrid list={topRated} onPress={go} />
+            </CollapsibleSection>
+          </>
         )}
 
-        {/* أقسام التصنيفات */}
         {categories.map((cat, ci) => {
           const list = byCat(cat);
           if (list.length === 0) return null;
           return (
             <React.Fragment key={cat.id}>
               <View style={s.divider} />
-              <CollapsibleSection title={cat.name_ar} icon={null} bg={ci % 2 === 0 ? C.sec : C.white}>
+              <CollapsibleSection title={cat.name_ar} icon={null} bg={ci % 2 === 0 ? C.sec : C.card}>
                 <SectionGrid list={list} onPress={go} />
               </CollapsibleSection>
             </React.Fragment>
@@ -477,10 +523,9 @@ export default function HomeScreen() {
 
         {restaurants.length === 0 && (
           <View style={{ paddingVertical: 40 }}>
-            <EmptyState emoji="🍽️" title="ما في مطاعم حاليًا" subtitle="جرّب تسحب للتحديث بعد شوي" />
+            <EmptyState emoji="🍽️" title="ما في مطاعم حاليًا" subtitle="جرّب تسحب للتحديث بعد شوي" ctaLabel="تحديث" onCta={onRefresh} />
           </View>
         )}
-        <View style={{ height: 110 }} />
       </ScrollView>
 
       <SupportButton />
@@ -499,7 +544,7 @@ const makeCs = (C) => StyleSheet.create({
 });
 
 const makeRc = (C) => StyleSheet.create({
-  wrap: { width: CARD_W, backgroundColor: C.white, borderRadius: 20, overflow: 'hidden', elevation: 5, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 } },
+  wrap: { width: CARD_W, backgroundColor: C.card, borderRadius: 20, overflow: 'hidden', elevation: 5, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 } },
   imgBox: { width: '100%', height: 118, position: 'relative' },
   img: { width: '100%', height: '100%' },
   scrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 50 },
@@ -526,7 +571,7 @@ const makeHc = (C) => StyleSheet.create({
   closedTxt: { color: '#FFF', fontSize: 12, fontWeight: '800' },
   ratePill: { position: 'absolute', top: 8, right: 8, flexDirection: 'row-reverse', alignItems: 'center', gap: 2, backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
   rateTxt: { fontSize: 11, fontWeight: '800', color: C.text },
-  logoDot: { position: 'absolute', bottom: 6, left: 6, width: 26, height: 26, borderRadius: 9, borderWidth: 2, borderColor: '#FFF', overflow: 'hidden', backgroundColor: '#FFF' },
+  logoDot: { position: 'absolute', bottom: 6, left: 6, width: 26, height: 26, borderRadius: 9, borderWidth: 2, borderColor: C.card, overflow: 'hidden', backgroundColor: C.card },
   logoImg: { width: '100%', height: '100%' },
   name: { fontSize: 13.5, fontWeight: '800', color: C.text, textAlign: 'right', marginTop: 7 },
   time: { fontSize: 11.5, color: C.gray, textAlign: 'right', marginTop: 1, fontWeight: '600' },
@@ -534,14 +579,19 @@ const makeHc = (C) => StyleSheet.create({
 
 const makeS = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  header: { paddingHorizontal: 16, paddingTop: 54, paddingBottom: 20, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, ...C.shadow.float },
+  header: { paddingHorizontal: 16, paddingBottom: 20, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden', ...C.shadow.float },
+  sheen: { position: 'absolute', top: 0, left: 0, right: 0, height: 80 },
+  cta: { flexDirection: 'row-reverse', alignItems: 'center', gap: 12, borderRadius: 18, padding: 15, ...C.shadow.float },
+  ctaTitle: { color: '#FFF', fontWeight: '900', fontSize: 15, textAlign: 'right' },
+  ctaSub: { color: 'rgba(255,255,255,0.92)', fontSize: 11.5, marginTop: 2, textAlign: 'right' },
+  locCaption: { fontSize: 10.5, color: 'rgba(255,255,255,0.85)', fontWeight: '700' },
   headerRow: { flexDirection: 'row', alignItems: 'center' },
-  greetWrap: { marginTop: 14, paddingHorizontal: 2 },
+  greetWrap: { marginTop: 14, paddingHorizontal: 2, alignItems: 'flex-end' },
   greetHi: { color: '#FFF', fontSize: 22, fontWeight: '900' },
   greetSub: { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '600', marginTop: 2 },
   iconBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center' },
-  locBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, marginHorizontal: 8, backgroundColor: 'rgba(255,255,255,0.20)', borderRadius: 22, paddingVertical: 9, paddingHorizontal: 12 },
-  locTxt: { fontSize: 15, fontWeight: '800', color: '#FFF' },
+  locBtn: { flex: 1, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: 8, backgroundColor: 'rgba(255,255,255,0.20)', borderRadius: 22, paddingVertical: 9, paddingHorizontal: 12 },
+  locTxt: { fontSize: 13.5, fontWeight: '800', color: '#FFF', textAlign: 'right' },
   divider: { height: 8, backgroundColor: C.divider },
   catHeader: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, paddingHorizontal: 16, marginBottom: 14 },
   catTitle: { fontSize: 17, fontWeight: '900', color: C.text },
@@ -553,7 +603,7 @@ const makeS = (C) => StyleSheet.create({
   grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16 },
   moreBtn: { marginTop: 14, marginHorizontal: 16, borderWidth: 1.5, borderColor: C.primary, borderRadius: 14, paddingVertical: 11, alignItems: 'center', backgroundColor: C.sec },
   moreTxt: { color: C.primary, fontWeight: '800', fontSize: 15 },
-  sortChip: { paddingHorizontal: 15, paddingVertical: 9, borderRadius: 22, backgroundColor: C.white, borderWidth: 1.5, borderColor: C.border },
+  sortChip: { paddingHorizontal: 15, paddingVertical: 9, borderRadius: 22, backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border },
   sortChipOn: { backgroundColor: C.primary, borderColor: C.primary, elevation: 3, shadowColor: C.primary, shadowOpacity: 0.35, shadowRadius: 7, shadowOffset: { width: 0, height: 3 } },
   sortChipTxt: { fontSize: 13, fontWeight: '700', color: C.text },
   sortChipTxtOn: { color: '#FFF' },

@@ -17,7 +17,7 @@ export default function EmptyState({ emoji = '🍽️', title, subtitle, ctaLabe
       {!!title && <Text style={[styles.title, { color: C.text }]}>{title}</Text>}
       {!!subtitle && <Text style={[styles.sub, { color: C.gray }]}>{subtitle}</Text>}
       {!!ctaLabel && (
-        <TouchableOpacity activeOpacity={0.9} onPress={onCta} style={[styles.cta, C.shadow.float]}>
+        <TouchableOpacity activeOpacity={0.9} onPress={onCta} style={[styles.cta, C.shadow.float]} accessibilityRole="button" accessibilityLabel={ctaLabel}>
           <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.ctaGrad}>
             <Text style={styles.ctaTxt}>{ctaLabel}</Text>
           </LinearGradient>

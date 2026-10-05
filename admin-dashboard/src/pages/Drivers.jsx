@@ -1,218 +1,258 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { FiPlus, FiBarChart2, FiEdit2, FiSlash, FiTrash2, FiCheck } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
+import { normalizePhone, truthy, num, fmtDate } from '../utils/format';
+import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, StatTile, useConfirm } from '../components/ui';
+import { Sk } from '../components/Skeleton';
+
+const PAGE = 30;
+const VEHICLES = ['دراجة نارية', 'دراجة', 'سيارة', 'دراجة هوائية'];
+const EMPTY = { name: '', phone: '', password: '', vehicle_type: 'دراجة نارية', vehicle_plate: '' };
 
 export default function Drivers() {
-  const [drivers, setDrivers] = useState(readCache('adm_drivers') || []);
-  const [loading, setLoading] = useState(!readCache('adm_drivers'));
+  const confirm = useConfirm();
+  const [params, setParams] = useSearchParams();
+  const cached = readCache('adm_drivers');
+  const [drivers, setDrivers] = useState(cached || []);
+  const [loading, setLoading] = useState(!cached);
+  const [refreshing, setRefreshing] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const [selectedDriver, setSelectedDriver] = useState(null);
-  const [form, setForm] = useState({ name: '', phone: '', password: '123456', vehicle_type: 'دراجة', vehicle_plate: '' });
+  const [expanded, setExpanded] = useState(null);
+  const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('');
+  const [visible, setVisible] = useState(PAGE);
+  const [editing, setEditing] = useState(null);
 
   useEffect(() => { fetchDrivers(); }, []);
+  useEffect(() => { if (params.get('new') === '1') { setShowForm(true); const p = new URLSearchParams(params); p.delete('new'); setParams(p, { replace: true }); } }, [params]);
+  useEffect(() => { setVisible(PAGE); }, [search, filter]);
 
   const fetchDrivers = async () => {
+    setRefreshing(true);
     try {
       const r = await api.get('/drivers');
       setDrivers(r.data || []); writeCache('adm_drivers', r.data || []);
-    } catch (e) { toast.error('فشل تحميل السائقين'); }
-    finally { setLoading(false); }
+    } catch (e) { if (e?.status !== 401 && e?.status !== 403) toast.error('فشل تحميل السائقين'); }
+    finally { setLoading(false); setRefreshing(false); }
   };
 
+  const uid = (d) => d.user_id || d.id;
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return drivers.filter(d => {
+      if (filter === 'online' && !truthy(d.is_online)) return false;
+      if (filter === 'busy' && !truthy(d.is_busy)) return false;
+      if (filter === 'blocked' && !truthy(d.is_blocked)) return false;
+      if (!q) return true;
+      return [d.name, d.phone, d.vehicle_plate, d.vehicle_type].join(' ').toLowerCase().includes(q);
+    });
+  }, [drivers, search, filter]);
+
+  const stats = useMemo(() => ({
+    online: drivers.filter(d => truthy(d.is_online)).length,
+    busy: drivers.filter(d => truthy(d.is_busy)).length,
+    blocked: drivers.filter(d => truthy(d.is_blocked)).length,
+  }), [drivers]);
+
   const addDriver = async () => {
-    if (!form.name || !form.phone) return toast.error('أدخل الاسم والهاتف');
+    const phone = normalizePhone(form.phone);
+    if (!form.name.trim()) return toast.error('أدخل اسم السائق');
+    if (!/^\+?\d{9,15}$/.test(phone)) return toast.error('أدخل رقم هاتف صحيح');
+    if (!form.password || form.password.length < 6) return toast.error('كلمة المرور 6 أحرف على الأقل');
     setSaving(true);
     try {
-      await api.post('/drivers', form);
-      toast.success('تم إضافة السائق');
+      await api.post('/drivers', { ...form, name: form.name.trim(), phone });
+      toast.success('تمت إضافة السائق');
       setShowForm(false);
-      setForm({ name: '', phone: '', password: '123456', vehicle_type: 'دراجة', vehicle_plate: '' });
+      setForm(EMPTY);
       fetchDrivers();
-    } catch (e) { toast.error(e.message || 'فشل الإضافة'); }
+    } catch (e) { toast.error(e?.message || 'فشل الإضافة'); }
     finally { setSaving(false); }
   };
 
-  const deleteDriver = async (id) => {
-    if (!confirm('حذف هذا السائق؟')) return;
-    try {
-      await api.delete(`/drivers/${id}`);
-      toast.success('تم الحذف');
-      fetchDrivers();
-    } catch { toast.error('فشل الحذف'); }
+  const deleteDriver = async (d) => {
+    const ok = await confirm({
+      title: 'حذف السائق',
+      message: `سيُزال «${d.name}» من قائمة السائقين ويتحوّل حسابه إلى زبون غير نشط. سجلّ طلباته السابقة يبقى محفوظاً.`,
+      confirmText: 'حذف',
+    });
+    if (!ok) return;
+    try { await api.delete(`/drivers/${uid(d)}`); toast.success('تم حذف السائق'); fetchDrivers(); }
+    catch (e) { toast.error(e?.message || 'فشل الحذف'); }
   };
 
-  const blockDriver = async (id) => {
+  const blockDriver = async (d) => {
+    const blocked = truthy(d.is_blocked);
+    const ok = await confirm({
+      title: blocked ? 'رفع الحظر' : 'حظر السائق',
+      message: blocked ? `سيتمكّن «${d.name}» من العمل مجدداً.` : `لن يتمكّن «${d.name}» من تسجيل الدخول أو استقبال الطلبات.`,
+      confirmText: blocked ? 'رفع الحظر' : 'حظر',
+      danger: !blocked,
+    });
+    if (!ok) return;
     try {
-      await api.patch(`/admin/users/${id}/block`);
-      toast.success('تم التحديث');
-      fetchDrivers();
-    } catch { toast.error('فشل'); }
+      const r = await api.patch(`/admin/users/${uid(d)}/block`);
+      setDrivers(prev => prev.map(x => (uid(x) === uid(d) ? { ...x, is_blocked: r?.is_blocked ?? !blocked } : x)));
+      toast.success(blocked ? 'تم رفع الحظر' : 'تم الحظر');
+    } catch (e) { toast.error(e?.message || 'فشل'); }
   };
+
+  const shown = filtered.slice(0, visible);
 
   return (
-    <div className="p-4 space-y-4" dir="rtl">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-black text-gray-900">السائقون</h1>
-        <button onClick={() => setShowForm(!showForm)}
-          className="bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1">
-          ➕ إضافة سائق
-        </button>
-      </div>
+    <div className="p-4 space-y-4 animate-fade-up">
+      <PageHeader icon="🛵" title="السائقون" subtitle={`${drivers.length} سائق مسجّل`}
+        action={<PrimaryBtn onClick={() => setShowForm(true)} className="flex items-center gap-1.5"><FiPlus /> سائق</PrimaryBtn>} />
 
-      {/* Add Form */}
-      {showForm && (
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3">
-          <h2 className="font-bold text-gray-900">سائق جديد</h2>
-          <input className="w-full border border-gray-200 rounded-xl p-3 text-sm" placeholder="الاسم الكامل *"
-            value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} />
-          <input className="w-full border border-gray-200 rounded-xl p-3 text-sm" placeholder="رقم الهاتف *"
-            value={form.phone} onChange={e => setForm(f => ({...f, phone: e.target.value}))} />
-          <input className="w-full border border-gray-200 rounded-xl p-3 text-sm" placeholder="كلمة المرور"
-            value={form.password} onChange={e => setForm(f => ({...f, password: e.target.value}))} />
-          <div className="grid grid-cols-2 gap-3">
-            <select className="border border-gray-200 rounded-xl p-3 text-sm" value={form.vehicle_type}
-              onChange={e => setForm(f => ({...f, vehicle_type: e.target.value}))}>
-              <option>دراجة</option>
-              <option>سيارة</option>
-              <option>دراجة هوائية</option>
-            </select>
-            <input className="border border-gray-200 rounded-xl p-3 text-sm" placeholder="رقم اللوحة"
-              value={form.vehicle_plate} onChange={e => setForm(f => ({...f, vehicle_plate: e.target.value}))} />
-          </div>
-          <div className="flex gap-2">
-            <button onClick={addDriver} disabled={saving}
-              className="flex-1 bg-orange-500 text-white py-3 rounded-xl font-bold text-sm disabled:opacity-60">
-              {saving ? 'جاري الحفظ...' : 'إضافة'}
-            </button>
-            <button onClick={() => setShowForm(false)} className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-bold text-sm">
-              إلغاء
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Stats Summary */}
       <div className="grid grid-cols-3 gap-3">
-        <div className="bg-green-50 rounded-xl p-3 text-center">
-          <p className="text-lg font-black text-green-600">{drivers.filter(d => d.is_online).length}</p>
-          <p className="text-xs text-green-700">متصل</p>
-        </div>
-        <div className="bg-orange-50 rounded-xl p-3 text-center">
-          <p className="text-lg font-black text-orange-600">{drivers.filter(d => d.is_busy).length}</p>
-          <p className="text-xs text-orange-700">مشغول</p>
-        </div>
-        <div className="bg-gray-50 rounded-xl p-3 text-center">
-          <p className="text-lg font-black text-gray-600">{drivers.length}</p>
-          <p className="text-xs text-gray-700">الكل</p>
-        </div>
+        <StatTile label="متصل" value={stats.online} tone="green" />
+        <StatTile label="مشغول" value={stats.busy} tone="orange" />
+        <StatTile label="الكل" value={drivers.length} tone="violet" />
       </div>
 
-      {/* Drivers List */}
-      {loading ? (
-        <div className="space-y-3 py-2">{[...Array(6)].map((_,i)=>(<div key={i} className="flex items-center gap-3 bg-white rounded-2xl p-4 shadow-soft"><div className="sk" style={{width:44,height:44,borderRadius:12}}/><div className="flex-1 space-y-2"><div className="sk" style={{width:"45%",height:14,borderRadius:8}}/><div className="sk" style={{width:"25%",height:11,borderRadius:8}}/></div></div>))}</div>
-      ) : drivers.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">
-          <p className="text-4xl mb-2">🛵</p>
-          <p>لا يوجد سائقون</p>
-        </div>
-      ) : (
-        <div className="space-y-3 stagger">
-          {drivers.map(d => (
-            <div key={d.id} className="bg-white rounded-2xl p-4 shadow-soft hover-lift">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-black text-lg flex-shrink-0">
-                  {d.name?.[0] || '🛵'}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-bold text-gray-900 truncate">{d.name}</p>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${d.is_online ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                      {d.is_online ? '🟢 متصل' : '⚫ غير متصل'}
-                    </span>
-                    {d.is_busy ? <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-semibold">مشغول</span> : null}
+      <SearchInput value={search} onChange={setSearch} placeholder="ابحث بالاسم أو الهاتف أو اللوحة…" loading={refreshing} />
+      <Chips value={filter} onChange={setFilter} options={[
+        ['', 'الكل', drivers.length], ['online', 'متصل', stats.online], ['busy', 'مشغول', stats.busy], ['blocked', 'محظور', stats.blocked],
+      ]} />
+
+      {loading && drivers.length === 0 ? <ListSkeleton rows={6} />
+        : filtered.length === 0 ? <EmptyState icon="🛵" title="لا يوجد سائقون" hint={search ? 'لا نتائج مطابقة' : 'أضف أول سائق من زر «سائق»'} />
+        : (
+          <div className="space-y-3">
+            {shown.map(d => {
+              const online = truthy(d.is_online), busy = truthy(d.is_busy), blocked = truthy(d.is_blocked);
+              const open = expanded === uid(d);
+              return (
+                <div key={d.id} className="card p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="relative w-12 h-12 rounded-2xl bg-violet-50 flex items-center justify-center text-violet-600 font-black text-lg flex-shrink-0">
+                      {d.name?.[0] || '🛵'}
+                      <span className={`absolute -bottom-0.5 -left-0.5 w-3.5 h-3.5 rounded-full ring-2 ring-white ${online ? 'bg-green-500' : 'bg-gray-300'}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-black text-gray-900 truncate">{d.name}</p>
+                      <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                        <Badge className={online ? 'bg-green-50 text-green-700 ring-green-200' : 'bg-gray-100 text-gray-500 ring-gray-200'}>{online ? 'متصل' : 'غير متصل'}</Badge>
+                        {busy && <Badge className="bg-orange-50 text-orange-700 ring-orange-200">مشغول</Badge>}
+                        {blocked && <Badge className="bg-red-50 text-red-600 ring-red-200">محظور</Badge>}
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1 truncate"><span dir="ltr">{d.phone}</span> · {d.vehicle_type || '—'} · {d.vehicle_plate || 'بدون لوحة'}</p>
+                    </div>
                   </div>
-                  <p className="text-sm text-gray-500">{d.phone}</p>
-                  <p className="text-xs text-gray-400">{d.vehicle_type} • {d.vehicle_plate || 'بدون لوحة'}</p>
-                </div>
-              </div>
 
-              {/* Stats */}
-              <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-50">
-                <div className="text-center">
-                  <p className="text-sm font-black text-orange-500">{d.total_orders || 0}</p>
-                  <p className="text-[10px] text-gray-400">طلب</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-sm font-black text-green-600">{parseFloat(d.total_earnings || 0).toFixed(1)}₪</p>
-                  <p className="text-[10px] text-gray-400">أرباح</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-sm font-black text-blue-600">{parseFloat(d.rating || 0).toFixed(1)} ⭐</p>
-                  <p className="text-[10px] text-gray-400">تقييم</p>
-                </div>
-              </div>
+                  <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-50 text-center">
+                    <div><p className="text-sm font-black text-orange-500 tabular-nums">{d.total_orders || 0}</p><p className="text-[10px] text-gray-400">توصيلة</p></div>
+                    <div><p className="text-sm font-black text-green-600 tabular-nums">{num(d.total_earnings).toFixed(1)}₪</p><p className="text-[10px] text-gray-400">أرباح</p></div>
+                    <div><p className="text-sm font-black text-blue-600 tabular-nums">{num(d.rating).toFixed(1)} ⭐</p><p className="text-[10px] text-gray-400">تقييم</p></div>
+                  </div>
 
-              {/* Actions */}
-              <div className="flex gap-2 mt-3">
-                <button onClick={() => setSelectedDriver(selectedDriver?.id === d.id ? null : d)}
-                  className="flex-1 bg-blue-50 text-blue-600 py-2 rounded-xl text-xs font-bold">
-                  📊 التفاصيل
-                </button>
-                <button onClick={() => blockDriver(d.user_id || d.id)}
-                  className={`flex-1 py-2 rounded-xl text-xs font-bold ${d.is_blocked ? 'bg-green-50 text-green-600' : 'bg-yellow-50 text-yellow-600'}`}>
-                  {d.is_blocked ? '✅ رفع الحظر' : '🚫 حظر'}
-                </button>
-                <button onClick={() => deleteDriver(d.user_id || d.id)}
-                  className="flex-1 bg-red-50 text-red-600 py-2 rounded-xl text-xs font-bold">
-                  🗑️ حذف
-                </button>
-              </div>
+                  <div className="grid grid-cols-4 gap-2 mt-3">
+                    <button onClick={() => setExpanded(open ? null : uid(d))} className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 ${open ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600'}`}><FiBarChart2 /> تفاصيل</button>
+                    <button onClick={() => setEditing(d)} className="py-2 rounded-xl text-xs font-bold bg-orange-50 text-orange-600 flex items-center justify-center gap-1"><FiEdit2 /> المركبة</button>
+                    <button onClick={() => blockDriver(d)} className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 ${blocked ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-700'}`}>{blocked ? <><FiCheck /> رفع</> : <><FiSlash /> حظر</>}</button>
+                    <button onClick={() => deleteDriver(d)} className="py-2 rounded-xl text-xs font-bold bg-red-50 text-red-600 flex items-center justify-center gap-1"><FiTrash2 /> حذف</button>
+                  </div>
 
-              {/* Expanded Stats */}
-              {selectedDriver?.id === d.id && (
-                <DriverStats driverId={d.user_id || d.id} />
-              )}
-            </div>
-          ))}
+                  {open && <DriverStats driverId={uid(d)} />}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+      <LoadMore shown={shown.length} total={filtered.length} onMore={() => setVisible(v => v + PAGE)} />
+
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="سائق جديد" subtitle="ينشئ حساب السائق وملف المركبة">
+        <div className="space-y-3">
+          <Field label="الاسم الكامل *"><input className="inp" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>
+          <Field label="رقم الهاتف *"><input className="inp" inputMode="tel" dir="ltr" style={{ textAlign: 'right' }} placeholder="05XXXXXXXX" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></Field>
+          <Field label="كلمة المرور *" hint="(6 أحرف على الأقل)"><PasswordInput value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} /></Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="المركبة">
+              <select className="inp" value={form.vehicle_type} onChange={e => setForm(f => ({ ...f, vehicle_type: e.target.value }))}>
+                {VEHICLES.map(v => <option key={v}>{v}</option>)}
+              </select>
+            </Field>
+            <Field label="رقم اللوحة"><input className="inp" value={form.vehicle_plate} onChange={e => setForm(f => ({ ...f, vehicle_plate: e.target.value }))} /></Field>
+          </div>
+          <button onClick={addDriver} disabled={saving} className="w-full btn-lux py-3 disabled:opacity-60">{saving ? 'جاري الحفظ…' : 'إضافة السائق'}</button>
         </div>
-      )}
+      </Modal>
+
+      <EditVehicle driver={editing} onClose={() => setEditing(null)} onSaved={(patch) => {
+        setDrivers(prev => prev.map(x => (uid(x) === uid(editing) ? { ...x, ...patch } : x)));
+        setEditing(null);
+      }} />
     </div>
+  );
+}
+
+function EditVehicle({ driver, onClose, onSaved }) {
+  const [v, setV] = useState({ vehicle_type: '', vehicle_plate: '' });
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (driver) setV({ vehicle_type: driver.vehicle_type || VEHICLES[0], vehicle_plate: driver.vehicle_plate || '' }); }, [driver]);
+  if (!driver) return null;
+  const id = driver.user_id || driver.id;
+
+  const save = async () => {
+    setSaving(true);
+    const body = { vehicle_type: v.vehicle_type, vehicle_plate: v.vehicle_plate.trim() };
+    try {
+      try { await api.put(`/drivers/${id}`, body); }
+      catch (e) { if (e?.status === 404) await api.patch(`/drivers/${id}`, body); else throw e; }
+      toast.success('تم تحديث المركبة');
+      onSaved(body);
+    } catch (e) {
+      toast.error(e?.status === 404 ? 'تعديل المركبة يتطلب تحديث الخادم (PUT /drivers/:id)' : (e?.message || 'فشل الحفظ'));
+    } finally { setSaving(false); }
+  };
+
+  const options = VEHICLES.includes(v.vehicle_type) ? VEHICLES : [v.vehicle_type, ...VEHICLES];
+  return (
+    <Modal open onClose={onClose} title="تعديل المركبة" subtitle={driver.name} size="sm">
+      <div className="space-y-3">
+        <Field label="نوع المركبة">
+          <select className="inp" value={v.vehicle_type} onChange={e => setV(p => ({ ...p, vehicle_type: e.target.value }))}>
+            {options.map(o => <option key={o}>{o}</option>)}
+          </select>
+        </Field>
+        <Field label="رقم اللوحة"><input className="inp" value={v.vehicle_plate} onChange={e => setV(p => ({ ...p, vehicle_plate: e.target.value }))} /></Field>
+        <button onClick={save} disabled={saving} className="w-full btn-lux py-3 disabled:opacity-60">{saving ? 'جاري الحفظ…' : 'حفظ'}</button>
+      </div>
+    </Modal>
   );
 }
 
 function DriverStats({ driverId }) {
   const [stats, setStats] = useState(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
-    api.get(`/admin/driver-stats/${driverId}`).then(r => setStats(r.data)).catch(() => {});
+    api.get(`/admin/driver-stats/${driverId}`).then(r => setStats(r.data || {})).catch(() => setFailed(true));
   }, [driverId]);
 
-  if (!stats) return <div className="mt-3 flex gap-2"><div className="sk flex-1" style={{ height: 40, borderRadius: 10 }} /><div className="sk flex-1" style={{ height: 40, borderRadius: 10 }} /></div>;
+  if (failed) return <p className="mt-3 text-xs text-center text-gray-400">تعذّر تحميل الإحصائيات</p>;
+  if (!stats) return <div className="mt-3 flex gap-2"><Sk h={44} r={12} className="flex-1" /><Sk h={44} r={12} className="flex-1" /><Sk h={44} r={12} className="flex-1" /></div>;
 
   return (
-    <div className="mt-3 pt-3 border-t border-orange-100 bg-orange-50 rounded-xl p-3 space-y-2">
+    <div className="mt-3 bg-gradient-to-br from-orange-50 to-rose-50 rounded-2xl p-3 space-y-2 animate-fade-up">
       <div className="grid grid-cols-3 gap-2 text-center">
-        <div>
-          <p className="font-black text-orange-600">{stats.total_orders || 0}</p>
-          <p className="text-[10px] text-gray-500">إجمالي الطلبات</p>
-        </div>
-        <div>
-          <p className="font-black text-green-600">{parseFloat(stats.total_earnings || 0).toFixed(2)}₪</p>
-          <p className="text-[10px] text-gray-500">إجمالي الأرباح</p>
-        </div>
-        <div>
-          <p className="font-black text-blue-600">{parseFloat(stats.avg_per_delivery || 0).toFixed(2)}₪</p>
-          <p className="text-[10px] text-gray-500">متوسط التوصيل</p>
-        </div>
+        <div><p className="font-black text-orange-600 tabular-nums">{stats.total_orders || 0}</p><p className="text-[10px] text-gray-500">إجمالي الطلبات</p></div>
+        <div><p className="font-black text-green-600 tabular-nums">{num(stats.total_earnings).toFixed(2)}₪</p><p className="text-[10px] text-gray-500">إجمالي الأرباح</p></div>
+        <div><p className="font-black text-blue-600 tabular-nums">{num(stats.avg_per_delivery).toFixed(2)}₪</p><p className="text-[10px] text-gray-500">متوسط التوصيلة</p></div>
       </div>
       {stats.weekly?.length > 0 && (
-        <div className="space-y-1">
-          <p className="text-xs font-bold text-gray-600">آخر 7 أيام:</p>
-          {stats.weekly.map((d, i) => (
+        <div className="space-y-1 pt-2 border-t border-orange-100">
+          <p className="text-xs font-bold text-gray-600">آخر 7 أيام</p>
+          {stats.weekly.map((w, i) => (
             <div key={i} className="flex justify-between text-xs">
-              <span className="text-gray-500">{d.date}</span>
-              <span>{d.orders} طلب • <strong>{parseFloat(d.earnings || 0).toFixed(2)}₪</strong></span>
+              <span className="text-gray-500">{fmtDate(w.date, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+              <span className="tabular-nums">{w.orders} طلب · <strong>{num(w.earnings).toFixed(2)}₪</strong></span>
             </div>
           ))}
         </div>

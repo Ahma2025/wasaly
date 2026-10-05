@@ -1,86 +1,102 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../utils/api';
 import GradientHeader from '../components/GradientHeader';
 import { readCache, writeCache } from '../utils/cache';
-import { FadeIn } from '../components/Anim';
-import { SHADOW } from '../theme';
+import { FadeIn, SkeletonCard } from '../components/Anim';
+import { COLORS, GRADIENTS, SHADOW, RTL } from '../theme';
+import { fmtDate, num } from '../utils/format';
 
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', bg: '#F8F9FA', star: '#FFB800' };
+// نجوم آمنة: تقيّد التقييم بين ٠ و٥ (repeat بقيمة سالبة كان يرمي RangeError)
+export const starStr = (n) => {
+  const v = Math.max(0, Math.min(5, Math.round(num(n))));
+  return '★'.repeat(v) + '☆'.repeat(5 - v);
+};
 
-const starStr = (n) => '★'.repeat(n || 0) + '☆'.repeat(5 - (n || 0));
-
-export default function ReviewsScreen({ navigation }) {
+export default function ReviewsScreen() {
+  const insets = useSafeAreaInsets();
   const [list, setList] = useState([]);
   const [avg, setAvg] = useState(0);
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const d = await api.get('/reviews/driver/me');
+      const data = Array.isArray(d?.data) ? d.data : [];
+      setList(data); setAvg(num(d?.avg_rating)); setCount(parseInt(d?.count, 10) || data.length);
+      writeCache('driver_reviews', { data, avg: num(d?.avg_rating), count: parseInt(d?.count, 10) || data.length });
+    } catch {} finally { setLoading(false); }
+  }, []);
 
   useEffect(() => {
     (async () => {
       const cached = await readCache('driver_reviews');
-      if (cached) { setList(cached.data || []); setAvg(cached.avg || 0); setCount(cached.count || 0); setLoading(false); }
-      api.get('/reviews/driver/me')
-        .then(d => { setList(d.data || []); setAvg(d.avg_rating || 0); setCount(d.count || 0); writeCache('driver_reviews', { data: d.data || [], avg: d.avg_rating || 0, count: d.count || 0 }); })
-        .catch(() => {})
-        .finally(() => setLoading(false));
+      if (cached) { setList(cached.data || []); setAvg(num(cached.avg)); setCount(cached.count || 0); setLoading(false); }
+      load();
     })();
-  }, []);
+  }, [load]);
+
+  const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
+
+  const header = (
+    <LinearGradient colors={GRADIENTS.gold} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.summary}>
+      <Text style={styles.avg}>{avg > 0 ? avg.toFixed(1) : '—'}</Text>
+      <Text style={styles.stars}>{starStr(avg)}</Text>
+      <Text style={styles.count}>{count} تقييم من الزبائن</Text>
+    </LinearGradient>
+  );
 
   return (
     <View style={styles.container}>
-      <GradientHeader title="تقييماتي ⭐" />
-
-      <View style={styles.summary}>
-        <Text style={styles.avg}>{parseFloat(avg || 0).toFixed(1)} ⭐</Text>
-        <Text style={styles.count}>{count} تقييم من الزبائن</Text>
-      </View>
-
-      {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={COLORS.primary} size="large" />
-      ) : list.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={{ fontSize: 52 }}>⭐</Text>
-          <Text style={styles.emptyText}>لا توجد تقييمات بعد</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={list}
-          keyExtractor={r => String(r.id)}
-          contentContainerStyle={{ padding: 16 }}
-          renderItem={({ item, index }) => (
-            <FadeIn delay={Math.min(index, 8) * 45}>
+      <GradientHeader title="تقييماتي" />
+      <FlatList
+        data={loading ? [] : list}
+        keyExtractor={(r, i) => String(r.id ?? i)}
+        ListHeaderComponent={header}
+        contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, flexGrow: 1 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />}
+        ListEmptyComponent={loading ? (
+          <View style={{ gap: 10 }}>{[0, 1, 2].map(i => <SkeletonCard key={i} lines={3} />)}</View>
+        ) : (
+          <View style={styles.empty}>
+            <Text style={{ fontSize: 52 }}>⭐</Text>
+            <Text style={styles.emptyText}>لا توجد تقييمات بعد</Text>
+          </View>
+        )}
+        renderItem={({ item, index }) => (
+          <FadeIn delay={Math.min(index, 8) * 45}>
             <View style={styles.card}>
-              <View style={styles.rowB}>
+              <View style={[RTL.row, { justifyContent: 'space-between' }]}>
                 <Text style={styles.name}>{item.customer_name || 'زبون'}</Text>
-                <Text style={styles.stars}>{starStr(parseInt(item.driver_rating))}</Text>
+                <Text style={styles.itemStars}>{starStr(item.driver_rating)}</Text>
               </View>
-              <Text style={styles.rest}>{[item.restaurant_name, new Date(item.created_at).toLocaleDateString('ar')].filter(Boolean).join(' · ')}</Text>
-              {!!item.comment && <Text style={styles.comment}>{item.comment}</Text>}
+              <Text style={[styles.rest, RTL.text]}>
+                {[item.restaurant_name || (item.order_type === 'personal' ? 'طلب توصيل' : null), fmtDate(item.created_at, false)].filter(Boolean).join(' · ')}
+              </Text>
+              {!!item.comment && <Text style={[styles.comment, RTL.text]}>{item.comment}</Text>}
             </View>
-            </FadeIn>
-          )}
-        />
-      )}
+          </FadeIn>
+        )}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E5E5EA' },
-  back: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 17, fontWeight: '800', color: COLORS.text },
-  summary: { backgroundColor: COLORS.primary, margin: 16, borderRadius: 20, padding: 22, alignItems: 'center', elevation: 6, shadowColor: COLORS.primary, shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: 8 } },
-  avg: { color: '#FFF', fontSize: 42, fontWeight: '900' },
-  count: { color: 'rgba(255,255,255,0.85)', fontSize: 14, marginTop: 4 },
-  empty: { alignItems: 'center', marginTop: 40, gap: 10 },
-  emptyText: { color: COLORS.gray, fontSize: 15, fontWeight: '600' },
-  card: { backgroundColor: '#FFF', borderRadius: 18, padding: 14, marginBottom: 10, ...SHADOW.soft },
-  rowB: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  name: { fontSize: 15, fontWeight: '800', color: COLORS.text },
-  stars: { fontSize: 15, color: COLORS.star },
-  rest: { fontSize: 12, color: COLORS.gray, marginTop: 3 },
-  comment: { fontSize: 14, color: COLORS.text, marginTop: 8, backgroundColor: '#F8F8F8', borderRadius: 10, padding: 10 },
+  summary: { borderRadius: 24, padding: 22, alignItems: 'center', marginBottom: 16, ...SHADOW.card },
+  avg: { color: '#FFF', fontSize: 44, fontWeight: '900' },
+  stars: { color: '#FFF', fontSize: 22, letterSpacing: 2 },
+  count: { color: 'rgba(255,255,255,0.92)', fontSize: 14, marginTop: 4, fontWeight: '700' },
+  empty: { alignItems: 'center', marginTop: 30, gap: 10 },
+  emptyText: { color: COLORS.gray, fontSize: 15, fontWeight: '700' },
+  card: { backgroundColor: COLORS.card, borderRadius: 18, padding: 14, marginBottom: 10, ...SHADOW.soft },
+  name: { fontSize: 15, fontWeight: '900', color: COLORS.text },
+  itemStars: { fontSize: 15, color: COLORS.star },
+  rest: { fontSize: 12, color: COLORS.gray, marginTop: 4 },
+  comment: { fontSize: 14, color: COLORS.text, marginTop: 8, backgroundColor: COLORS.inputBg, borderRadius: 12, padding: 10, lineHeight: 20 },
 });

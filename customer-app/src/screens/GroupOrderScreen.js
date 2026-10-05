@@ -1,44 +1,52 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Share, Alert, ActivityIndicator, Image } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Share, Alert, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import api from '../utils/api';
 import { Skeleton } from '../components/Skeleton';
 import GradientHeader from '../components/GradientHeader';
+import EmptyState from '../components/EmptyState';
 import { useCart } from '../context/CartContext';
 import { useTheme } from '../context/ThemeContext';
+import { SOCKET_URL } from '../config';
 
-const SOCKET_URL = 'https://burger-app-production.up.railway.app';
+const lineTotal = (it) => {
+  const addons = (it.options || []).reduce((a, o) => a + (parseFloat(o.price) || 0), 0);
+  return ((parseFloat(it.price) || 0) + addons) * (parseInt(it.quantity, 10) || 1);
+};
 
 export default function GroupOrderScreen() {
   const route = useRoute();
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const { colors: COLORS } = useTheme();
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
-  const { reorder } = useCart();
+  const { reorder, items: cartItems } = useCart();
 
   const [code, setCode] = useState(route.params?.code || null);
   const [codeInput, setCodeInput] = useState('');
   const [group, setGroup] = useState(null);
   const [loading, setLoading] = useState(!!route.params?.code);
-  const socketRef = useRef(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // تحميل المجموعة بالكود
-  const fetchGroup = useCallback(async (c) => {
+  const fetchGroup = useCallback(async (c, { silent } = {}) => {
     if (!c) return;
     try {
       const data = await api.get(`/group-orders/${c}`);
       setGroup(data.data || data);
     } catch (e) {
-      Alert.alert('خطأ', 'المجموعة غير موجودة أو انتهت');
-      setCode(null); setGroup(null);
-    } finally { setLoading(false); }
+      if (!silent) {
+        Alert.alert('المجموعة غير متاحة', e?.message === 'Network error' ? 'تعذّر الاتصال — تأكد من الإنترنت' : 'المجموعة غير موجودة أو انتهت');
+        setCode(null); setGroup(null);
+      }
+    } finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  // كل ما نرجع للشاشة نعيد التحميل (مثلاً بعد إضافة أصناف من المطعم)
-  useFocusEffect(useCallback(() => { if (code) fetchGroup(code); }, [code, fetchGroup]));
+  useFocusEffect(useCallback(() => { if (code) fetchGroup(code, { silent: !!group }); }, [code, fetchGroup]));
 
   // تحديث لحظي عبر السوكِت
   useEffect(() => {
@@ -49,9 +57,8 @@ export default function GroupOrderScreen() {
         const token = await SecureStore.getItemAsync('token');
         if (!token) return;
         sock = io(SOCKET_URL, { auth: { token }, transports: ['websocket'] });
-        socketRef.current = sock;
         sock.on('group:updated', (p) => {
-          if (!p?.code || String(p.code).toUpperCase() === String(code).toUpperCase()) fetchGroup(code);
+          if (!p?.code || String(p.code).toUpperCase() === String(code).toUpperCase()) fetchGroup(code, { silent: true });
         });
       } catch {}
     })();
@@ -67,8 +74,8 @@ export default function GroupOrderScreen() {
   const shareCode = () => {
     if (!group) return;
     Share.share({
-      message: `🍔 تعال نطلب سوا من ${group.restaurant_name || 'المطعم'} على تطبيق وصلّي!\n\nافتح التطبيق → طلب جماعي → أدخل الكود:\n\n🔑 ${group.code}\n\nكل واحد بيزيد أكله والحساب بينقسم 😋`,
-    });
+      message: `🍔 تعال نطلب سوا من ${group.restaurant_name || 'المطعم'} على تطبيق وصلّي!\n\nافتح التطبيق → طلب جماعي → أدخل الكود:\n\n🔑 ${group.code}\n\nكل واحد بيزيد أكله وبيشوف حسابه 😋`,
+    }).catch(() => {});
   };
 
   const addMyItems = () => {
@@ -76,34 +83,44 @@ export default function GroupOrderScreen() {
     navigation.navigate('Restaurant', { restaurantId: group.restaurant_id, groupId: group.id, groupCode: group.code });
   };
 
-  const removeItem = async (itemId) => {
-    try { await api.delete(`/group-orders/${group.id}/items/${itemId}`); fetchGroup(code); }
-    catch { Alert.alert('خطأ', 'تعذّر حذف الصنف'); }
-  };
-
-  // المضيف: استيراد كل أصناف المجموعة للسلّة ثم إكمال الدفع العادي
-  const checkoutAll = () => {
-    if (!group || !group.items?.length) return Alert.alert('السلّة فارغة', 'ما في أصناف بالمجموعة بعد');
-    Alert.alert('اطلب الكل', `رح تنقل ${group.items.length} صنف لسلّتك وتكمّل الدفع. متأكد؟`, [
+  const removeItem = (it) => {
+    Alert.alert('حذف الصنف', `بدك تحذف «${it.name}» من المجموعة؟`, [
       { text: 'إلغاء', style: 'cancel' },
       {
-        text: 'نعم، اطلب', onPress: async () => {
-          const cartItems = group.items.map(it => ({
-            id: it.menu_item_id,
-            name_ar: it.name,
-            image: it.image,
-            price: parseFloat(it.price) || 0,
-            discount_price: parseFloat(it.price) || 0,
-            quantity: parseInt(it.quantity) || 1,
-            addons: it.options || [],
-            notes: it.notes || '',
-          }));
-          reorder(cartItems, { id: group.restaurant_id, name_ar: group.restaurant_name });
-          try { await api.post(`/group-orders/${group.id}/close`, { status: 'ordered' }); } catch {}
-          navigation.navigate('Main', { screen: 'سلتي' });
+        text: 'حذف', style: 'destructive', onPress: async () => {
+          try { await api.delete(`/group-orders/${group.id}/items/${it.id}`); fetchGroup(code, { silent: true }); }
+          catch (e) { Alert.alert('خطأ', e?.message || 'تعذّر حذف الصنف'); }
         },
       },
     ]);
+  };
+
+  // المضيف: نقل الأصناف للسلة — المجموعة تُقفل فقط بعد نجاح الطلب (من السلة)
+  const doCheckout = () => {
+    const items = group.items.map(it => ({
+      id: it.menu_item_id,
+      name_ar: it.name,
+      image: it.image,
+      price: parseFloat(it.price) || 0,
+      quantity: parseInt(it.quantity, 10) || 1,
+      addons: (it.options || []).map(o => ({ ...o, price: parseFloat(o.price) || 0 })),
+      notes: it.notes || '',
+    }));
+    reorder(items, { id: group.restaurant_id, name_ar: group.restaurant_name }, { groupOrder: { id: group.id, code: group.code } });
+    navigation.navigate('Main', { screen: 'سلتي' });
+  };
+
+  const checkoutAll = () => {
+    if (!group || !group.items?.length) return Alert.alert('المجموعة فارغة', 'ما في أصناف بالمجموعة بعد');
+    const hasCart = cartItems.length > 0;
+    Alert.alert(
+      'اطلب الكل',
+      `رح ننقل ${group.items.length} صنف لسلّتك لتكمل الدفع.${hasCart ? '\n\n⚠️ سلتك الحالية فيها أصناف ورح تُستبدل.' : ''}\nالمجموعة بتتقفل بعد ما يتأكد الطلب.`,
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        { text: hasCart ? 'استبدل السلة واطلب' : 'نعم، كمّل', style: hasCart ? 'destructive' : 'default', onPress: doCheckout },
+      ]
+    );
   };
 
   // ===== شاشة الانضمام (بدون كود) =====
@@ -111,10 +128,10 @@ export default function GroupOrderScreen() {
     return (
       <View style={styles.container}>
         <GradientHeader title="طلب جماعي 👥" />
-        <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center' }}>
+        <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center' }} keyboardShouldPersistTaps="handled">
           <Text style={{ fontSize: 64, marginTop: 20 }}>🧑‍🤝‍🧑</Text>
-          <Text style={styles.bigTitle}>اطلبوا سوا — كسر الحساب</Text>
-          <Text style={styles.sub}>واحد يفتح مجموعة من صفحة المطعم، وكل واحد يزيد أكله من موبايله، والحساب بينقسم 😋</Text>
+          <Text style={styles.bigTitle}>اطلبوا سوا من نفس المطعم</Text>
+          <Text style={styles.sub}>واحد يفتح مجموعة من صفحة المطعم، وكل واحد يزيد أكله من موبايله، وكل شخص بيشوف حسابه 😋</Text>
 
           <View style={styles.joinCard}>
             <Text style={styles.joinLbl}>عندك كود مجموعة؟</Text>
@@ -122,13 +139,16 @@ export default function GroupOrderScreen() {
               value={codeInput}
               onChangeText={t => setCodeInput(t.toUpperCase())}
               placeholder="مثال: A7K9P2"
-              placeholderTextColor={COLORS.gray}
+              placeholderTextColor={COLORS.faint}
               autoCapitalize="characters"
               maxLength={8}
               style={styles.codeInput}
+              onSubmitEditing={joinByCode}
             />
-            <TouchableOpacity style={styles.joinBtn} onPress={joinByCode}>
-              <Text style={styles.joinBtnTxt}>انضم للمجموعة</Text>
+            <TouchableOpacity activeOpacity={0.9} onPress={joinByCode}>
+              <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.joinBtn}>
+                <Text style={styles.joinBtnTxt}>انضم للمجموعة</Text>
+              </LinearGradient>
             </TouchableOpacity>
           </View>
 
@@ -142,91 +162,113 @@ export default function GroupOrderScreen() {
   }
 
   if (loading) return (
-    <View style={{ flex: 1, backgroundColor: COLORS.bg, paddingTop: 50, paddingHorizontal: 16, gap: 12 }}>
-      <Skeleton w={'50%'} h={18} />
-      <Skeleton w={'100%'} h={80} r={16} />
-      {[0,1,2].map(i => <Skeleton key={i} w={'100%'} h={60} r={14} />)}
+    <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
+      <GradientHeader title="طلب جماعي" />
+      <View style={{ padding: 16, gap: 12 }}>
+        <Skeleton w={'100%'} h={150} r={20} />
+        {[0, 1, 2].map(i => <Skeleton key={i} w={'100%'} h={70} r={16} />)}
+      </View>
     </View>
   );
-  if (!group) return null;
+  if (!group) return (
+    <View style={styles.container}>
+      <GradientHeader title="طلب جماعي" />
+      <EmptyState emoji="😕" title="تعذّر فتح المجموعة" subtitle="حاول مرة ثانية" ctaLabel="إعادة المحاولة" onCta={() => { setLoading(true); fetchGroup(code); }} />
+    </View>
+  );
 
   const isOrdered = group.status === 'ordered';
-  // تجميع الأصناف حسب المشارك
+  const isClosed = group.status && group.status !== 'open' && !isOrdered;
+  // تجميع الأصناف حسب المشارك + مجموع كل شخص
   const byUser = {};
-  (group.items || []).forEach(it => { (byUser[it.user_name] = byUser[it.user_name] || []).push(it); });
+  (group.items || []).forEach(it => {
+    const k = it.user_name || 'مشارك';
+    if (!byUser[k]) byUser[k] = { items: [], total: 0, mine: false };
+    byUser[k].items.push(it);
+    byUser[k].total += lineTotal(it);
+    if (it.is_mine) byUser[k].mine = true;
+  });
+  const people = Object.entries(byUser);
+  const itemsTotal = people.reduce((s, [, v]) => s + v.total, 0);
+  const groupTotal = parseFloat(group.total) || itemsTotal;
 
   return (
     <View style={styles.container}>
-      <GradientHeader title={group.restaurant_name || 'طلب جماعي'} />
+      <GradientHeader title={group.restaurant_name || 'طلب جماعي'} subtitle="طلب جماعي" />
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
-        {/* كود المشاركة */}
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 120 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchGroup(code, { silent: true }); }} tintColor={COLORS.primary} />}>
         <View style={styles.codeCard}>
           <Text style={styles.codeCardLbl}>🔑 كود المجموعة</Text>
-          <Text style={styles.codeBig}>{group.code}</Text>
-          <TouchableOpacity style={styles.shareBtn} onPress={shareCode}>
-            <Ionicons name="share-social" size={18} color="#FFF" />
-            <Text style={styles.shareBtnTxt}>شارك الكود مع الشباب</Text>
-          </TouchableOpacity>
-          <Text style={styles.partCount}>👥 {group.participant_count || 0} مشارك · {(group.items || []).length} صنف</Text>
+          <Text style={styles.codeBig} selectable>{group.code}</Text>
+          {!isOrdered && (
+            <TouchableOpacity style={styles.shareBtn} onPress={shareCode}>
+              <Ionicons name="share-social" size={18} color="#FFF" />
+              <Text style={styles.shareBtnTxt}>شارك الكود مع الشباب</Text>
+            </TouchableOpacity>
+          )}
+          <Text style={styles.partCount}>👥 {group.participant_count || people.length} مشارك · {(group.items || []).length} صنف</Text>
         </View>
 
-        {isOrdered && (
-          <View style={styles.orderedBanner}>
+        {(isOrdered || isClosed) && (
+          <View style={[styles.orderedBanner, { backgroundColor: COLORS.successBg, borderColor: COLORS.successBorder }]}>
             <Ionicons name="checkmark-circle" size={20} color={COLORS.green} />
-            <Text style={styles.orderedTxt}>تم إرسال الطلب ✅ — المجموعة مقفلة</Text>
+            <Text style={[styles.orderedTxt, { color: COLORS.successText }]}>{isOrdered ? 'تم الطلب ✅ — المجموعة مقفلة' : 'المجموعة مقفلة'}</Text>
           </View>
         )}
 
-        {/* الأصناف حسب المشارك */}
-        {(group.items || []).length === 0 ? (
+        {people.length === 0 ? (
           <View style={styles.emptyBox}>
             <Text style={{ fontSize: 40 }}>🛒</Text>
-            <Text style={styles.sub}>لسه ما حدا أضاف أصناف</Text>
+            <Text style={styles.sub}>لسه ما حدا أضاف أصناف — ابدأ أنت!</Text>
           </View>
-        ) : (
-          Object.entries(byUser).map(([userName, items]) => (
-            <View key={userName} style={styles.userGroup}>
-              <Text style={styles.userName}>🧑 {userName}</Text>
-              {items.map(it => {
-                const addons = (it.options || []).reduce((a, o) => a + parseFloat(o.price || 0), 0);
-                const line = (parseFloat(it.price || 0) + addons) * (parseInt(it.quantity) || 1);
-                return (
-                  <View key={it.id} style={styles.itemRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.itemName}>{it.name} × {it.quantity}</Text>
-                      {it.options?.length > 0 && <Text style={styles.itemOpts}>{it.options.map(o => o.name).join(' • ')}</Text>}
-                    </View>
-                    <Text style={styles.itemPrice}>{line.toFixed(2)}₪</Text>
-                    {!isOrdered && (it.is_mine || group.is_host) && (
-                      <TouchableOpacity onPress={() => removeItem(it.id)} style={styles.delBtn}>
-                        <Ionicons name="close-circle" size={20} color={COLORS.red} />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                );
-              })}
+        ) : people.map(([userName, info]) => (
+          <View key={userName} style={[styles.userGroup, info.mine && { borderColor: COLORS.primary, borderWidth: 1.5 }]}>
+            <View style={styles.userHead}>
+              <Text style={styles.userName}>🧑 {userName}{info.mine ? ' (أنت)' : ''}</Text>
+              <View style={styles.userTotalPill}>
+                <Text style={styles.userTotalTxt}>{info.total.toFixed(2)}₪</Text>
+              </View>
             </View>
-          ))
-        )}
+            {info.items.map(it => (
+              <View key={it.id} style={styles.itemRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.itemName}>{it.name} × {it.quantity}</Text>
+                  {it.options?.length > 0 && <Text style={styles.itemOpts}>{it.options.map(o => o.name).join(' • ')}</Text>}
+                </View>
+                <Text style={styles.itemPrice}>{lineTotal(it).toFixed(2)}₪</Text>
+                {!isOrdered && !isClosed && (it.is_mine || group.is_host) && (
+                  <TouchableOpacity onPress={() => removeItem(it)} style={styles.delBtn} accessibilityLabel={`حذف ${it.name}`}>
+                    <Ionicons name="close-circle" size={20} color={COLORS.red} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
+          </View>
+        ))}
 
-        {/* الإجمالي */}
-        <View style={styles.totalRow}>
-          <Text style={styles.totalLbl}>الإجمالي</Text>
-          <Text style={styles.totalVal}>{parseFloat(group.total || 0).toFixed(2)}₪</Text>
+        <View style={styles.totalCard}>
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLbl}>مجموع الأصناف</Text>
+            <Text style={styles.totalVal}>{groupTotal.toFixed(2)}₪</Text>
+          </View>
+          {people.length > 1 && (
+            <Text style={styles.splitHint}>كل شخص يدفع مجموع أصنافه الظاهر بجانب اسمه. رسوم التوصيل والخصومات تُحسب بالسلة عند الدفع ويمكن تقسيمها بالتساوي (≈ حصة كل شخص من التوصيل = الرسوم ÷ {people.length}).</Text>
+          )}
         </View>
       </ScrollView>
 
-      {/* أزرار أسفل */}
-      {!isOrdered && (
-        <View style={styles.footer}>
+      {!isOrdered && !isClosed && (
+        <View style={[styles.footer, { paddingBottom: insets.bottom + 14 }]}>
           <TouchableOpacity style={styles.addBtn} onPress={addMyItems}>
             <Ionicons name="add-circle" size={20} color={COLORS.primary} />
             <Text style={styles.addBtnTxt}>أضف أصنافك</Text>
           </TouchableOpacity>
           {group.is_host && (
-            <TouchableOpacity style={styles.payBtn} onPress={checkoutAll}>
-              <Text style={styles.payBtnTxt}>اطلب الكل وادفع 💳</Text>
+            <TouchableOpacity activeOpacity={0.9} style={{ flex: 1.2 }} onPress={checkoutAll}>
+              <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.payBtn}>
+                <Text style={styles.payBtnTxt}>اطلب الكل وادفع 💳</Text>
+              </LinearGradient>
             </TouchableOpacity>
           )}
         </View>
@@ -235,43 +277,44 @@ export default function GroupOrderScreen() {
   );
 }
 
-const makeStyles = (COLORS) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg },
-  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10, backgroundColor: COLORS.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: COLORS.card, borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: COLORS.inputBg },
-  headerTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text, flex: 1, textAlign: 'center' },
-  bigTitle: { fontSize: 22, fontWeight: '900', color: COLORS.text, marginTop: 14, textAlign: 'center' },
-  sub: { fontSize: 13, color: COLORS.gray, textAlign: 'center', marginTop: 8, lineHeight: 20 },
-  joinCard: { backgroundColor: COLORS.card, borderRadius: 18, padding: 18, width: '100%', marginTop: 26, elevation: 2 },
-  joinLbl: { fontSize: 14, fontWeight: '800', color: COLORS.text, marginBottom: 10, textAlign: 'center' },
-  codeInput: { backgroundColor: COLORS.inputBg, borderRadius: 12, paddingVertical: 14, fontSize: 22, fontWeight: '900', textAlign: 'center', letterSpacing: 4, color: COLORS.text, borderWidth: 1, borderColor: COLORS.line },
-  joinBtn: { backgroundColor: COLORS.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12 },
+const makeStyles = (C) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
+  bigTitle: { fontSize: 22, fontWeight: '900', color: C.text, marginTop: 14, textAlign: 'center' },
+  sub: { fontSize: 13, color: C.gray, textAlign: 'center', marginTop: 8, lineHeight: 20 },
+  joinCard: { backgroundColor: C.card, borderRadius: 20, padding: 18, width: '100%', marginTop: 26, gap: 12, ...C.shadow.soft },
+  joinLbl: { fontSize: 14, fontWeight: '800', color: C.text, textAlign: 'center' },
+  codeInput: { backgroundColor: C.inputBg, borderRadius: 14, paddingVertical: 14, fontSize: 22, fontWeight: '900', textAlign: 'center', letterSpacing: 4, color: C.text, borderWidth: 1, borderColor: C.border },
+  joinBtn: { borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
   joinBtnTxt: { color: '#FFF', fontWeight: '900', fontSize: 16 },
-  hintBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.tint, borderRadius: 12, padding: 12, marginTop: 20 },
-  hintTxt: { flex: 1, fontSize: 12, color: COLORS.primary, fontWeight: '600' },
-  codeCard: { backgroundColor: COLORS.card, borderRadius: 20, padding: 18, alignItems: 'center', elevation: 2, borderWidth: 2, borderColor: '#FFE0CC' },
-  codeCardLbl: { fontSize: 13, color: COLORS.gray, fontWeight: '700' },
-  codeBig: { fontSize: 40, fontWeight: '900', color: COLORS.primary, letterSpacing: 8, marginVertical: 6 },
-  shareBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.primary, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 20, marginTop: 6 },
+  hintBox: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, backgroundColor: C.tint, borderRadius: 12, padding: 12, marginTop: 20 },
+  hintTxt: { flex: 1, fontSize: 12.5, color: C.primary, fontWeight: '700', textAlign: 'right' },
+  codeCard: { backgroundColor: C.card, borderRadius: 22, padding: 18, alignItems: 'center', borderWidth: 2, borderColor: C.tintBorder, ...C.shadow.soft },
+  codeCardLbl: { fontSize: 13, color: C.gray, fontWeight: '700' },
+  codeBig: { fontSize: 38, fontWeight: '900', color: C.primary, letterSpacing: 8, marginVertical: 6 },
+  shareBtn: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, backgroundColor: C.primary, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 20, marginTop: 6 },
   shareBtnTxt: { color: '#FFF', fontWeight: '800', fontSize: 15 },
-  partCount: { fontSize: 12, color: COLORS.gray, marginTop: 12, fontWeight: '600' },
-  orderedBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.tint, borderRadius: 12, padding: 12, marginTop: 14 },
-  orderedTxt: { fontSize: 13, fontWeight: '800', color: COLORS.green },
+  partCount: { fontSize: 12.5, color: C.gray, marginTop: 12, fontWeight: '600' },
+  orderedBanner: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, borderRadius: 14, padding: 12, marginTop: 14, borderWidth: 1 },
+  orderedTxt: { fontSize: 13.5, fontWeight: '800' },
   emptyBox: { alignItems: 'center', paddingVertical: 40, gap: 8 },
-  userGroup: { backgroundColor: COLORS.card, borderRadius: 16, padding: 14, marginTop: 12, elevation: 1 },
-  userName: { fontSize: 14, fontWeight: '800', color: COLORS.text, marginBottom: 8 },
-  itemRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7, borderTopWidth: 1, borderTopColor: COLORS.line },
-  itemName: { fontSize: 13, fontWeight: '600', color: COLORS.text },
-  itemOpts: { fontSize: 11, color: COLORS.gray, marginTop: 2 },
-  itemPrice: { fontSize: 13, fontWeight: '800', color: COLORS.primary },
+  userGroup: { backgroundColor: C.card, borderRadius: 18, padding: 14, marginTop: 12, borderWidth: 1, borderColor: C.border, ...C.shadow.soft },
+  userHead: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  userName: { fontSize: 14.5, fontWeight: '900', color: C.text },
+  userTotalPill: { backgroundColor: C.tint, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
+  userTotalTxt: { color: C.primary, fontWeight: '900', fontSize: 14 },
+  itemRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: C.line },
+  itemName: { fontSize: 13.5, fontWeight: '700', color: C.text, textAlign: 'right' },
+  itemOpts: { fontSize: 11.5, color: C.gray, marginTop: 2, textAlign: 'right' },
+  itemPrice: { fontSize: 13.5, fontWeight: '800', color: C.primary },
   delBtn: { padding: 2 },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 16, padding: 16, marginTop: 14, elevation: 1 },
-  totalLbl: { fontSize: 15, fontWeight: '800', color: COLORS.text },
-  totalVal: { fontSize: 20, fontWeight: '900', color: COLORS.primary },
-  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', gap: 10, padding: 14, paddingBottom: 24, backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.line },
-  addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, borderWidth: 2, borderColor: COLORS.primary, flex: 1 },
-  addBtnTxt: { color: COLORS.primary, fontWeight: '800', fontSize: 15 },
-  payBtn: { backgroundColor: COLORS.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center', flex: 1.2 },
+  totalCard: { backgroundColor: C.card, borderRadius: 18, padding: 16, marginTop: 14, ...C.shadow.soft },
+  totalRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' },
+  totalLbl: { fontSize: 15, fontWeight: '800', color: C.text },
+  totalVal: { fontSize: 20, fontWeight: '900', color: C.primary },
+  splitHint: { fontSize: 12, color: C.sub, marginTop: 10, lineHeight: 19, textAlign: 'right' },
+  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row-reverse', gap: 10, padding: 14, backgroundColor: C.card, borderTopWidth: 1, borderTopColor: C.line },
+  addBtn: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, borderWidth: 2, borderColor: C.primary, flex: 1 },
+  addBtnTxt: { color: C.primary, fontWeight: '800', fontSize: 15 },
+  payBtn: { borderRadius: 14, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
   payBtnTxt: { color: '#FFF', fontWeight: '900', fontSize: 15 },
 });

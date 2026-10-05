@@ -1,10 +1,12 @@
 import React, { useEffect, useRef } from 'react';
 import { TouchableOpacity, Text, View, StyleSheet, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
 
 export default function CartBar({ count, total, onPress }) {
   const { colors: COLORS } = useTheme();
+  const insets = useSafeAreaInsets();
   const scale = useRef(new Animated.Value(1)).current;
   const prevCount = useRef(count);
 
@@ -20,8 +22,9 @@ export default function CartBar({ count, total, onPress }) {
   }, [count]);
 
   return (
-    <Animated.View style={[styles.wrap, { transform: [{ scale }] }]}>
-      <TouchableOpacity onPress={onPress} activeOpacity={0.9} style={styles.shadow}>
+    <Animated.View style={[styles.wrap, { bottom: insets.bottom + 16, transform: [{ scale }] }]}>
+      <TouchableOpacity onPress={onPress} activeOpacity={0.9} style={styles.shadow}
+        accessibilityRole="button" accessibilityLabel={`عرض السلة، ${count} صنف، ${total.toFixed(2)} شيكل`}>
         <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.bar}>
           <View style={styles.badge}><Text style={styles.badgeText}>{count}</Text></View>
           <Text style={styles.text}>عرض السلة</Text>
@@ -33,11 +36,11 @@ export default function CartBar({ count, total, onPress }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', bottom: 22, left: 16, right: 16 },
+  wrap: { position: 'absolute', left: 16, right: 16 },
   shadow: { borderRadius: 20, elevation: 12, shadowColor: '#FF6B00', shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 10 } },
-  bar: { borderRadius: 20, flexDirection: 'row', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 18 },
+  bar: { borderRadius: 20, flexDirection: 'row-reverse', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 18 },
   badge: { backgroundColor: 'rgba(255,255,255,0.28)', borderRadius: 13, minWidth: 26, height: 26, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' },
   badgeText: { color: '#FFF', fontWeight: '900', fontSize: 14 },
   text: { flex: 1, color: '#FFF', fontWeight: '800', fontSize: 15, textAlign: 'center', letterSpacing: 0.3 },
-  total: { color: '#FFF', fontWeight: '900', fontSize: 16 }
+  total: { color: '#FFF', fontWeight: '900', fontSize: 16 },
 });

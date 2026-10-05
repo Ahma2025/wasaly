@@ -1,13 +1,31 @@
-import React, { useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, ActivityIndicator, Text, TextInput, StyleSheet, StatusBar, I18nManager } from 'react-native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
-import { AuthProvider, useAuth } from './src/context/AuthContext';
-import { View, ActivityIndicator, Text, TextInput, StyleSheet } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as ExpoSplash from 'expo-splash-screen';
 import { useFonts, Tajawal_400Regular, Tajawal_500Medium, Tajawal_700Bold, Tajawal_800ExtraBold, Tajawal_900Black } from '@expo-google-fonts/tajawal';
+import './src/tasks/locationTask'; // يُعرّف مهمة تتبّع الموقع في الخلفية (يجب أن يكون في نطاق الوحدة)
+import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { LocationProvider } from './src/context/LocationContext';
+import { DriverProvider } from './src/context/DriverContext';
+import { navRef, markNavReady } from './src/navigation/navRef';
 import SplashScreen from './src/components/SplashScreen';
-import './src/tasks/locationTask'; // يُعرّف مهمة تتبّع الموقع في الخلفية
+import FloatingTabBar from './src/components/FloatingTabBar';
+import { COLORS } from './src/theme';
+
+import LoginScreen from './src/screens/LoginScreen';
+import HomeScreen from './src/screens/HomeScreen';
+import EarningsScreen from './src/screens/EarningsScreen';
+import OrdersHistoryScreen from './src/screens/OrdersHistoryScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
+import DeliveryScreen from './src/screens/DeliveryScreen';
+import ReviewsScreen from './src/screens/ReviewsScreen';
+import SupportChatScreen from './src/screens/SupportChatScreen';
+
+// اتجاه ثابت: لا نسمح بقلب التخطيط حسب لغة الجهاز — الأنماط تكتب RTL صراحةً (انظر theme.RTL)
+try { I18nManager.allowRTL(false); I18nManager.forceRTL(false); } catch {}
 
 const WEIGHT_MAP = {
   '400': 'Tajawal_400Regular', 'normal': 'Tajawal_400Regular',
@@ -21,6 +39,7 @@ function applyGlobalFont() {
   _fontPatched = true;
   const patch = (Comp) => {
     const orig = Comp.render;
+    if (typeof orig !== 'function') return;
     Comp.render = function (...args) {
       const el = orig.apply(this, args);
       if (!el || !el.props) return el;
@@ -33,18 +52,10 @@ function applyGlobalFont() {
   try { patch(Text); patch(TextInput); } catch {}
 }
 
-import LoginScreen from './src/screens/LoginScreen';
-import HomeScreen from './src/screens/HomeScreen';
-import EarningsScreen from './src/screens/EarningsScreen';
-import OrdersHistoryScreen from './src/screens/OrdersHistoryScreen';
-import ProfileScreen from './src/screens/ProfileScreen';
-import DeliveryScreen from './src/screens/DeliveryScreen';
-import ReviewsScreen from './src/screens/ReviewsScreen';
-import SupportChatScreen from './src/screens/SupportChatScreen';
-import FloatingTabBar from './src/components/FloatingTabBar';
-
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
+
+const navTheme = { ...DefaultTheme, colors: { ...DefaultTheme.colors, background: COLORS.bg, primary: COLORS.primary } };
 
 function MainTabs() {
   return (
@@ -61,37 +72,59 @@ function MainTabs() {
 
 function AppNavigator() {
   const { user, loading } = useAuth();
-  if (loading) return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" color="#FF6B00" /></View>;
+  if (loading) {
+    return <View style={styles.loading}><ActivityIndicator size="large" color={COLORS.primary} /></View>;
+  }
+  if (!user) {
+    return (
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="Login" component={LoginScreen} />
+      </Stack.Navigator>
+    );
+  }
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right', animationDuration: 260, gestureEnabled: true }}>
-      {user ? (
-        <>
+    <LocationProvider>
+      <DriverProvider>
+        <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_left', animationDuration: 260, gestureEnabled: true, contentStyle: { backgroundColor: COLORS.bg } }}>
           <Stack.Screen name="Main" component={MainTabs} />
-          <Stack.Screen name="Delivery" component={DeliveryScreen} options={{ presentation: 'fullScreenModal' }} />
+          <Stack.Screen name="Delivery" component={DeliveryScreen} options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom', gestureEnabled: false }} />
           <Stack.Screen name="Reviews" component={ReviewsScreen} />
           <Stack.Screen name="SupportChat" component={SupportChatScreen} />
-        </>
-      ) : (
-        <Stack.Screen name="Login" component={LoginScreen} />
-      )}
-    </Stack.Navigator>
+        </Stack.Navigator>
+      </DriverProvider>
+    </LocationProvider>
   );
 }
 
 export default function App() {
   const [splashDone, setSplashDone] = useState(false);
-  const [fontsLoaded] = useFonts({ Tajawal_400Regular, Tajawal_500Medium, Tajawal_700Bold, Tajawal_800ExtraBold, Tajawal_900Black });
+  const [fontsLoaded, fontError] = useFonts({ Tajawal_400Regular, Tajawal_500Medium, Tajawal_700Bold, Tajawal_800ExtraBold, Tajawal_900Black });
+  const fontsReady = fontsLoaded || !!fontError;
   if (fontsLoaded) applyGlobalFont();
 
-  if (!splashDone) {
-    return <SplashScreen onFinish={() => setSplashDone(true)} />;
-  }
+  // إخفاء السبلاش الأصلي بعد رسم أول شاشة JS (بعد الخطوط) — بلا وميض أبيض
+  const hideNative = useCallback(() => { ExpoSplash.hideAsync().catch(() => {}); }, []);
+  // احتياط: لا نترك السبلاش الأصلي عالقاً إن تأخرت الخطوط
+  useEffect(() => { const t = setTimeout(hideNative, 6000); return () => clearTimeout(t); }, [hideNative]);
+
+  if (!fontsReady) return null; // السبلاش الأصلي ما زال ظاهراً
 
   return (
-    <AuthProvider>
-      <NavigationContainer>
-        <AppNavigator />
-      </NavigationContainer>
-    </AuthProvider>
+    <SafeAreaProvider>
+      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+      {!splashDone ? (
+        <SplashScreen onReady={hideNative} onFinish={() => setSplashDone(true)} />
+      ) : (
+        <AuthProvider>
+          <NavigationContainer ref={navRef} theme={navTheme} onReady={markNavReady}>
+            <AppNavigator />
+          </NavigationContainer>
+        </AuthProvider>
+      )}
+    </SafeAreaProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.bg },
+});

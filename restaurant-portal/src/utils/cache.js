@@ -7,3 +7,10 @@ export const readCache = (key) => {
 export const writeCache = (key, data) => {
   try { localStorage.setItem('cache_' + key, JSON.stringify(data)); } catch {}
 };
+
+// حذف كل الكاش (عند الخروج) مع إبقاء إعدادات الجهاز مثل الطابعة
+export const clearCaches = () => {
+  try {
+    Object.keys(localStorage).filter(k => k.startsWith('cache_')).forEach(k => localStorage.removeItem(k));
+  } catch {}
+};

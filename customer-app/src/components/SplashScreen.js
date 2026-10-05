@@ -18,13 +18,15 @@ export default function SplashScreen({ onFinish }) {
       Animated.timing(logoRise, { toValue: 0, duration: 550, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
     ]).start();
 
-    Animated.loop(Animated.sequence([
+    const loop = Animated.loop(Animated.sequence([
       Animated.timing(ringPulse, { toValue: 1, duration: 1400, easing: Easing.out(Easing.ease), useNativeDriver: true }),
       Animated.timing(ringPulse, { toValue: 0, duration: 0, useNativeDriver: true }),
-    ])).start();
+    ]));
+    loop.start();
 
     Animated.timing(barAnim, { toValue: 1, duration: 950, delay: 150, useNativeDriver: false })
       .start(() => setTimeout(() => onFinish && onFinish(), 150));
+    return () => loop.stop();
   }, []);
 
   const barWidth = barAnim.interpolate({ inputRange: [0, 1], outputRange: [0, width * 0.6] });
@@ -33,15 +35,13 @@ export default function SplashScreen({ onFinish }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar backgroundColor="#FF7A1A" barStyle="light-content" />
+      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
       <LinearGradient colors={['#FF8A00', '#FF5E3A', '#F53B57']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
 
-      {/* دوائر ضوء زخرفية */}
       <View style={styles.glowTop} />
       <View style={styles.glowBottom} />
 
       <Animated.View style={[styles.inner, { opacity: fadeAnim }]}>
-        {/* شعار بحلقة نبض */}
         <View style={styles.logoWrap}>
           <Animated.View style={[styles.ring, { transform: [{ scale: ringScale }], opacity: ringOpacity }]} />
           <Animated.View style={[styles.logoBadge, { transform: [{ scale: logoScale }, { translateY: logoRise }] }]}>
@@ -57,9 +57,8 @@ export default function SplashScreen({ onFinish }) {
             <LinearGradient colors={['#FFFFFF', 'rgba(255,255,255,0.85)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.barFill} />
           </Animated.View>
         </View>
-
-        <Text style={styles.bottom}>WSSELY DELIVERY</Text>
       </Animated.View>
+      <Text style={styles.bottom}>وصلّي</Text>
     </View>
   );
 }
@@ -77,5 +76,5 @@ const styles = StyleSheet.create({
   tag: { fontSize: 18, color: 'rgba(255,255,255,0.92)', fontWeight: '600', marginBottom: 56 },
   barTrack: { width: width * 0.6, height: 6, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 3, overflow: 'hidden' },
   barFill: { height: '100%', borderRadius: 3 },
-  bottom: { fontSize: 11, color: 'rgba(255,255,255,0.55)', letterSpacing: 4, position: 'absolute', bottom: -120, fontWeight: '700' },
+  bottom: { position: 'absolute', bottom: 48, fontSize: 13, color: 'rgba(255,255,255,0.6)', letterSpacing: 1, fontWeight: '700' },
 });

@@ -1,16 +1,44 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-import api from '../utils/api';
+import api, { setUnauthorizedHandler } from '../utils/api';
+import { clearAllCache } from '../utils/cache';
+import { emitLogout } from '../utils/session';
 import { registerForPushNotifications } from '../utils/pushNotifications';
 
-const AuthContext = createContext();
+const AuthContext = createContext({});
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(null);
   const appState = useRef(AppState.currentState);
+  const loggingOut = useRef(false);
+
+  // تنظيف كامل للجلسة: التوكن، المستخدم، السلة، الكاش، تذكير السلة المجدول
+  const clearSession = useCallback(async () => {
+    try { await SecureStore.deleteItemAsync('token'); } catch {}
+    try { await SecureStore.deleteItemAsync('user'); } catch {}
+    await emitLogout();      // السلة تمسح نفسها وتلغي التذكير
+    await clearAllCache();   // cache_* (home, profile, orders_my, favorites, notifications, rest_*...)
+    setToken(null);
+    setUser(null);
+  }, []);
+
+  const logout = useCallback(async ({ remote = true } = {}) => {
+    if (loggingOut.current) return;
+    loggingOut.current = true;
+    try {
+      if (remote) { try { await api.post('/auth/logout'); } catch {} }
+      await clearSession();
+    } finally { loggingOut.current = false; }
+  }, [clearSession]);
+
+  // أي 401 من السيرفر (توكن منتهي) → خروج نظيف بدل بقاء التطبيق بمستخدم وهمي
+  useEffect(() => {
+    setUnauthorizedHandler(() => { logout({ remote: false }); });
+    return () => setUnauthorizedHandler(null);
+  }, [logout]);
 
   useEffect(() => { loadUser(); }, []);
 
@@ -20,7 +48,7 @@ export const AuthProvider = ({ children }) => {
       if (appState.current.match(/inactive|background/) && next === 'active') {
         SecureStore.getItemAsync('token').then(t => {
           if (t) registerForPushNotifications().catch(() => {});
-        });
+        }).catch(() => {});
       }
       appState.current = next;
     });
@@ -32,20 +60,17 @@ export const AuthProvider = ({ children }) => {
       const t = await SecureStore.getItemAsync('token');
       if (t) {
         setToken(t);
-        // عرض فوري من الكاش (بدون انتظار الشبكة) — يلغي شاشة التحميل البيضا
+        // عرض فوري من الكاش (بدون انتظار الشبكة)
         try {
           const cached = await SecureStore.getItemAsync('user');
           if (cached) setUser(JSON.parse(cached));
-        } catch {}
-        setLoading(false); // ندخل التطبيق فورًا
-        // تحقّق بالخلفية (تحديث البيانات، وتسجيل خروج فقط لو التوكن غير صالح)
+          else setUser({});
+        } catch { setUser({}); }
+        setLoading(false);
+        // تحقّق بالخلفية — 401 يتولاه معالج الـ api (logout)
         api.get('/auth/me')
           .then(data => { if (data?.user) { setUser(data.user); SecureStore.setItemAsync('user', JSON.stringify(data.user)).catch(() => {}); } })
-          .catch(async (e) => {
-            if (e?.message !== 'Network error' && e?.status === 401) {
-              await SecureStore.deleteItemAsync('token'); setToken(null); setUser(null);
-            }
-          });
+          .catch((e) => { if (e?.status === 401) logout({ remote: false }); });
         registerForPushNotifications().catch(() => {});
         return;
       }
@@ -54,22 +79,24 @@ export const AuthProvider = ({ children }) => {
   };
 
   const login = async (tokenValue, userData) => {
+    // حساب جديد على نفس الجهاز → لا نُبقي بيانات الحساب السابق
+    await emitLogout();
+    await clearAllCache();
     await SecureStore.setItemAsync('token', tokenValue);
-    try { await SecureStore.setItemAsync('user', JSON.stringify(userData)); } catch {}
+    try { await SecureStore.setItemAsync('user', JSON.stringify(userData || {})); } catch {}
     setToken(tokenValue);
-    setUser(userData);
+    setUser(userData || {});
     registerForPushNotifications().catch(() => {});
   };
 
-  const logout = async () => {
-    try { await api.post('/auth/logout'); } catch {}
-    await SecureStore.deleteItemAsync('token');
-    try { await SecureStore.deleteItemAsync('user'); } catch {}
-    setToken(null);
-    setUser(null);
-  };
-
-  const updateUser = (data) => setUser(prev => ({ ...prev, ...data }));
+  // تحديث بيانات المستخدم بالذاكرة + التخزين الآمن (مثلاً بعد تعديل الاسم)
+  const updateUser = useCallback((data) => {
+    setUser(prev => {
+      const next = { ...(prev || {}), ...data };
+      SecureStore.setItemAsync('user', JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
 
   return (
     <AuthContext.Provider value={{ user, token, loading, login, logout, updateUser }}>

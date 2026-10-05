@@ -1,11 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
+import { FiImage, FiTrash2, FiPlus } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
+import { truthy } from '../utils/format';
+import { PageHeader, EmptyState, Field, Badge, useConfirm } from '../components/ui';
+import { Sk } from '../components/Skeleton';
 
 export default function Banners() {
-  const [banners, setBanners] = useState(readCache('adm_banners') || []);
-  const [loading, setLoading] = useState(!readCache('adm_banners'));
+  const confirm = useConfirm();
+  const cached = readCache('adm_banners');
+  const [banners, setBanners] = useState(cached || []);
+  const [loading, setLoading] = useState(!cached);
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({ title_ar: '', sort_order: '' });
   const [preview, setPreview] = useState(null);
@@ -13,34 +19,24 @@ export default function Banners() {
   const fileRef = useRef();
 
   useEffect(() => { load(); }, []);
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
   const load = async () => {
     try {
       const r = await api.get('/banners/all');
       setBanners(r.data || []); writeCache('adm_banners', r.data || []);
     } catch {
-      // fallback to public endpoint
-      try {
-        const r = await api.get('/banners');
-        setBanners(r.data || []);
-      } catch (e) { console.error(e); }
+      try { const r = await api.get('/banners'); setBanners(r.data || []); } catch { /* ignore */ }
     } finally { setLoading(false); }
   };
 
   const pickImage = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (!file.type.startsWith('image/')) return toast.error('اختر ملف صورة');
+    if (file.size > 10 * 1024 * 1024) return toast.error('الحد الأقصى 10MB');
     setImageFile(file);
     setPreview(URL.createObjectURL(file));
-  };
-
-  const uploadImage = async () => {
-    if (!imageFile) return null;
-    const fd = new FormData();
-    fd.append('file', imageFile);
-    // axios يضبط Content-Type مع boundary تلقائياً لـ FormData
-    const r = await api.post('/upload', fd);
-    return r.url || null;
   };
 
   const submit = async (e) => {
@@ -49,161 +45,94 @@ export default function Banners() {
     if (!form.title_ar.trim()) return toast.error('أدخل عنوان الإعلان');
     setUploading(true);
     try {
-      const imageUrl = await uploadImage();
+      const fd = new FormData();
+      fd.append('file', imageFile);
+      const up = await api.post('/upload', fd);
+      const imageUrl = up.url || up.data?.url;
       if (!imageUrl) throw new Error('فشل رفع الصورة');
-      const sortOrder = form.sort_order === '' ? banners.length + 1 : parseInt(form.sort_order) || 1;
-      await api.post('/banners', { ...form, sort_order: sortOrder, image: imageUrl, is_active: true });
-      toast.success('تم إضافة الإعلان ✅');
+      const sortOrder = form.sort_order === '' ? banners.length + 1 : Math.max(1, parseInt(form.sort_order) || 1);
+      await api.post('/banners', { title_ar: form.title_ar.trim(), sort_order: sortOrder, image: imageUrl, is_active: true });
+      toast.success('تمت إضافة الإعلان ✅');
       setForm({ title_ar: '', sort_order: '' });
-      setPreview(null);
-      setImageFile(null);
+      setPreview(null); setImageFile(null);
       if (fileRef.current) fileRef.current.value = '';
       load();
-    } catch (err) {
-      toast.error(err.message || 'حدث خطأ');
-    } finally { setUploading(false); }
+    } catch (err) { toast.error(err?.message || 'حدث خطأ'); }
+    finally { setUploading(false); }
   };
 
-  const toggleActive = async (id, current) => {
+  const toggleActive = async (b) => {
+    const cur = truthy(b.is_active);
     try {
-      await api.patch(`/banners/${id}/toggle`);
-      setBanners(prev => prev.map(b => b.id === id ? { ...b, is_active: !current } : b));
-      toast.success(current ? 'تم إيقاف الإعلان' : 'تم تفعيل الإعلان');
-    } catch { toast.error('حدث خطأ'); }
+      await api.patch(`/banners/${b.id}/toggle`);
+      setBanners(prev => prev.map(x => (x.id === b.id ? { ...x, is_active: !cur } : x)));
+      toast.success(cur ? 'تم إيقاف الإعلان' : 'تم تفعيل الإعلان');
+    } catch (e) { toast.error(e?.message || 'حدث خطأ'); }
   };
 
-  const deleteBanner = async (id) => {
-    if (!confirm('حذف هذا الإعلان؟')) return;
+  const deleteBanner = async (b) => {
+    const ok = await confirm({ title: 'حذف الإعلان', message: `حذف «${b.title_ar || 'الإعلان'}» نهائياً؟ لا يمكن التراجع.`, confirmText: 'حذف' });
+    if (!ok) return;
     try {
-      await api.delete(`/banners/${id}`);
-      setBanners(prev => prev.filter(b => b.id !== id));
+      await api.delete(`/banners/${b.id}`);
+      setBanners(prev => prev.filter(x => x.id !== b.id));
       toast.success('تم الحذف');
-    } catch { toast.error('حدث خطأ'); }
+    } catch (e) { toast.error(e?.message || 'حدث خطأ'); }
   };
 
   return (
-    <div className="p-4 pb-32 space-y-4" dir="rtl">
-      <h1 className="text-lg font-black text-gray-900">🖼️ إدارة الإعلانات</h1>
+    <div className="p-4 space-y-4 animate-fade-up">
+      <PageHeader icon="🖼️" title="الإعلانات" subtitle={`${banners.length} إعلان · تظهر في واجهة تطبيق الزبون`} />
 
-      {/* فورم إضافة */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-        <h2 className="font-bold text-gray-800 mb-3 text-sm">إضافة إعلان جديد</h2>
-        <form onSubmit={submit} className="space-y-3">
+      <form onSubmit={submit} className="card p-4 space-y-3">
+        <h2 className="font-black text-gray-900 text-sm">إضافة إعلان جديد</h2>
+        <button type="button" onClick={() => fileRef.current?.click()}
+          className="w-full border-2 border-dashed border-orange-200 rounded-2xl overflow-hidden bg-orange-50/60 hover:bg-orange-50" style={{ minHeight: 140 }}>
+          {preview ? (
+            <img src={preview} alt="معاينة" className="w-full object-cover" style={{ maxHeight: 200 }} />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-36 text-orange-400">
+              <FiImage className="text-4xl mb-2" />
+              <span className="text-sm font-bold">اضغط لاختيار صورة الإعلان</span>
+              <span className="text-xs text-orange-300 mt-1">JPG, PNG, WEBP — حتى 10MB</span>
+            </div>
+          )}
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickImage} />
+        <Field label="عنوان الإعلان *"><input className="inp" value={form.title_ar} onChange={e => setForm(p => ({ ...p, title_ar: e.target.value }))} placeholder="مثال: عروض رمضان 🌙" /></Field>
+        <Field label="الترتيب" hint="(1 = أولاً · فارغ = في النهاية)"><input className="inp" type="number" min="1" value={form.sort_order} placeholder="تلقائي" onChange={e => setForm(p => ({ ...p, sort_order: e.target.value }))} /></Field>
+        <button type="submit" disabled={uploading} className="w-full btn-lux py-3 disabled:opacity-60 flex items-center justify-center gap-2">
+          {uploading ? <><span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" /> جاري الرفع…</> : <><FiPlus /> إضافة الإعلان</>}
+        </button>
+      </form>
 
-          {/* رفع الصورة */}
-          <div
-            onClick={() => fileRef.current?.click()}
-            className="border-2 border-dashed border-orange-300 rounded-xl cursor-pointer overflow-hidden bg-orange-50 hover:bg-orange-100 transition-colors"
-            style={{ minHeight: 140 }}
-          >
-            {preview ? (
-              <img src={preview} alt="preview" className="w-full object-cover" style={{ maxHeight: 200 }} />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-36 text-orange-400">
-                <span className="text-4xl mb-2">📷</span>
-                <span className="text-sm font-semibold">اضغط لرفع صورة الإعلان</span>
-                <span className="text-xs text-orange-300 mt-1">JPG, PNG, WEBP — حتى 10MB</span>
-              </div>
-            )}
-          </div>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickImage} />
-
-          {/* العنوان */}
-          <div>
-            <label className="text-xs font-semibold text-gray-600 mb-1 block">عنوان الإعلان *</label>
-            <input
-              value={form.title_ar}
-              onChange={e => setForm(p => ({ ...p, title_ar: e.target.value }))}
-              placeholder="مثال: عروض رمضان 🌙"
-              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400 text-right"
-            />
-          </div>
-
-          {/* الترتيب */}
-          <div>
-            <label className="text-xs font-semibold text-gray-600 mb-1 block">الترتيب (1 = يظهر أول، اتركه فاضياً للتلقائي)</label>
-            <input
-              type="number"
-              min="1"
-              value={form.sort_order}
-              placeholder="مثال: 1"
-              onChange={e => setForm(p => ({ ...p, sort_order: e.target.value }))}
-              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={uploading}
-            className="w-full bg-orange-500 text-white font-bold py-3 rounded-xl disabled:opacity-60 flex items-center justify-center gap-2"
-          >
-            {uploading ? (
-              <><span className="animate-spin">⏳</span> جاري الرفع...</>
-            ) : (
-              <><span>➕</span> إضافة الإعلان</>
-            )}
-          </button>
-        </form>
-      </div>
-
-      {/* قائمة الإعلانات */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <span className="text-xs text-gray-500">{banners.length} إعلان</span>
-          <h2 className="font-bold text-gray-800 text-sm">الإعلانات الحالية</h2>
-        </div>
-
-        {loading ? (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 py-2">
-            {[...Array(6)].map((_, i) => <div key={i} className="sk" style={{ width: '100%', height: 120, borderRadius: 16 }} />)}
-          </div>
-        ) : banners.length === 0 ? (
-          <div className="text-center py-12 text-gray-400">
-            <div className="text-4xl mb-2">🖼️</div>
-            <p className="text-sm">لا توجد إعلانات بعد</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {banners.map(b => (
+      {loading && banners.length === 0 ? (
+        <div className="space-y-3">{[...Array(3)].map((_, i) => <Sk key={i} h={84} r={18} />)}</div>
+      ) : banners.length === 0 ? (
+        <EmptyState icon="🖼️" title="لا توجد إعلانات بعد" />
+      ) : (
+        <div className="card divide-y divide-gray-50 overflow-hidden">
+          {[...banners].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).map(b => {
+            const active = truthy(b.is_active);
+            return (
               <div key={b.id} className="flex items-center gap-3 p-3">
-                {/* صورة */}
-                <div className="w-20 h-14 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                  {b.image ? (
-                    <img src={b.image} alt={b.title_ar} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-gray-400 text-xl">🖼️</div>
-                  )}
+                <div className="w-24 h-16 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
+                  {b.image ? <img src={b.image} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-400 text-xl"><FiImage /></div>}
                 </div>
-
-                {/* تفاصيل */}
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-gray-800 text-sm truncate">{b.title_ar || 'بدون عنوان'}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">ترتيب: {b.sort_order ?? 0}</p>
-                  <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full mt-1 ${b.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                    {b.is_active ? '● نشط' : '○ متوقف'}
-                  </span>
+                  <p className="text-xs text-gray-400 mt-0.5">الترتيب: {b.sort_order ?? 0}</p>
+                  <Badge className={`mt-1 ${active ? 'bg-green-50 text-green-700 ring-green-200' : 'bg-gray-100 text-gray-500 ring-gray-200'}`}>{active ? '● نشط' : '○ متوقف'}</Badge>
                 </div>
-
-                {/* أزرار */}
                 <div className="flex flex-col gap-1.5">
-                  <button
-                    onClick={() => toggleActive(b.id, b.is_active)}
-                    className={`text-xs font-bold px-3 py-1.5 rounded-lg ${b.is_active ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}
-                  >
-                    {b.is_active ? 'إيقاف' : 'تفعيل'}
-                  </button>
-                  <button
-                    onClick={() => deleteBanner(b.id)}
-                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-red-50 text-red-500"
-                  >
-                    حذف
-                  </button>
+                  <button onClick={() => toggleActive(b)} className={`text-xs font-bold px-3 py-1.5 rounded-lg ${active ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'}`}>{active ? 'إيقاف' : 'تفعيل'}</button>
+                  <button onClick={() => deleteBanner(b)} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-red-50 text-red-500 flex items-center justify-center gap-1"><FiTrash2 /> حذف</button>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

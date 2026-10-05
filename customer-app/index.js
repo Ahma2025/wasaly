@@ -2,8 +2,7 @@ import { registerRootComponent } from 'expo';
 import * as ExpoSplash from 'expo-splash-screen';
 import App from './App';
 
-// Hide the native splash immediately so our custom animated splash shows
+// نُبقي شاشة البداية الأصلية ظاهرة حتى تجهز الخطوط — App.js يخفيها بعدها (بدون وميض أبيض)
 ExpoSplash.preventAutoHideAsync().catch(() => {});
-ExpoSplash.hideAsync().catch(() => {});
 
 registerRootComponent(App);

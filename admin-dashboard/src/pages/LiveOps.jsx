@@ -1,13 +1,43 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
+import { statusMeta, money, num, isPersonal, fmtTime } from '../utils/format';
+import { PageHeader, StatTile, EmptyState, Badge } from '../components/ui';
 
-const STATUS = {
-  pending:    { l: 'قيد الانتظار', c: 'bg-yellow-100 text-yellow-700' },
-  confirmed:  { l: 'مقبول',        c: 'bg-blue-100 text-blue-700' },
-  preparing:  { l: 'يُحضَّر',       c: 'bg-orange-100 text-orange-700' },
-  ready:      { l: 'جاهز',         c: 'bg-green-100 text-green-700' },
-  on_the_way: { l: 'في الطريق',    c: 'bg-purple-100 text-purple-700' },
+const CENTER = [32.313, 35.029];
+
+/** يبني محتوى popup كعناصر DOM بنصوص آمنة (textContent) — لا HTML من المستخدمين أبداً */
+function popupNode(lines) {
+  const root = document.createElement('div');
+  root.style.minWidth = '150px';
+  lines.filter(l => l && l[0] != null && String(l[0]).trim() !== '').forEach(([text, bold], i) => {
+    const el = document.createElement('div');
+    el.textContent = String(text ?? '');
+    if (bold) el.style.fontWeight = '800';
+    if (i > 0) { el.style.fontSize = '12px'; el.style.color = '#5B6070'; el.style.marginTop = '2px'; }
+    root.appendChild(el);
+  });
+  return root;
+}
+
+// أيقونات ثابتة (بلا أي بيانات مستخدم)
+const ICON_CACHE = {};
+function icon(emoji, bg) {
+  const key = emoji + bg;
+  if (!ICON_CACHE[key]) {
+    ICON_CACHE[key] = L.divIcon({
+      html: `<div style="font-size:17px;background:${bg};border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3)">${emoji}</div>`,
+      className: '', iconSize: [32, 32], iconAnchor: [16, 16],
+    });
+  }
+  return ICON_CACHE[key];
+}
+
+const valid = (lat, lng) => {
+  const a = parseFloat(lat), b = parseFloat(lng);
+  return Number.isFinite(a) && Number.isFinite(b) && !(a === 0 && b === 0) ? [a, b] : null;
 };
 
 export default function LiveOps() {
@@ -17,76 +47,76 @@ export default function LiveOps() {
   const fittedRef = useRef(false);
   const [data, setData] = useState(readCache('adm_liveops') || { orders: [], drivers: [] });
   const [failed, setFailed] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState(null);
 
-  const load = () => api.get('/admin/live-ops')
-    .then(r => { const d={ orders: r.orders || [], drivers: r.drivers || [] }; setData(d); writeCache('adm_liveops', d); })
-    .catch(() => {});
+  const load = useCallback(() => api.get('/admin/live-ops')
+    .then(r => {
+      const d = { orders: r.orders || r.data?.orders || [], drivers: r.drivers || r.data?.drivers || [] };
+      setData(d); writeCache('adm_liveops', d); setUpdatedAt(new Date());
+    })
+    .catch(() => {}), []);
 
-  // init map (Leaflet from CDN)
+  // init map (Leaflet مضمّن في الحزمة — يعمل بدون CDN)
   useEffect(() => {
-    let cancelled = false;
-    const loadLeaflet = async () => {
-      if (window.L) return window.L;
-      if (!document.getElementById('leaflet-css')) {
-        const link = document.createElement('link');
-        link.id = 'leaflet-css'; link.rel = 'stylesheet';
-        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        document.head.appendChild(link);
-      }
-      await new Promise((res, rej) => {
-        const s = document.createElement('script');
-        s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-        s.onload = res; s.onerror = rej; document.body.appendChild(s);
-      });
-      return window.L;
-    };
-    loadLeaflet().then((L) => {
-      if (cancelled || !containerRef.current || mapRef.current) return;
-      const map = L.map(containerRef.current).setView([32.313, 35.029], 13);
+    if (!containerRef.current || mapRef.current) return;
+    try {
+      const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(CENTER, 13);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
       layerRef.current = L.layerGroup().addTo(map);
       mapRef.current = map;
       setTimeout(() => map.invalidateSize(), 250);
-      load();
-    }).catch(() => setFailed(true));
-    return () => { cancelled = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
-  }, []);
+    } catch { setFailed(true); }
+    load();
+    return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; layerRef.current = null; } };
+  }, [load]);
 
-  // poll every 8s
-  useEffect(() => { const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
-
-  // draw markers
+  // تحديث كل 8 ثوانٍ — يتوقف عندما تكون الصفحة مخفية
   useEffect(() => {
-    const L = window.L;
-    if (!L || !mapRef.current || !layerRef.current) return;
+    let t = null;
+    const start = () => { if (!t) t = setInterval(load, 8000); };
+    const stop = () => { clearInterval(t); t = null; };
+    const onVis = () => { if (document.hidden) stop(); else { load(); start(); } };
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [load]);
+
+  // رسم العلامات
+  useEffect(() => {
+    if (!mapRef.current || !layerRef.current) return;
     const layer = layerRef.current; layer.clearLayers();
-    const icon = (e, bg) => L.divIcon({
-      html: `<div style="font-size:18px;background:${bg};border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.35)">${e}</div>`,
-      className: '', iconSize: [32, 32], iconAnchor: [16, 16],
-    });
     const pts = [];
     for (const o of data.orders) {
-      if (o.restaurant_lat && o.restaurant_lng) {
-        L.marker([o.restaurant_lat, o.restaurant_lng], { icon: icon('🏪', '#fff') }).addTo(layer)
-          .bindPopup(`🏪 ${o.restaurant_name || 'مطعم'}<br>طلب #${o.order_number || o.id} — ${STATUS[o.status]?.l || o.status}`);
-        pts.push([o.restaurant_lat, o.restaurant_lng]);
+      const num_ = `طلب #${o.order_number || o.id}`;
+      const st = statusMeta(o.status).label;
+      const personal = isPersonal(o);
+      const from = personal ? valid(o.pickup_lat, o.pickup_lng) : valid(o.restaurant_lat, o.restaurant_lng);
+      const to = valid(o.delivery_lat, o.delivery_lng);
+      if (from) {
+        L.marker(from, { icon: icon(personal ? '📦' : '🏪', personal ? '#FFF1E6' : '#fff') }).addTo(layer)
+          .bindPopup(popupNode(personal
+            ? [['📦 توصيل شخصي — نقطة الاستلام', true], [o.pickup_address], [`${num_} — ${st}`]]
+            : [[`🏪 ${o.restaurant_name || 'مطعم'}`, true], [`${num_} — ${st}`]]));
+        pts.push(from);
       }
-      if (o.delivery_lat && o.delivery_lng) {
-        L.marker([o.delivery_lat, o.delivery_lng], { icon: icon('📍', '#fff') }).addTo(layer)
-          .bindPopup(`📍 ${o.customer_name || 'زبون'}<br>طلب #${o.order_number || o.id}`);
-        pts.push([o.delivery_lat, o.delivery_lng]);
+      if (to) {
+        L.marker(to, { icon: icon('📍', '#fff') }).addTo(layer)
+          .bindPopup(popupNode([[`📍 ${o.customer_name || 'زبون'}`, true], [o.customer_phone], [num_]]));
+        pts.push(to);
       }
-      if (o.restaurant_lat && o.delivery_lat) {
-        L.polyline([[o.restaurant_lat, o.restaurant_lng], [o.delivery_lat, o.delivery_lng]], { color: '#FF6B00', weight: 2, opacity: 0.4, dashArray: '6' }).addTo(layer);
+      if (from && to) {
+        L.polyline([from, to], { color: personal ? '#F53B57' : '#FF6B00', weight: 2, opacity: 0.45, dashArray: '6' }).addTo(layer);
       }
     }
     for (const d of data.drivers) {
-      L.marker([d.current_lat, d.current_lng], { icon: icon('🛵', d.is_busy ? '#FFE0CC' : '#D1FADF') }).addTo(layer)
-        .bindPopup(`🛵 ${d.name}<br>${d.is_busy ? 'مشغول 🔴' : 'متاح 🟢'}`);
-      pts.push([d.current_lat, d.current_lng]);
+      const p = valid(d.current_lat, d.current_lng);
+      if (!p) continue;
+      L.marker(p, { icon: icon('🛵', d.is_busy ? '#FFE0CC' : '#D1FADF') }).addTo(layer)
+        .bindPopup(popupNode([[`🛵 ${d.name || 'سائق'}`, true], [d.phone], [d.is_busy ? 'مشغول 🔴' : 'متاح 🟢']]));
+      pts.push(p);
     }
     if (!fittedRef.current && pts.length) {
-      try { mapRef.current.fitBounds(pts, { padding: [40, 40], maxZoom: 15 }); fittedRef.current = true; } catch {}
+      try { mapRef.current.fitBounds(pts, { padding: [40, 40], maxZoom: 15 }); fittedRef.current = true; } catch { /* ignore */ }
     }
   }, [data]);
 
@@ -95,53 +125,49 @@ export default function LiveOps() {
   const availableDrivers = data.drivers.filter(d => !d.is_busy).length;
 
   return (
-    <div className="p-4 space-y-4 animate-fade-up" dir="rtl">
-      <h1 className="text-lg font-black text-gray-900">العمليات الحية 🗺️</h1>
+    <div className="p-4 space-y-4 animate-fade-up">
+      <PageHeader icon="🗺️" title="العمليات الحية" subtitle={updatedAt ? `آخر تحديث ${fmtTime(updatedAt)} · كل 8 ثوانٍ` : 'يتحدّث تلقائياً كل 8 ثوانٍ'} />
 
-      {/* ملخّص */}
       <div className="grid grid-cols-3 gap-3">
-        <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-3 text-white text-center shadow-card">
-          <p className="text-2xl font-black">{activeCount}</p>
-          <p className="text-white/80 text-[11px]">طلب نشط</p>
-        </div>
-        <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl p-3 text-white text-center shadow-card">
-          <p className="text-2xl font-black">{availableDrivers}</p>
-          <p className="text-white/80 text-[11px]">سائق متاح</p>
-        </div>
-        <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl p-3 text-white text-center shadow-card">
-          <p className="text-2xl font-black">{onlineDrivers}</p>
-          <p className="text-white/80 text-[11px]">سائق متصل</p>
-        </div>
+        <StatTile label="طلب نشط" value={activeCount} tone="orange" />
+        <StatTile label="سائق متاح" value={availableDrivers} tone="green" />
+        <StatTile label="سائق متصل" value={onlineDrivers} tone="violet" />
       </div>
 
-      {/* الخريطة */}
       {failed ? (
-        <div className="flex flex-col items-center justify-center h-40 bg-gray-50 rounded-2xl text-gray-400 gap-1">
-          <span className="text-3xl">🗺️</span><p className="text-sm">تعذّر تحميل الخريطة</p>
+        <div className="card flex flex-col items-center justify-center h-40 text-gray-400 gap-1">
+          <span className="text-3xl">🗺️</span><p className="text-sm font-semibold">تعذّر تحميل الخريطة</p>
         </div>
       ) : (
-        <div ref={containerRef} style={{ width: '100%', height: '340px', borderRadius: '16px', overflow: 'hidden', zIndex: 0 }} className="shadow-soft" />
+        <div ref={containerRef} style={{ width: '100%', height: '340px', borderRadius: '20px', overflow: 'hidden', zIndex: 0 }} className="shadow-card border border-gray-100" />
       )}
-      <p className="text-[11px] text-gray-400 text-center">🏪 مطعم · 📍 وجهة التوصيل · 🛵 سائق (أخضر متاح / برتقالي مشغول) — يتحدّث كل 8 ثوانٍ</p>
+      <p className="text-[11px] text-gray-400 text-center font-semibold">🏪 مطعم · 📦 استلام شخصي · 📍 وجهة التسليم · 🛵 سائق (أخضر متاح / برتقالي مشغول)</p>
 
-      {/* قائمة الطلبات النشطة */}
-      <div className="space-y-2">
-        {data.orders.length === 0 ? (
-          <div className="text-center py-10 text-gray-400"><p className="text-4xl mb-2">✅</p><p className="font-semibold">لا توجد طلبات نشطة الآن</p></div>
-        ) : <div className="space-y-2 stagger">{data.orders.map(o => (
-          <div key={o.id} className="bg-white rounded-2xl p-3 shadow-soft hover-lift flex items-center justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="font-black text-gray-900 text-sm">#{o.order_number || o.id}</p>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${STATUS[o.status]?.c || 'bg-gray-100 text-gray-500'}`}>{STATUS[o.status]?.l || o.status}</span>
-                <span className="text-[10px] text-gray-400">{o.order_type === 'pickup' ? '🏃 استلام' : '🛵 توصيل'}</span>
+      {data.orders.length === 0 ? (
+        <EmptyState icon="✅" title="لا توجد طلبات نشطة الآن" />
+      ) : (
+        <div className="space-y-2">
+          {data.orders.map(o => {
+            const m = statusMeta(o.status);
+            const personal = isPersonal(o);
+            return (
+              <div key={o.id} className="card p-3 flex items-center justify-between gap-2" style={{ borderRight: `4px solid ${m.color}` }}>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-black text-gray-900 text-sm">#{o.order_number || o.id}</p>
+                    <Badge className={m.cls}>{m.label}</Badge>
+                    <span className="text-[10px] text-gray-400 font-bold">{o.order_type === 'pickup' ? '🏃 استلام' : personal ? '📦 توصيل شخصي' : '🛵 توصيل'}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1 truncate">
+                    {personal ? `📦 ${o.pickup_address || 'توصيل شخصي'}` : `🏪 ${o.restaurant_name || '—'}`} · {o.driver_name ? `🛵 ${o.driver_name}` : 'بلا سائق'}
+                  </p>
+                </div>
+                <p className="font-black text-orange-500 text-sm flex-shrink-0 tabular-nums">{money(num(o.total), 0)}</p>
               </div>
-              <p className="text-xs text-gray-500 mt-1 truncate">🏪 {o.restaurant_name} · {o.driver_name ? `🛵 ${o.driver_name}` : 'بلا سائق'}</p>
-            </div>
-            <p className="font-black text-orange-500 text-sm flex-shrink-0">{parseFloat(o.total || 0).toFixed(0)}₪</p>
-          </div>
-        ))}</div>}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

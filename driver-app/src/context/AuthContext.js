@@ -1,83 +1,103 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { registerForPushNotifications } from '../utils/pushNotifications';
+import { registerForPushNotifications, resetPushRegistration } from '../utils/pushNotifications';
 import { disconnectSocket } from '../utils/socket';
+import api, { setUnauthorizedHandler } from '../utils/api';
+import { getToken, setToken as storeToken, clearAllUserData, decodeJWT, isTokenExpired, USER_KEY, ONLINE_KEY } from '../utils/storage';
+import { stopBackgroundTracking } from '../tasks/locationTask';
 
-const AuthContext = createContext();
-
-function decodeJWT(token) {
-  try {
-    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const padded = base64 + '=='.slice(0, (4 - base64.length % 4) % 4);
-    const json = decodeURIComponent(
-      Array.from(atob ? atob(padded) : Buffer.from(padded, 'base64').toString())
-        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-        .join('')
-    );
-    return JSON.parse(json);
-  } catch {
-    try {
-      const parts = token.split('.');
-      if (parts.length < 2) return null;
-      let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-      while (b64.length % 4) b64 += '=';
-      const decoded = Buffer.from(b64, 'base64').toString('utf8');
-      return JSON.parse(decoded);
-    } catch { return null; }
-  }
-}
+const AuthContext = createContext({});
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
   const appState = useRef(AppState.currentState);
+  const loggingOut = useRef(false);
 
   useEffect(() => {
-    AsyncStorage.multiGet(['driver_token', 'driver_user']).then(([[, t], [, u]]) => {
-      if (t) {
-        setToken(t);
-        if (u) {
-          try { setUser(JSON.parse(u)); } catch { setUser(decodeJWT(t)); }
-        } else {
-          setUser(decodeJWT(t));
+    let alive = true;
+    (async () => {
+      try {
+        const t = await getToken();
+        let u = null;
+        try { u = await AsyncStorage.getItem(USER_KEY); } catch {}
+        if (t && !isTokenExpired(t)) {
+          let parsed = null;
+          if (u) { try { parsed = JSON.parse(u); } catch {} }
+          if (!parsed) parsed = decodeJWT(t);
+          if (alive && parsed) {
+            setToken(t);
+            setUser(parsed);
+            registerForPushNotifications().catch(() => {});
+          }
+        } else if (t) {
+          // توكن منتهي → تنظيف كامل
+          await clearAllUserData();
         }
-        registerForPushNotifications().catch(() => {});
-      }
-      setLoading(false);
-    });
+      } catch { /* قراءة التخزين فشلت — نكمل كمستخدم غير مسجّل */ }
+      if (alive) setLoading(false);
+    })();
+    return () => { alive = false; };
   }, []);
 
-  // Re-register push token whenever app comes to foreground
+  // إعادة تسجيل توكن الإشعارات عند العودة للتطبيق (يُرسل فقط إن تغيّر)
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       if (appState.current.match(/inactive|background/) && next === 'active') {
-        AsyncStorage.getItem('driver_token').then(t => {
-          if (t) registerForPushNotifications().catch(() => {});
-        });
+        getToken().then(t => { if (t) registerForPushNotifications().catch(() => {}); });
       }
       appState.current = next;
     });
     return () => sub.remove();
   }, []);
 
-  const login = async (t, u) => {
-    await AsyncStorage.multiSet([['driver_token', t], ['driver_user', JSON.stringify(u)]]);
+  const login = useCallback(async (t, u) => {
+    await storeToken(t);
+    try { await AsyncStorage.setItem(USER_KEY, JSON.stringify(u)); } catch {}
     setToken(t);
     setUser(u);
-    registerForPushNotifications().catch(() => {});
-  };
+    registerForPushNotifications({ force: true }).catch(() => {});
+  }, []);
 
-  const logout = async () => {
-    disconnectSocket();
-    await AsyncStorage.multiRemove(['driver_token', 'driver_user']);
-    setToken(null);
-    setUser(null);
-  };
+  const updateUser = useCallback(async (patch) => {
+    setUser(prev => {
+      const next = { ...(prev || {}), ...patch };
+      AsyncStorage.setItem(USER_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  // remote=false عند 401 (التوكن مرفوض أصلاً — لا داعي لطلبات الشبكة)
+  const logout = useCallback(async ({ remote = true } = {}) => {
+    if (loggingOut.current) return;
+    loggingOut.current = true;
+    try {
+      if (remote) {
+        const withTimeout = (p) => Promise.race([p, new Promise(r => setTimeout(r, 5000))]);
+        await withTimeout(api.patch('/drivers/status', { is_online: false }).catch(() => {}));
+        await withTimeout(api.post('/auth/logout').catch(() => {}));
+      }
+      await stopBackgroundTracking();
+      disconnectSocket();
+      resetPushRegistration();
+      await clearAllUserData();
+      try { await AsyncStorage.removeItem(ONLINE_KEY); } catch {}
+    } finally {
+      setToken(null);
+      setUser(null);
+      loggingOut.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => logout({ remote: false }));
+    return () => setUnauthorizedHandler(null);
+  }, [logout]);
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, token, loading, login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

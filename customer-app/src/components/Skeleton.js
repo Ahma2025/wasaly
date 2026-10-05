@@ -14,7 +14,7 @@ export function Skeleton({ w = '100%', h = 14, r = 8, style }) {
     loop.start();
     return () => loop.stop();
   }, []);
-  return <Animated.View style={[{ width: w, height: h, borderRadius: r, backgroundColor: colors.mode === 'dark' ? '#2A2A32' : '#E6E6EB', opacity: anim }, style]} />;
+  return <Animated.View style={[{ width: w, height: h, borderRadius: r, backgroundColor: colors.skeleton || (colors.mode === 'dark' ? '#2A2A32' : '#E6E6EB'), opacity: anim }, style]} />;
 }
 
 // هيكل بطاقة مطعم أفقية
@@ -47,7 +47,7 @@ export function GridSkeleton({ count = 6 }) {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'transparent', padding: 12, marginBottom: 6 },
+  row: { flexDirection: 'row-reverse', alignItems: 'center', backgroundColor: 'transparent', padding: 12, marginBottom: 6 },
   grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16 },
   gridCard: { width: '46%' },
 });

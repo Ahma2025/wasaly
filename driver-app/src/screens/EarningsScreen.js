@@ -1,99 +1,153 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import api from '../utils/api';
 import GradientHeader from '../components/GradientHeader';
-import { GRADIENTS, SHADOW } from '../theme';
-import { FadeIn } from '../components/Anim';
+import { useTabBarOffset } from '../components/FloatingTabBar';
+import { COLORS, GRADIENTS, SHADOW, RTL } from '../theme';
+import { FadeIn, Skeleton } from '../components/Anim';
 import { readCache, writeCache } from '../utils/cache';
+import { money, num, fmtDay } from '../utils/format';
 
-const COLORS = { primary: '#FF6B00', text: '#1A1A2E', gray: '#8E8E93', green: '#34C759', bg: '#F8F9FA' };
+const PERIODS = [{ id: 'today', label: 'اليوم' }, { id: 'week', label: 'الأسبوع' }, { id: 'month', label: 'الشهر' }];
 
 export default function EarningsScreen() {
+  const navigation = useNavigation();
+  const { contentPadding } = useTabBarOffset();
   const [period, setPeriod] = useState('today');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const reqId = useRef(0);
 
-  useEffect(() => {
-    (async () => {
-      const cached = await readCache('driver_earnings_' + period);
-      if (cached) { setData(cached); setLoading(false); }
-      fetchEarnings();
-    })();
-  }, [period]);
-
-  const fetchEarnings = async () => {
+  const fetchEarnings = useCallback(async (p) => {
+    const id = ++reqId.current;
     setHasError(false);
     try {
-      const res = await api.get(`/drivers/earnings?period=${period}`);
-      setData(res.data);
-      writeCache('driver_earnings_' + period, res.data);
-    } catch (e) {
-      console.error('fetchEarnings error:', e);
-      setHasError(true);
-    } finally { setLoading(false); }
-  };
+      const res = await api.get(`/drivers/earnings?period=${p}`);
+      if (id !== reqId.current) return; // تجاهل استجابة فترة قديمة
+      setData(res?.data || null);
+      writeCache('driver_earnings_' + p, res?.data || null);
+    } catch {
+      if (id === reqId.current) setHasError(true);
+    } finally {
+      if (id === reqId.current) setLoading(false);
+    }
+  }, []);
 
-  const periods = [{ id: 'today', label: 'اليوم' }, { id: 'week', label: 'الأسبوع' }, { id: 'month', label: 'الشهر' }];
+  // عند تغيير الفترة: كاش فوري (إن وُجد) وإلا هيكل تحميل — لا نعرض أرقام فترة أخرى
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setData(null);
+    (async () => {
+      const cached = await readCache('driver_earnings_' + period);
+      if (alive && cached) { setData(cached); setLoading(false); }
+      fetchEarnings(period);
+    })();
+    return () => { alive = false; };
+  }, [period, fetchEarnings]);
+
+  // تحديث عند العودة للتبويب (بعد توصيل جديد مثلاً)
+  const firstFocus = useRef(true);
+  useFocusEffect(useCallback(() => {
+    if (firstFocus.current) { firstFocus.current = false; return; }
+    fetchEarnings(period);
+  }, [period, fetchEarnings]));
+
+  const onRefresh = async () => { setRefreshing(true); await fetchEarnings(period); setRefreshing(false); };
+
+  const showSkeleton = loading && !data;
+  const daily = Array.isArray(data?.daily) ? data.daily : [];
+  const maxDay = Math.max(1, ...daily.map(d => num(d.earnings)));
 
   return (
     <View style={styles.container}>
-      <GradientHeader title="أرباحي 💰" showBack={false} />
+      <GradientHeader title="أرباحي" showBack={false} />
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 110 }} showsVerticalScrollIndicator={false}>
-        {/* Error Banner */}
+      <ScrollView
+        contentContainerStyle={{ padding: 16, paddingBottom: contentPadding }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />}>
+        <View style={styles.periodRow}>
+          {PERIODS.map(p => {
+            const on = period === p.id;
+            return (
+              <TouchableOpacity key={p.id} style={[styles.periodBtn, on && styles.periodBtnActive]} onPress={() => setPeriod(p.id)} activeOpacity={0.85}>
+                <Text style={[styles.periodText, on && { color: '#FFF' }]}>{p.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
         {hasError && (
           <View style={styles.errorBox}>
-            <Text style={styles.errorText}>فشل تحميل البيانات</Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={fetchEarnings}>
+            <Ionicons name="cloud-offline-outline" size={22} color={COLORS.red} />
+            <Text style={styles.errorText}>تعذّر تحميل الأرباح</Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={() => fetchEarnings(period)}>
               <Text style={styles.retryBtnText}>إعادة المحاولة</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Period Selector */}
-        <View style={styles.periodRow}>
-          {periods.map(p => (
-            <TouchableOpacity key={p.id} style={[styles.periodBtn, period === p.id && styles.periodBtnActive]} onPress={() => setPeriod(p.id)}>
-              <Text style={[styles.periodText, period === p.id && { color: '#FFF' }]}>{p.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Summary */}
-        <FadeIn>
-        <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.summaryCard}>
-          <View style={styles.summaryGlow} />
-          <Text style={styles.summaryTitle}>إجمالي الأرباح</Text>
-          <Text style={styles.summaryAmount}>{parseFloat(data?.stats?.earnings || 0).toFixed(2)}₪</Text>
-          <Text style={styles.summaryDeliveries}>{data?.stats?.deliveries || 0} توصيلة</Text>
-        </LinearGradient>
+        <FadeIn key={period}>
+          <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.summaryCard}>
+            <View style={styles.summaryGlow} />
+            <Text style={styles.summaryTitle}>إجمالي الأرباح · {PERIODS.find(p => p.id === period)?.label}</Text>
+            {showSkeleton ? (
+              <>
+                <Skeleton width={160} height={44} style={{ marginVertical: 8, backgroundColor: 'rgba(255,255,255,0.3)' }} />
+                <Skeleton width={90} height={14} style={{ backgroundColor: 'rgba(255,255,255,0.3)' }} />
+              </>
+            ) : (
+              <>
+                <Text style={styles.summaryAmount}>{money(data?.stats?.earnings)}</Text>
+                <Text style={styles.summaryDeliveries}>{parseInt(data?.stats?.deliveries, 10) || 0} توصيلة</Text>
+              </>
+            )}
+          </LinearGradient>
         </FadeIn>
 
-        {/* Wallet */}
         <View style={styles.walletCard}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Ionicons name="wallet" size={24} color={COLORS.primary} />
+          <View style={[RTL.row, { gap: 12 }]}>
+            <View style={styles.walletIcon}><Ionicons name="wallet" size={22} color={COLORS.primary} /></View>
             <View>
-              <Text style={styles.walletLabel}>رصيد المحفظة</Text>
-              <Text style={styles.walletAmount}>{parseFloat(data?.wallet_balance || 0).toFixed(2)}₪</Text>
+              <Text style={[styles.walletLabel, RTL.text]}>رصيد المحفظة</Text>
+              {showSkeleton ? <Skeleton width={90} height={20} style={{ marginTop: 4 }} />
+                : <Text style={[styles.walletAmount, RTL.text]}>{money(data?.wallet_balance)}</Text>}
             </View>
           </View>
-          <TouchableOpacity style={styles.withdrawBtn} onPress={() => Alert.alert('قريباً', 'ميزة السحب قيد التطوير')}>
-            <Text style={styles.withdrawBtnText}>سحب</Text>
+          <TouchableOpacity style={styles.withdrawBtn} onPress={() => navigation.navigate('SupportChat')} activeOpacity={0.85}>
+            <Text style={styles.withdrawBtnText}>طلب سحب</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Daily breakdown */}
-        <Text style={styles.sectionTitle}>التفاصيل اليومية</Text>
-        {data?.daily?.map((day, i) => (
-          <View key={i} style={styles.dayRow}>
-            <Text style={styles.dayDate}>{day.date}</Text>
-            <Text style={styles.dayCount}>{day.count} توصيلة</Text>
-            <Text style={styles.dayEarnings}>{parseFloat(day.earnings || 0).toFixed(2)}₪</Text>
+        <Text style={[styles.sectionTitle, RTL.text]}>آخر ٣٠ يوماً</Text>
+        {showSkeleton ? (
+          [0, 1, 2].map(i => <Skeleton key={i} height={56} radius={14} style={{ marginBottom: 8 }} />)
+        ) : daily.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={{ fontSize: 38 }}>📊</Text>
+            <Text style={styles.emptyText}>لا توجد توصيلات مكتملة بعد</Text>
           </View>
+        ) : daily.map((day, i) => (
+          <FadeIn key={day.date || i} delay={Math.min(i, 8) * 40}>
+            <View style={styles.dayRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.dayDate, RTL.text]}>{fmtDay(day.date)}</Text>
+                <View style={styles.barTrack}>
+                  <View style={[styles.barFill, { width: `${Math.max(6, (num(day.earnings) / maxDay) * 100)}%` }]} />
+                </View>
+              </View>
+              <View style={{ alignItems: 'flex-start', marginRight: 14 }}>
+                <Text style={styles.dayEarnings}>{money(day.earnings)}</Text>
+                <Text style={styles.dayCount}>{parseInt(day.count, 10) || 0} توصيلة</Text>
+              </View>
+            </View>
+          </FadeIn>
         ))}
       </ScrollView>
     </View>
@@ -102,29 +156,32 @@ export default function EarningsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E5E5EA' },
-  title: { fontSize: 20, fontWeight: '800', color: COLORS.text },
-  periodRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  periodBtn: { flex: 1, padding: 11, borderRadius: 14, backgroundColor: '#FFF', alignItems: 'center', borderWidth: 1.5, borderColor: '#EDEDF0' },
-  periodBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary, elevation: 3, shadowColor: COLORS.primary, shadowOpacity: 0.35, shadowRadius: 7, shadowOffset: { width: 0, height: 3 } },
-  periodText: { fontWeight: '700', color: COLORS.text, fontSize: 13 },
+  periodRow: { flexDirection: 'row-reverse', gap: 8, marginBottom: 16, backgroundColor: COLORS.card, borderRadius: 18, padding: 5, ...SHADOW.soft },
+  periodBtn: { flex: 1, paddingVertical: 10, borderRadius: 14, alignItems: 'center' },
+  periodBtnActive: { backgroundColor: COLORS.primary, ...SHADOW.glow },
+  periodText: { fontWeight: '800', color: COLORS.sub, fontSize: 13.5 },
   summaryCard: { borderRadius: 24, padding: 26, alignItems: 'center', marginBottom: 16, overflow: 'hidden', ...SHADOW.float },
   summaryGlow: { position: 'absolute', top: -40, right: -30, width: 150, height: 150, borderRadius: 75, backgroundColor: 'rgba(255,255,255,0.12)' },
-  summaryTitle: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '600' },
+  summaryTitle: { color: 'rgba(255,255,255,0.9)', fontSize: 14, fontWeight: '700' },
   summaryAmount: { color: '#FFF', fontSize: 42, fontWeight: '900', marginVertical: 4 },
-  summaryDeliveries: { color: 'rgba(255,255,255,0.85)', fontSize: 14 },
-  walletCard: { backgroundColor: '#FFF', borderRadius: 18, padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, elevation: 3, shadowColor: '#1A1A2E', shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
-  walletLabel: { fontSize: 12, color: COLORS.gray },
-  walletAmount: { fontSize: 20, fontWeight: '800', color: COLORS.text },
-  withdrawBtn: { backgroundColor: '#FFF5EE', borderRadius: 12, paddingHorizontal: 18, paddingVertical: 9, borderWidth: 1.5, borderColor: COLORS.primary },
+  summaryDeliveries: { color: 'rgba(255,255,255,0.9)', fontSize: 14, fontWeight: '600' },
+  walletCard: { backgroundColor: COLORS.card, borderRadius: 20, padding: 16, flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, ...SHADOW.soft },
+  walletIcon: { width: 46, height: 46, borderRadius: 16, backgroundColor: COLORS.sec, alignItems: 'center', justifyContent: 'center' },
+  walletLabel: { fontSize: 12, color: COLORS.gray, fontWeight: '600' },
+  walletAmount: { fontSize: 21, fontWeight: '900', color: COLORS.text },
+  withdrawBtn: { backgroundColor: COLORS.sec, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 9, borderWidth: 1.5, borderColor: COLORS.primary },
   withdrawBtnText: { color: COLORS.primary, fontWeight: '800' },
-  sectionTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text, marginBottom: 12 },
-  dayRow: { backgroundColor: '#FFF', borderRadius: 14, padding: 13, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, elevation: 1, shadowColor: '#1A1A2E', shadowOpacity: 0.04, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
-  dayDate: { fontSize: 13, color: COLORS.gray, flex: 1 },
-  dayCount: { fontSize: 13, color: COLORS.text, flex: 1, textAlign: 'center' },
-  dayEarnings: { fontSize: 14, fontWeight: '800', color: COLORS.primary, flex: 1, textAlign: 'left' },
-  errorBox: { backgroundColor: '#FFF0F0', borderRadius: 12, padding: 16, marginBottom: 16, alignItems: 'center', borderWidth: 1, borderColor: '#FFD0D0' },
-  errorText: { color: '#D00', fontWeight: '700', marginBottom: 10 },
-  retryBtn: { backgroundColor: COLORS.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 8 },
-  retryBtnText: { color: '#FFF', fontWeight: '700' },
+  sectionTitle: { fontSize: 16, fontWeight: '900', color: COLORS.text, marginBottom: 12 },
+  dayRow: { backgroundColor: COLORS.card, borderRadius: 16, padding: 14, flexDirection: 'row-reverse', alignItems: 'center', marginBottom: 8, ...SHADOW.soft },
+  dayDate: { fontSize: 13.5, color: COLORS.text, fontWeight: '700' },
+  barTrack: { height: 6, borderRadius: 3, backgroundColor: COLORS.inputBg, marginTop: 8, overflow: 'hidden', flexDirection: 'row-reverse' },
+  barFill: { height: '100%', borderRadius: 3, backgroundColor: COLORS.primary },
+  dayEarnings: { fontSize: 15, fontWeight: '900', color: COLORS.primary },
+  dayCount: { fontSize: 11.5, color: COLORS.gray, marginTop: 2 },
+  empty: { alignItems: 'center', paddingVertical: 30, gap: 8 },
+  emptyText: { color: COLORS.gray, fontWeight: '700' },
+  errorBox: { backgroundColor: COLORS.redSoft, borderRadius: 16, padding: 16, marginBottom: 16, alignItems: 'center', gap: 6 },
+  errorText: { color: COLORS.red, fontWeight: '800' },
+  retryBtn: { backgroundColor: COLORS.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 8, marginTop: 4 },
+  retryBtnText: { color: '#FFF', fontWeight: '800' },
 });

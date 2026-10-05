@@ -9,5 +9,14 @@ export const readCache = async (key) => {
 };
 
 export const writeCache = (key, data) => {
-  try { AsyncStorage.setItem('cache_' + key, JSON.stringify(data)); } catch {}
+  try { AsyncStorage.setItem('cache_' + key, JSON.stringify(data)).catch(() => {}); } catch {}
+};
+
+// مسح كل الكاش (عند تسجيل الخروج) — حتى ما يشوف الحساب التالي بيانات الحساب السابق
+export const clearAllCache = async () => {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const mine = keys.filter(k => k.startsWith('cache_'));
+    if (mine.length) await AsyncStorage.multiRemove(mine);
+  } catch {}
 };

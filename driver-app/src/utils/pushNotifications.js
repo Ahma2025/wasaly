@@ -1,73 +1,89 @@
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import api from './api';
 
+export const CHANNEL_ID = 'wasaly_default';
+
+// معالج العرض أثناء فتح التطبيق:
+// - رنّة عرض الطلب المحلية: صوت فقط بدون بانر (النافذة الكاملة ظاهرة أصلاً)
+// - إشعار طلب جديد والتطبيق مفتوح: صوت بدون بانر (النافذة تظهر من السوكِت/المستمع)
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
+  handleNotification: async (n) => {
+    const data = n?.request?.content?.data || {};
+    if (data._offerChime) return { shouldShowAlert: false, shouldPlaySound: true, shouldSetBadge: false };
+    if (data.type === 'new_order_request' && AppState.currentState === 'active') {
+      return { shouldShowAlert: false, shouldPlaySound: true, shouldSetBadge: false };
+    }
+    return { shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: true };
+  },
 });
 
-export async function registerForPushNotifications() {
-  if (Platform.OS !== 'android' && Platform.OS !== 'ios') return null;
-
+async function ensureChannel() {
+  if (Platform.OS !== 'android') return;
   try {
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('wasaly_default', {
-        name: 'وصلّي - إشعارات السائق',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#FF6B35',
-        sound: 'default',
-        enableVibrate: true,
-        showBadge: true,
-      });
-    }
+    await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
+      name: 'وصلّي - إشعارات السائق',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 400, 250, 400],
+      lightColor: '#FF6B00',
+      sound: 'default',
+      enableVibrate: true,
+      showBadge: true,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    });
+  } catch {}
+}
 
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-    if (finalStatus !== 'granted') return null;
+let lastRegisteredToken = null;
+let registering = null;
 
-    let token = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const result = await Notifications.getDevicePushTokenAsync();
-        token = result?.data;
-        if (token) break;
-      } catch (e) {
-        if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
+export async function registerForPushNotifications({ force = false } = {}) {
+  if (Platform.OS !== 'android' && Platform.OS !== 'ios') return null;
+  if (registering) return registering;
+  registering = (async () => {
+    try {
+      await ensureChannel();
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
       }
+      if (finalStatus !== 'granted') return null;
+
+      let token = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const result = await Notifications.getDevicePushTokenAsync();
+          token = result?.data;
+          if (token) break;
+        } catch {
+          if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
+        }
+      }
+      if (!token) return null;
+      // لا نعيد الإرسال إن لم يتغيّر التوكن (كان يُرسل مع كل عودة للتطبيق)
+      if (!force && token === lastRegisteredToken) return token;
+      await api.post('/users/fcm-token', { token });
+      lastRegisteredToken = token;
+      return token;
+    } catch {
+      return null;
+    } finally {
+      registering = null;
     }
-
-    if (!token) return null;
-
-    await api.post('/users/fcm-token', { token });
-    return token;
-  } catch (e) {
-    return null;
-  }
+  })();
+  return registering;
 }
 
-export async function showLocalNotification(title, body, data = {}) {
-  await Notifications.scheduleNotificationAsync({
-    content: { title, body, data, sound: 'default' },
-    trigger: null,
-  });
-}
+export function resetPushRegistration() { lastRegisteredToken = null; }
 
-// Setup notification tap handler — call once in App root
-export function setupNotificationListeners(navigationRef) {
-  const responseSub = Notifications.addNotificationResponseReceivedListener(response => {
-    const data = response.notification.request.content.data;
-    if (data?.order_id && navigationRef?.current) {
-      navigationRef.current.navigate('ActiveOrder');
-    }
-  });
-  return () => responseSub.remove();
+// رنّة تنبيه لعرض الطلب (بدون expo-av): إشعار محلي صوت-فقط عبر المعالج أعلاه
+export async function playOfferChime() {
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: { title: 'طلب جديد', body: '', data: { _offerChime: true }, sound: 'default' },
+      trigger: null,
+    });
+  } catch {}
 }

@@ -2,13 +2,20 @@
   "expo": {
     "name": "وصلّي",
     "slug": "wasaly-customer",
-    "version": "1.0.0",
+    "version": "2.4.0",
     "sdkVersion": "50.0.0",
     "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
     "platforms": ["ios", "android"],
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FF5E3A"
+    },
     "android": {
       "package": "com.wasaly.customer",
       "googleServicesFile": "./android/app/google-services.json",
+      "userInterfaceStyle": "automatic",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -16,6 +23,13 @@
         "VIBRATE",
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SCHEDULE_EXACT_ALARM"
       ]
     },
     "icon": "./assets/icon.png",
@@ -23,17 +37,20 @@
       "bundleIdentifier": "com.wasaly.customer",
       "icon": "./assets/icon.png",
       "supportsTablet": false,
+      "userInterfaceStyle": "automatic",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "plugins": [
       ["expo-location", {
-        "locationAlwaysAndWhenInUsePermission": "نحتاج موقعك لتوصيل الطلبات"
+        "locationAlwaysAndWhenInUsePermission": "نحتاج موقعك لتوصيل الطلبات",
+        "locationWhenInUsePermission": "نحتاج موقعك لتحديد عنوان التوصيل وحساب رسوم التوصيل بدقة"
       }],
       ["expo-image-picker", {
         "photosPermission": "نحتاج إذن الصور لاختيار صورة من معرض الصور",
-        "cameraPermission": "نحتاج إذن الكاميرا لالتقاط صورة"
+        "cameraPermission": "نحتاج إذن الكاميرا لالتقاط صورة",
+        "microphonePermission": false
       }],
       ["expo-notifications", {
         "icon": "./assets/icon.png",

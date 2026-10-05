@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../utils/api';
 import { readCache } from '../utils/cache';
 import { GridSkeleton } from '../components/Skeleton';
@@ -10,38 +10,68 @@ import { FadeIn } from '../components/Anim';
 import EmptyState from '../components/EmptyState';
 import { useTheme } from '../context/ThemeContext';
 
+// مطابقة احتياطية بالاسم مع أقسام المنيو (للسيرفر/البيانات اللي ما فيها category_id)
+const fuzzy = (all, cn) => (all || []).filter(r => (r.menu_cats || []).some(mc => mc && cn && (mc.includes(cn) || cn.includes(mc))));
+const byId = (all, id) => (all || []).filter(r => id != null && String(r.category_id) === String(id));
+// الأولوية لتطابق التصنيف الدقيق؛ المطابقة بالاسم فقط لو ما في نتائج دقيقة
+const pick = (exact, loose) => (exact.length ? exact : loose);
+
 export default function CategoryScreen({ route, navigation }) {
   const { categoryId, categoryName } = route.params || {};
   const { colors: COLORS } = useTheme();
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
+  const insets = useSafeAreaInsets();
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const load = async () => {
+    const cn = categoryName || '';
+    try {
+      // 1) فلتر السيرفر الدقيق بالتصنيف
+      let exact = [];
+      if (categoryId != null) {
+        try { const d = await api.get(`/restaurants?limit=100&category_id=${encodeURIComponent(categoryId)}`); exact = byId(d.data || [], categoryId); } catch {}
+      }
+      // 2) احتياط: سيرفر قديم أو تصنيف بدون مطاعم مربوطة → مطابقة بأقسام المنيو
+      let res = exact;
+      if (!res.length) { const all = await api.get('/restaurants?limit=100'); res = pick(byId(all.data || [], categoryId), fuzzy(all.data || [], cn)); }
+      setList(res);
+      setFailed(false);
+    } catch { setFailed(true); }
+    finally { setLoading(false); setRefreshing(false); }
+  };
 
   useEffect(() => {
-    const cn = categoryName || '';
-    const applyFilter = (all) => setList((all || []).filter(r => (r.menu_cats || []).some(mc => mc && (mc.includes(cn) || cn.includes(mc)))));
     (async () => {
-      const cached = await readCache('home'); // نستخدم مطاعم الرئيسية المخزّنة للعرض الفوري
-      if (cached?.restaurants?.length) { applyFilter(cached.restaurants); setLoading(false); }
-      try { const d = await api.get('/restaurants?limit=100'); applyFilter(d.data || []); } catch {}
-      finally { setLoading(false); }
+      const cached = await readCache('home');
+      if (cached?.restaurants?.length) {
+        setList(pick(byId(cached.restaurants, categoryId), fuzzy(cached.restaurants, categoryName || '')));
+        setLoading(false);
+      }
+      load();
     })();
   }, [categoryId, categoryName]);
 
+  const sorted = [...list].sort((a, b) => (b.is_open ? 1 : 0) - (a.is_open ? 1 : 0));
+
   return (
     <View style={styles.container}>
-      <GradientHeader title={categoryName || 'المطاعم'} />
+      <GradientHeader title={categoryName || 'المطاعم'} subtitle={!loading && list.length ? `${list.length} مطعم` : undefined} />
 
       {loading ? (
         <View style={{ paddingTop: 12 }}><GridSkeleton count={6} /></View>
-      ) : list.length === 0 ? (
-        <EmptyState emoji="🍽️" title="ما في مطاعم هون" subtitle={`لا توجد مطاعم في «${categoryName}» حالياً`} />
+      ) : sorted.length === 0 ? (
+        failed
+          ? <EmptyState emoji="📡" title="تعذّر التحميل" subtitle="تأكد من الإنترنت وحاول مرة ثانية" ctaLabel="إعادة المحاولة" onCta={() => { setLoading(true); load(); }} />
+          : <EmptyState emoji="🍽️" title="ما في مطاعم هون" subtitle={`لا توجد مطاعم في «${categoryName || ''}» حالياً`} ctaLabel="تصفّح كل المطاعم" onCta={() => navigation.navigate('Main', { screen: 'الرئيسية' })} />
       ) : (
         <FlatList
-          data={list}
+          data={sorted}
           keyExtractor={r => String(r.id)}
-          contentContainerStyle={{ padding: 16, paddingBottom: 30 }}
-          ListHeaderComponent={<Text style={styles.count}>{list.length} مطعم</Text>}
+          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} />}
           renderItem={({ item, index }) => (
             <FadeIn delay={Math.min(index, 8) * 50}>
               <RestaurantCard restaurant={item} onPress={() => navigation.navigate('Restaurant', { restaurantId: item.id })} />
@@ -56,10 +86,4 @@ export default function CategoryScreen({ route, navigation }) {
 
 const makeStyles = (COLORS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: COLORS.card, borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 17, fontWeight: '800', color: COLORS.text },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
-  empty: { fontSize: 15, color: COLORS.gray, fontWeight: '600', textAlign: 'center' },
-  count: { fontSize: 13, color: COLORS.gray, fontWeight: '700', marginBottom: 12 },
 });

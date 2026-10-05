@@ -3,57 +3,94 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --brand: #FF6B00;
+  --ink: #1A1A2E;
+  --bg: #F5F6F8;
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --nav-h: 64px;
+}
+
 * { font-family: 'Tajawal', 'Segoe UI', system-ui, -apple-system, sans-serif; }
 
-html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
-body { direction: rtl; background: #F5F6F8; color: #1A1A2E; }
+html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; -webkit-tap-highlight-color: transparent; }
+body { direction: rtl; background: var(--bg); color: var(--ink); overscroll-behavior-y: none; }
 
-/* انتقالات ناعمة على العناصر التفاعلية */
-button, a, input, [role="button"] { transition: all .18s cubic-bezier(.4,0,.2,1); }
-button:active { transform: scale(.97); }
+/* انتقالات ناعمة ومحددة (بدل transition: all) */
+button, a, input, select, textarea, [role="button"] {
+  transition: color .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .2s ease, opacity .18s ease, transform .18s cubic-bezier(.4,0,.2,1);
+}
+button:not(:disabled):active:not(.no-press) { transform: scale(.97); }
+button:disabled { cursor: not-allowed; }
 
-/* ظلال جاهزة أنعم وأعمق ومتعددة الطبقات (إحساس فخم) */
-.shadow-soft { box-shadow: 0 2px 8px rgba(26,26,46,.04), 0 6px 24px rgba(26,26,46,.05); }
-.shadow-card { box-shadow: 0 2px 6px rgba(26,26,46,.04), 0 12px 34px rgba(26,26,46,.08); }
-.shadow-brand { box-shadow: 0 10px 28px rgba(245,59,87,.34), 0 3px 8px rgba(255,107,0,.24); }
+/* ظلال */
+.shadow-soft { box-shadow: 0 1px 2px rgba(26,26,46,.04), 0 6px 22px rgba(26,26,46,.06); }
+.shadow-card { box-shadow: 0 2px 6px rgba(26,26,46,.04), 0 14px 38px rgba(26,26,46,.10); }
+.shadow-brand { box-shadow: 0 10px 26px rgba(255,107,0,.30), 0 3px 8px rgba(255,107,0,.20); }
 
-/* حلقة تركيز أنيقة موحّدة (وصول أفضل) */
+/* حلقة تركيز موحّدة */
 :focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 0 0 5px rgba(255,107,0,.55); border-radius: 12px; }
 
-/* شريط تمرير أنيق */
+/* شريط تمرير */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: #D9DBE1; border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: #C2C5CE; }
 ::-webkit-scrollbar-track { background: transparent; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
 
-/* ظهور ناعم للبطاقات */
+/* حركات */
 @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sheetUp { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes ring { 0%,100% { transform: rotate(0); } 15% { transform: rotate(14deg); } 30% { transform: rotate(-12deg); } 45% { transform: rotate(8deg); } 60% { transform: rotate(-6deg); } }
+@keyframes pulseDot { 0% { box-shadow: 0 0 0 0 rgba(255,107,0,.55); } 70% { box-shadow: 0 0 0 10px rgba(255,107,0,0); } 100% { box-shadow: 0 0 0 0 rgba(255,107,0,0); } }
 .animate-fade-up { animation: fadeUp .35s cubic-bezier(.4,0,.2,1) both; }
+.animate-fade-in { animation: fadeIn .25s ease both; }
+.animate-sheet { animation: sheetUp .28s cubic-bezier(.2,.8,.2,1) both; }
+.animate-ring { animation: ring 1.2s ease-in-out infinite; transform-origin: 50% 0; }
+.pulse-dot { animation: pulseDot 1.6s infinite; }
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
+/* سكيليتون */
 .sk { position: relative; overflow: hidden; background: #EEF0F4; }
 .sk::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.65), transparent); animation: shimmer 1.3s infinite; }
 @keyframes shimmer { 100% { transform: translateX(100%); } }
 
-/* ===== لمسات فخمة إضافية ===== */
+/* ===== هوية وصلّي ===== */
 .grad-brand { background: linear-gradient(135deg, #FF9A2E, #FF6B00 55%, #FF4D3D); }
-.grad-sunset { background: linear-gradient(135deg, #FF8A1E 0%, #FB5A3C 55%, #F53B57 100%); }
-.grad-text { background: linear-gradient(135deg,#FF8A00,#F53B57); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.grad-sunset { background: linear-gradient(135deg, #FF8A1E 0%, #FF6B00 50%, #F5503C 100%); }
+.grad-text { background: linear-gradient(135deg,#FF8A00,#F5503C); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .hover-lift { transition: transform .22s cubic-bezier(.4,0,.2,1), box-shadow .22s ease; }
-.hover-lift:hover { transform: translateY(-4px); box-shadow: 0 20px 40px rgba(26,26,46,.13), 0 4px 10px rgba(26,26,46,.06); }
-.glass { background: rgba(255,255,255,.14); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.2); }
-
-/* لمعة زجاجية علوية توضع فوق أي عنصر بتدرّج (position:relative على الأب) */
+@media (hover: hover) { .hover-lift:hover { transform: translateY(-3px); box-shadow: 0 18px 36px rgba(26,26,46,.12), 0 4px 10px rgba(26,26,46,.06); } }
+.glass { background: rgba(255,255,255,.16); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.24); }
 .sheen { position: relative; overflow: hidden; }
 .sheen::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 45%;
   background: linear-gradient(180deg, rgba(255,255,255,.26), rgba(255,255,255,0)); pointer-events: none; }
 
-/* زر فخم بتدرّج وتوهّج */
-.btn-lux { background: linear-gradient(135deg,#FF8A1E,#FB5A3C 55%,#F53B57); color:#fff; font-weight:800;
-  border-radius: 16px; box-shadow: 0 10px 26px rgba(245,59,87,.34); transition: transform .18s, box-shadow .22s, filter .2s; }
-.btn-lux:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(245,59,87,.42); filter: brightness(1.04); }
-.btn-lux:active { transform: translateY(0) scale(.98); }
 .stagger > * { animation: fadeUp .4s cubic-bezier(.4,0,.2,1) both; }
-.stagger > *:nth-child(1){animation-delay:.03s}.stagger > *:nth-child(2){animation-delay:.08s}
-.stagger > *:nth-child(3){animation-delay:.13s}.stagger > *:nth-child(4){animation-delay:.18s}
-.stagger > *:nth-child(5){animation-delay:.23s}.stagger > *:nth-child(6){animation-delay:.28s}
-.stagger > *:nth-child(7){animation-delay:.33s}.stagger > *:nth-child(8){animation-delay:.38s}
+.stagger > *:nth-child(1){animation-delay:.02s}.stagger > *:nth-child(2){animation-delay:.06s}
+.stagger > *:nth-child(3){animation-delay:.10s}.stagger > *:nth-child(4){animation-delay:.14s}
+.stagger > *:nth-child(5){animation-delay:.18s}.stagger > *:nth-child(6){animation-delay:.22s}
+.stagger > *:nth-child(7){animation-delay:.26s}.stagger > *:nth-child(8){animation-delay:.30s}
+
+/* مكوّنات */
+@layer components {
+  .card { @apply bg-white rounded-2xl shadow-soft; }
+  .input { @apply w-full border-[1.5px] border-gray-200 bg-white rounded-xl px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100; }
+  .label { @apply text-xs font-bold text-gray-600 mb-1 block; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl font-bold text-sm px-4 py-2.5 disabled:opacity-60; }
+  .btn-primary { @apply btn text-white; background: linear-gradient(135deg, #FF9A2E, #FF6B00 55%, #FF4D3D); box-shadow: 0 10px 26px rgba(255,107,0,.30), 0 3px 8px rgba(255,107,0,.20); }
+  .btn-ghost { @apply btn bg-white text-gray-700 border border-gray-200 hover:border-brand-300 hover:text-brand-600; }
+  .btn-danger { @apply btn bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100; }
+  .chip { @apply inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full; }
+  .section-title { @apply font-black text-gray-900 text-base flex items-center gap-2; }
+}
+
+/* مساحة آمنة: المحتوى لا يختفي خلف القائمة السفلية وزر الدعم */
+.page-bottom-space { padding-bottom: calc(var(--nav-h) + var(--sab) + 84px); }
+
+/* Leaflet داخل RTL */
+.leaflet-container { direction: ltr; font-family: inherit; }
+.leaflet-popup-content { direction: rtl; text-align: right; }

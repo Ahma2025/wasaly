@@ -9,6 +9,7 @@ import { PopIn } from '../components/Anim';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const AUTH_TIMEOUT = 30000; // مهلة أطول للشبكات الضعيفة — يمنع "فشل" وهمي بعد نجاح فعلي
 
@@ -16,6 +17,7 @@ export default function LoginScreen() {
   const { login } = useAuth();
   const { colors: C } = useTheme();
   const styles = React.useMemo(() => makeStyles(C), [C]);
+  const insets = useSafeAreaInsets();
 
   const [tab, setTab] = useState('login');
   const [phone, setPhone] = useState('');
@@ -115,9 +117,9 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false}>
-        <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+        <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.hero, { paddingTop: insets.top + 56 }]}>
           <LinearGradient colors={C.gradients.sheen} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={styles.heroSheen} pointerEvents="none" />
-          <PopIn><View style={styles.logo}><Text style={{ fontSize: 48 }}>🍔</Text></View></PopIn>
+          <PopIn><View style={styles.logo}><Text style={{ fontSize: 48 }}>🛵</Text></View></PopIn>
           <Text style={styles.appName}>وصلّي</Text>
           <Text style={styles.tagline}>توصيل سريع لأشهى المطاعم</Text>
         </LinearGradient>
@@ -138,7 +140,7 @@ export default function LoginScreen() {
                 <Text style={[styles.bannerText, { color: banner.type === 'info' ? C.text : C.red }]}>{banner.msg}</Text>
                 {banner.action && (
                   <TouchableOpacity onPress={banner.action.run} style={{ marginTop: 6 }}>
-                    <Text style={styles.bannerAction}>{banner.action.label} ←</Text>
+                    <Text style={styles.bannerAction}>{banner.action.label} ‹</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -161,7 +163,7 @@ export default function LoginScreen() {
                   secureTextEntry={!showPw} value={password} onChangeText={setPassword} textAlign="right"
                   onFocus={() => setErrors(e => ({ ...e, password: undefined }))}
                 />
-                <TouchableOpacity onPress={() => setShowPw(s => !s)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <TouchableOpacity onPress={() => setShowPw(s => !s)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} accessibilityLabel={showPw ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}>
                   <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={20} color={C.faint} />
                 </TouchableOpacity>
               </View>
@@ -195,27 +197,27 @@ export default function LoginScreen() {
 const makeStyles = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   content: { flexGrow: 1, paddingBottom: 40 },
-  hero: { alignItems: 'center', paddingTop: 88, paddingBottom: 64, borderBottomLeftRadius: 40, borderBottomRightRadius: 40, overflow: 'hidden', ...C.shadow.float },
+  hero: { alignItems: 'center', paddingBottom: 64, borderBottomLeftRadius: 40, borderBottomRightRadius: 40, overflow: 'hidden', ...C.shadow.float },
   heroSheen: { position: 'absolute', top: 0, left: 0, right: 0, height: 90 },
   logo: { width: 96, height: 96, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)' },
   appName: { fontSize: 38, fontWeight: '900', color: '#FFF', marginTop: 14 },
   tagline: { fontSize: 14, color: 'rgba(255,255,255,0.92)', marginTop: 4, fontWeight: '600' },
   card: { backgroundColor: C.card, marginHorizontal: 18, marginTop: -38, borderRadius: 28, padding: 20, ...C.shadow.card },
-  tabs: { flexDirection: 'row', backgroundColor: C.inputBg, borderRadius: 16, padding: 5, marginBottom: 18 },
+  tabs: { flexDirection: 'row-reverse', backgroundColor: C.inputBg, borderRadius: 16, padding: 5, marginBottom: 18 },
   tab: { flex: 1, paddingVertical: 11, alignItems: 'center', borderRadius: 12 },
   tabActive: { backgroundColor: C.primary, ...C.shadow.soft },
   tabText: { fontWeight: '800', color: C.gray, fontSize: 14 },
   tabTextActive: { color: '#FFF' },
   form: { gap: 13 },
-  inputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: C.border, borderRadius: 16, paddingHorizontal: 12, backgroundColor: C.inputBg },
-  inputErr: { borderColor: C.red, backgroundColor: C.mode === 'dark' ? '#2A1416' : '#FFF5F5' },
+  inputWrap: { flexDirection: 'row-reverse', alignItems: 'center', borderWidth: 1.5, borderColor: C.border, borderRadius: 16, paddingHorizontal: 12, backgroundColor: C.inputBg },
+  inputErr: { borderColor: C.red, backgroundColor: C.dangerBg },
   input: { flex: 1, paddingVertical: 15, fontSize: 16, color: C.text },
-  errText: { color: C.red, fontSize: 12, fontWeight: '700', marginTop: 5, marginRight: 4 },
-  banner: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', padding: 13, borderRadius: 14, marginBottom: 16 },
+  errText: { color: C.red, fontSize: 12, fontWeight: '700', marginTop: 5, marginRight: 4, textAlign: 'right' },
+  banner: { flexDirection: 'row-reverse', gap: 10, alignItems: 'flex-start', padding: 13, borderRadius: 14, marginBottom: 16 },
   bannerInfo: { backgroundColor: C.sec, borderWidth: 1, borderColor: C.tint },
-  bannerErr: { backgroundColor: C.mode === 'dark' ? '#2A1416' : '#FFF5F5', borderWidth: 1, borderColor: '#FFD2D2' },
-  bannerText: { fontSize: 13.5, fontWeight: '600', lineHeight: 21 },
-  bannerAction: { color: C.primary, fontWeight: '900', fontSize: 14 },
+  bannerErr: { backgroundColor: C.dangerBg, borderWidth: 1, borderColor: C.dangerBorder },
+  bannerText: { fontSize: 13.5, fontWeight: '600', lineHeight: 21, textAlign: 'right' },
+  bannerAction: { color: C.primary, fontWeight: '900', fontSize: 14, textAlign: 'right' },
   submit: { borderRadius: 16, paddingVertical: 16, alignItems: 'center', marginTop: 4, ...C.shadow.float },
   submitText: { color: '#fff', fontWeight: '900', fontSize: 17 },
   switchHint: { textAlign: 'center', color: C.sub, fontSize: 13.5, marginTop: 6, fontWeight: '600' },

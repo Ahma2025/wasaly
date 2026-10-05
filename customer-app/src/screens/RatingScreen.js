@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Image, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Image, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { pickImage } from '../utils/pickImage';
 import GradientHeader from '../components/GradientHeader';
 import api from '../utils/api';
 import { useTheme } from '../context/ThemeContext';
 
+const LABELS = ['', 'سيء', 'مقبول', 'جيد', 'ممتاز', 'رائع 🤩'];
+
 export default function RatingScreen({ route, navigation }) {
-  const { orderId, restaurantName, driverName } = route.params || {};
+  const { orderId, restaurantName, driverName, isPersonal } = route.params || {};
   const { colors: COLORS } = useTheme();
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
+  const insets = useSafeAreaInsets();
   const [foodRating, setFoodRating] = useState(0);
   const [driverRating, setDriverRating] = useState(0);
   const [comment, setComment] = useState('');
@@ -32,115 +36,133 @@ export default function RatingScreen({ route, navigation }) {
     finally { setUploading(false); }
   };
 
-  const QUICK_COMMENTS = ['طعام لذيذ', 'خدمة سريعة', 'سائق محترم', 'سيعاد الطلب', 'التغليف ممتاز'];
+  const QUICK_COMMENTS = isPersonal
+    ? ['سائق محترم', 'وصل بسرعة', 'تعامل ممتاز', 'رح أطلب مرة ثانية']
+    : ['طعام لذيذ', 'خدمة سريعة', 'سائق محترم', 'سيعاد الطلب', 'التغليف ممتاز'];
 
-  const Stars = ({ value, onChange }) => (
-    <View style={styles.starsRow}>
-      {[1, 2, 3, 4, 5].map(i => (
-        <TouchableOpacity key={i} onPress={() => onChange(i)}>
-          <Text style={[styles.star, i <= value && styles.starActive]}>★</Text>
-        </TouchableOpacity>
-      ))}
+  const Stars = ({ value, onChange, label }) => (
+    <View>
+      <View style={styles.starsRow}>
+        {[1, 2, 3, 4, 5].map(i => (
+          <TouchableOpacity key={i} onPress={() => onChange(i)} hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            accessibilityRole="button" accessibilityLabel={`${label}: ${i} من 5`}>
+            <Ionicons name={i <= value ? 'star' : 'star-outline'} size={34} color={i <= value ? COLORS.star : COLORS.border} />
+          </TouchableOpacity>
+        ))}
+      </View>
+      {value > 0 && <Text style={styles.starLabel}>{LABELS[value]}</Text>}
     </View>
   );
 
+  // للطلب الشخصي: التقييم الأساسي = تقييم الخدمة/السائق
+  const mainLabel = isPersonal ? 'تقييم الخدمة' : 'جودة الطعام';
+
   const submit = async () => {
-    if (!foodRating) return Alert.alert('خطأ', 'قيّم الطعام على الأقل');
+    if (!foodRating) return Alert.alert('التقييم', `قيّم ${isPersonal ? 'الخدمة' : 'الطعام'} على الأقل`);
     setSaving(true);
     try {
-      await api.post(`/orders/${orderId}/rate`, { restaurant_rating: foodRating, driver_rating: driverRating, comment, images });
-      Alert.alert('شكراً!', 'تم إرسال تقييمك', [{ text: 'حسناً', onPress: () => navigation.navigate('Main', { screen: 'الرئيسية' }) }]);
-    } catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }
+      await api.post(`/orders/${orderId}/rate`, {
+        restaurant_rating: foodRating,
+        // بدون تقييم للسائق = null (حتى ما ينزل معدله بصفر)
+        driver_rating: isPersonal ? (driverRating || foodRating) : (driverRating > 0 ? driverRating : null),
+        comment: comment.trim(),
+        images,
+      });
+      Alert.alert('شكراً! 💛', 'تم إرسال تقييمك', [{ text: 'حسناً', onPress: () => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Main', { screen: 'الرئيسية' })) }]);
+    } catch (e) { Alert.alert('خطأ', e?.message || 'حاول مرة أخرى'); }
     finally { setSaving(false); }
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <GradientHeader title="قيّم تجربتك" />
 
-      <View style={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 30 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Text style={styles.emoji}>⭐</Text>
         <Text style={styles.title}>كيف كانت تجربتك؟</Text>
-        <Text style={styles.subtitle}>{restaurantName}</Text>
+        {!!restaurantName && <Text style={styles.subtitle}>{restaurantName}</Text>}
 
         <View style={styles.section}>
-          <Text style={styles.label}>جودة الطعام</Text>
-          <Stars value={foodRating} onChange={setFoodRating} />
+          <Text style={styles.label}>{mainLabel}</Text>
+          <Stars value={foodRating} onChange={setFoodRating} label={mainLabel} />
         </View>
 
-        {driverName && (
+        {!!driverName && !isPersonal && (
           <View style={styles.section}>
-            <Text style={styles.label}>خدمة التوصيل - {driverName}</Text>
-            <Stars value={driverRating} onChange={setDriverRating} />
+            <Text style={styles.label}>خدمة التوصيل — {driverName} <Text style={styles.optional}>(اختياري)</Text></Text>
+            <Stars value={driverRating} onChange={setDriverRating} label="تقييم السائق" />
           </View>
         )}
 
         <View style={styles.quickWrap}>
-          {QUICK_COMMENTS.map(q => (
-            <TouchableOpacity key={q} style={[styles.quickTag, comment.includes(q) && styles.quickTagActive]} onPress={() => setComment(c => c.includes(q) ? c.replace(q, '').trim() : (c + ' ' + q).trim())}>
-              <Text style={[styles.quickText, comment.includes(q) && { color: '#FFF' }]}>{q}</Text>
-            </TouchableOpacity>
-          ))}
+          {QUICK_COMMENTS.map(q => {
+            const on = comment.includes(q);
+            return (
+              <TouchableOpacity key={q} style={[styles.quickTag, on && styles.quickTagActive]} onPress={() => setComment(c => (c.includes(q) ? c.replace(q, '').replace(/\s+/g, ' ').trim() : (c + ' ' + q).trim()))}>
+                <Text style={[styles.quickText, on && { color: '#FFF' }]}>{q}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
-        <TextInput style={styles.commentInput} placeholder="أضف تعليقاً..." value={comment} onChangeText={setComment} multiline numberOfLines={3} />
+        <TextInput style={styles.commentInput} placeholder="أضف تعليقاً..." placeholderTextColor={COLORS.faint} value={comment} onChangeText={setComment}
+          multiline numberOfLines={3} textAlign="right" maxLength={500} />
 
-        {/* صور المراجعة */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoRow} style={{ alignSelf: 'stretch' }}>
+          {images.length < 3 && (
+            <TouchableOpacity style={styles.photoAdd} onPress={addPhoto} disabled={uploading} accessibilityLabel="إضافة صورة">
+              {uploading ? <ActivityIndicator color={COLORS.primary} /> : <Ionicons name="camera" size={22} color={COLORS.primary} />}
+              <Text style={styles.photoAddTxt}>{uploading ? '...' : 'صورة'}</Text>
+            </TouchableOpacity>
+          )}
           {images.map((uri, i) => (
-            <View key={i} style={styles.photoWrap}>
+            <View key={uri} style={styles.photoWrap}>
               <Image source={{ uri }} style={styles.photo} />
-              <TouchableOpacity style={styles.photoDel} onPress={() => setImages(arr => arr.filter((_, j) => j !== i))}>
+              <TouchableOpacity style={styles.photoDel} onPress={() => setImages(arr => arr.filter((_, j) => j !== i))} accessibilityLabel="حذف الصورة">
                 <Ionicons name="close" size={13} color="#FFF" />
               </TouchableOpacity>
             </View>
           ))}
-          {images.length < 3 && (
-            <TouchableOpacity style={styles.photoAdd} onPress={addPhoto} disabled={uploading}>
-              <Ionicons name={uploading ? 'hourglass-outline' : 'camera'} size={22} color={COLORS.primary} />
-              <Text style={styles.photoAddTxt}>{uploading ? '...' : 'صورة'}</Text>
-            </TouchableOpacity>
-          )}
         </ScrollView>
 
-        <TouchableOpacity style={styles.submitBtn} onPress={submit} disabled={saving}>
-          <Text style={styles.submitText}>{saving ? 'جاري الإرسال...' : 'إرسال التقييم'}</Text>
+        <TouchableOpacity activeOpacity={0.9} onPress={submit} disabled={saving} style={{ alignSelf: 'stretch' }}>
+          <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.submitBtn, saving && { opacity: 0.7 }]}>
+            {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.submitText}>إرسال التقييم</Text>}
+          </LinearGradient>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => navigation.navigate('Main', { screen: 'الرئيسية' })} style={styles.skipBtn}>
-          <Text style={styles.skipText}>تخطي</Text>
+        <TouchableOpacity onPress={() => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Main', { screen: 'الرئيسية' }))} style={styles.skipBtn}>
+          <Text style={styles.skipText}>لاحقاً</Text>
         </TouchableOpacity>
-      </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
-const makeStyles = (COLORS) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 16, backgroundColor: COLORS.card, borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  headerTitle: { fontSize: 20, fontWeight: '900', color: COLORS.text },
-  content: { flex: 1, padding: 24, alignItems: 'center' },
-  emoji: { fontSize: 56, marginTop: 20, marginBottom: 10 },
-  title: { fontSize: 22, fontWeight: '900', color: COLORS.text },
-  subtitle: { fontSize: 15, color: COLORS.gray, marginTop: 4, marginBottom: 24 },
-  section: { width: '100%', backgroundColor: COLORS.card, borderRadius: 16, padding: 16, marginBottom: 12, elevation: 2 },
-  label: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 10 },
-  starsRow: { flexDirection: 'row', gap: 6 },
-  star: { fontSize: 32, color: COLORS.border },
-  starActive: { color: '#FFD700' },
-  quickWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 16 },
-  quickTag: { backgroundColor: COLORS.card, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: COLORS.border },
-  quickTagActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  quickText: { fontSize: 13, fontWeight: '600', color: COLORS.text },
-  commentInput: { width: '100%', borderWidth: 1.5, borderColor: COLORS.border, borderRadius: 14, padding: 12, fontSize: 14, color: COLORS.text, backgroundColor: COLORS.inputBg, marginBottom: 12 },
-  photoRow: { gap: 10, paddingVertical: 4, marginBottom: 12 },
+const makeStyles = (C) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
+  content: { padding: 20, alignItems: 'center' },
+  emoji: { fontSize: 52, marginTop: 6, marginBottom: 8 },
+  title: { fontSize: 22, fontWeight: '900', color: C.text },
+  subtitle: { fontSize: 15, color: C.gray, marginTop: 4, marginBottom: 18 },
+  section: { width: '100%', backgroundColor: C.card, borderRadius: 18, padding: 16, marginBottom: 12, ...C.shadow.soft },
+  label: { fontSize: 14.5, fontWeight: '800', color: C.text, marginBottom: 10, textAlign: 'right' },
+  optional: { fontSize: 12, color: C.faint, fontWeight: '600' },
+  starsRow: { flexDirection: 'row-reverse', gap: 8, justifyContent: 'center' },
+  starLabel: { textAlign: 'center', marginTop: 6, color: C.primary, fontWeight: '800', fontSize: 13 },
+  quickWrap: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 14, marginTop: 4 },
+  quickTag: { backgroundColor: C.card, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: C.border },
+  quickTagActive: { backgroundColor: C.primary, borderColor: C.primary },
+  quickText: { fontSize: 13, fontWeight: '700', color: C.text },
+  commentInput: { width: '100%', minHeight: 90, textAlignVertical: 'top', borderWidth: 1.5, borderColor: C.border, borderRadius: 14, padding: 12, fontSize: 14, color: C.text, backgroundColor: C.inputBg, marginBottom: 12 },
+  photoRow: { gap: 10, paddingVertical: 6, marginBottom: 14, flexDirection: 'row-reverse' },
   photoWrap: { position: 'relative' },
   photo: { width: 64, height: 64, borderRadius: 12 },
-  photoDel: { position: 'absolute', top: -6, right: -6, backgroundColor: '#FF3B30', width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: COLORS.card },
-  photoAdd: { width: 64, height: 64, borderRadius: 12, borderWidth: 1.5, borderColor: '#FFE0CC', borderStyle: 'dashed', backgroundColor: COLORS.tint, alignItems: 'center', justifyContent: 'center' },
-  photoAddTxt: { fontSize: 11, color: COLORS.primary, fontWeight: '700', marginTop: 2 },
-  submitBtn: { width: '100%', backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, alignItems: 'center' },
+  photoDel: { position: 'absolute', top: -6, right: -6, backgroundColor: '#FF3B30', width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: C.card },
+  photoAdd: { width: 64, height: 64, borderRadius: 12, borderWidth: 1.5, borderColor: C.tintBorder, borderStyle: 'dashed', backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center' },
+  photoAddTxt: { fontSize: 11, color: C.primary, fontWeight: '700', marginTop: 2 },
+  submitBtn: { borderRadius: 18, padding: 16, alignItems: 'center', ...C.shadow.float },
   submitText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
-  skipBtn: { marginTop: 12 },
-  skipText: { color: COLORS.gray, fontSize: 14 },
+  skipBtn: { marginTop: 14, padding: 6 },
+  skipText: { color: C.gray, fontSize: 14, fontWeight: '600' },
 });

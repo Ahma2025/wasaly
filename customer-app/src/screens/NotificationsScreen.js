@@ -1,101 +1,125 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { useTheme } from '../context/ThemeContext';
 import GradientHeader from '../components/GradientHeader';
+import EmptyState from '../components/EmptyState';
+import { CardRowSkeleton } from '../components/Skeleton';
 import { FadeIn } from '../components/Anim';
 
-const TYPE_ICONS = { order: '📦', promo: '🎁', system: '🔔', driver: '🏍️', payment: '💳' };
+const TYPE_ICONS = { order: '📦', order_status: '📦', promo: '🎁', system: '🔔', driver: '🏍️', payment: '💳', review: '⭐', wallet: '💰' };
 
-export default function NotificationsScreen() {
+const parseData = (d) => {
+  if (!d) return {};
+  if (typeof d === 'string') { try { return JSON.parse(d) || {}; } catch { return {}; } }
+  return d;
+};
+const asList = (d) => (Array.isArray(d) ? d : []);
+
+export default function NotificationsScreen({ navigation }) {
   const { colors: COLORS } = useTheme();
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
+  const insets = useSafeAreaInsets();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const d = await api.get('/notifications');
+      const list = asList(d?.data);
+      setNotifications(list);
+      writeCache('notifications', list);
+    } catch {}
+    finally { setLoading(false); setRefreshing(false); }
+  }, []);
 
   useEffect(() => {
     (async () => {
       const cached = await readCache('notifications');
-      if (cached) { setNotifications(cached); setLoading(false); }
-      api.get('/notifications').then(d => { setNotifications(d.data); writeCache('notifications', d.data); }).catch(() => {}).finally(() => setLoading(false));
+      if (cached) { setNotifications(asList(cached)); setLoading(false); }
+      load();
     })();
-  }, []);
+  }, [load]);
 
   const markRead = async (id) => {
-    try {
-      await api.patch(`/notifications/${id}/read`);
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-    } catch {}
+    setNotifications(prev => prev.map(n => (n.id === id ? { ...n, is_read: true } : n)));
+    try { await api.patch(`/notifications/${id}/read`); } catch {}
   };
 
   const markAllRead = async () => {
-    try {
-      await api.patch('/notifications/read-all');
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-    } catch {}
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    try { await api.patch('/notifications/read-all'); } catch {}
+  };
+
+  const onPress = (item) => {
+    if (!item.is_read) markRead(item.id);
+    const data = parseData(item.data);
+    if (data.order_id) navigation.navigate('OrderTracking', { orderId: data.order_id });
   };
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
-  const renderItem = ({ item, index }) => (
-    <FadeIn delay={Math.min(index, 8) * 45}>
-    <TouchableOpacity style={[styles.card, !item.is_read && styles.cardUnread]} onPress={() => !item.is_read && markRead(item.id)}>
-      <View style={styles.iconBox}><Text style={{ fontSize: 22 }}>{TYPE_ICONS[item.type] || '🔔'}</Text></View>
-      <View style={styles.content}>
-        <Text style={styles.title}>{item.title}</Text>
-        <Text style={styles.body}>{item.body}</Text>
-        <Text style={styles.time}>{new Date(item.created_at).toLocaleDateString('ar-SA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</Text>
-      </View>
-      {!item.is_read && <View style={styles.unreadDot} />}
-    </TouchableOpacity>
-    </FadeIn>
-  );
+  const renderItem = ({ item, index }) => {
+    const data = parseData(item.data);
+    const title = item.title_ar || item.title || 'إشعار';
+    const body = item.body_ar || item.body || '';
+    const opens = !!data.order_id;
+    return (
+      <FadeIn delay={Math.min(index, 8) * 45}>
+        <TouchableOpacity style={[styles.card, !item.is_read && styles.cardUnread]} onPress={() => onPress(item)} activeOpacity={0.8}
+          accessibilityRole="button" accessibilityLabel={`${item.is_read ? '' : 'غير مقروء، '}${title}`}>
+          <View style={styles.iconBox}><Text style={{ fontSize: 22 }}>{TYPE_ICONS[item.type] || (opens ? '📦' : '🔔')}</Text></View>
+          <View style={styles.content}>
+            <Text style={styles.title}>{title}</Text>
+            {!!body && <Text style={styles.body}>{body}</Text>}
+            <View style={styles.metaRow}>
+              <Text style={styles.time}>{item.created_at ? new Date(item.created_at).toLocaleString('ar', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</Text>
+              {opens && <Text style={styles.openTxt}>عرض الطلب ‹</Text>}
+            </View>
+          </View>
+          {!item.is_read && <View style={styles.unreadDot} />}
+        </TouchableOpacity>
+      </FadeIn>
+    );
+  };
 
   return (
     <View style={styles.container}>
       <GradientHeader
-        title={`الإشعارات ${unreadCount > 0 ? `(${unreadCount})` : ''}`}
-        right={unreadCount > 0 ? <TouchableOpacity onPress={markAllRead}><Ionicons name="checkmark-done" size={22} color="#FFF" /></TouchableOpacity> : null}
+        title={`الإشعارات${unreadCount > 0 ? ` (${unreadCount})` : ''}`}
+        right={unreadCount > 0 ? <TouchableOpacity onPress={markAllRead} accessibilityLabel="تحديد الكل كمقروء"><Ionicons name="checkmark-done" size={22} color="#FFF" /></TouchableOpacity> : null}
       />
 
-      <FlatList
-        data={notifications}
-        keyExtractor={i => String(i.id)}
-        renderItem={renderItem}
-        contentContainerStyle={{ padding: 16, gap: 10 }}
-        onRefresh={() => {
-          api.get('/notifications')
-            .then(d => setNotifications(d.data))
-            .catch(() => {})
-            .finally(() => setLoading(false));
-        }}
-        refreshing={loading}
-        ListEmptyComponent={!loading && (
-          <View style={styles.empty}>
-            <Text style={{ fontSize: 48 }}>🔔</Text>
-            <Text style={styles.emptyText}>لا إشعارات جديدة</Text>
-          </View>
-        )}
-      />
+      {loading ? (
+        <View style={{ padding: 8 }}>{[0, 1, 2, 3, 4].map(i => <CardRowSkeleton key={i} />)}</View>
+      ) : (
+        <FlatList
+          data={notifications}
+          keyExtractor={(i, idx) => String(i.id ?? idx)}
+          renderItem={renderItem}
+          contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: insets.bottom + 24, flexGrow: 1 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} />}
+          ListEmptyComponent={<EmptyState emoji="🔔" title="لا إشعارات جديدة" subtitle="رح نبلغك هون بكل تحديث على طلباتك" />}
+        />
+      )}
     </View>
   );
 }
 
-const makeStyles = (COLORS) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 16, backgroundColor: COLORS.card, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  headerTitle: { fontSize: 20, fontWeight: '900', color: COLORS.text },
-  markAll: { fontSize: 14, color: COLORS.primary, fontWeight: '700' },
-  card: { flexDirection: 'row', gap: 12, backgroundColor: COLORS.card, borderRadius: 16, padding: 14, elevation: 1 },
-  cardUnread: { backgroundColor: COLORS.tint, borderWidth: 1, borderColor: '#FFE0CC' },
-  iconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: COLORS.inputBg, alignItems: 'center', justifyContent: 'center', shrink: 0 },
+const makeStyles = (C) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
+  card: { flexDirection: 'row-reverse', gap: 12, backgroundColor: C.card, borderRadius: 18, padding: 14, ...C.shadow.soft },
+  cardUnread: { backgroundColor: C.tint, borderWidth: 1, borderColor: C.tintBorder },
+  iconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: C.inputBg, alignItems: 'center', justifyContent: 'center' },
   content: { flex: 1 },
-  title: { fontSize: 14, fontWeight: '800', color: COLORS.text },
-  body: { fontSize: 13, color: COLORS.gray, marginTop: 3, lineHeight: 18 },
-  time: { fontSize: 11, color: COLORS.gray, marginTop: 6 },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.primary, alignSelf: 'flex-start', marginTop: 4 },
-  empty: { alignItems: 'center', paddingTop: 80, gap: 12 },
-  emptyText: { fontSize: 16, color: COLORS.gray },
+  title: { fontSize: 14, fontWeight: '800', color: C.text, textAlign: 'right' },
+  body: { fontSize: 13, color: C.gray, marginTop: 3, lineHeight: 19, textAlign: 'right' },
+  metaRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
+  time: { fontSize: 11, color: C.gray },
+  openTxt: { fontSize: 11.5, color: C.primary, fontWeight: '800' },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.primary, alignSelf: 'flex-start', marginTop: 4 },
 });

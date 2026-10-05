@@ -34,6 +34,11 @@ const LIGHT = {
   sec: '#FFF6F1', tint: '#FFEDE2', inputBg: '#F6F7FB',
   white: '#FFFFFF', danger: '#FF3B30', red: '#FF3B30', green: '#25C26E', star: '#FFB800',
   divider: '#EDEEF3',
+  // درجات دلالية (بدل الألوان الثابتة اللي كانت تكسر الوضع الداكن)
+  tintBorder: '#FFE0CC', successBg: '#EDFFF3', successBorder: '#C3F5D8', successText: '#1A7A43',
+  dangerBg: '#FFF0EE', dangerBorder: '#FFD5CE', warnBg: '#FFF9E6', warnBorder: '#FFE9A8', warnFill: '#FFB800',
+  overlay: 'rgba(10,10,20,0.45)', skeleton: '#E6E6EB', onPrimary: '#FFFFFF',
+  statusBar: 'light-content',
 };
 
 const DARK = {
@@ -44,6 +49,10 @@ const DARK = {
   sec: '#221A13', tint: '#2A1D12', inputBg: '#1D1D27',
   white: '#16161F', danger: '#FF5A4E', red: '#FF5A4E', green: '#25C26E', star: '#FFB800',
   divider: '#1C1C26',
+  tintBorder: '#3A2618', successBg: '#11261A', successBorder: '#1E4A30', successText: '#5BE39A',
+  dangerBg: '#2A1416', dangerBorder: '#4A2226', warnBg: '#2A2412', warnBorder: '#4A3E1A', warnFill: '#FFB800',
+  overlay: 'rgba(0,0,0,0.6)', skeleton: '#2A2A32', onPrimary: '#FFFFFF',
+  statusBar: 'light-content',
 };
 
 const ThemeCtx = createContext({ isDark: false, colors: LIGHT, toggle: () => {}, setTheme: () => {}, pref: null });

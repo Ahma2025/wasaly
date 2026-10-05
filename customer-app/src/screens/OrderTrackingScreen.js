@@ -1,280 +1,227 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView, Animated, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView, Animated, ActivityIndicator, Modal, Pressable, TextInput, Alert, BackHandler } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
+import { LinearGradient } from 'expo-linear-gradient';
 import api from '../utils/api';
 import { Skeleton } from '../components/Skeleton';
 import GradientHeader from '../components/GradientHeader';
-import { LinearGradient } from 'expo-linear-gradient';
 import { FadeIn } from '../components/Anim';
-
 import { useTheme } from '../context/ThemeContext';
+import { SOCKET_URL, SUPPORT_PHONE } from '../config';
+import { leafletPage, TILE_URL } from '../utils/leaflet';
+import { statusLabel, CANCELLABLE_STATUSES, isPersonalOrder } from '../utils/status';
+import { startCardPayment } from '../utils/payments';
 
-const STATUS_STEPS = [
-  { key: 'pending',    label: 'في الانتظار',  icon: 'time-outline',             desc: 'طلبك وصل للمطعم' },
-  { key: 'confirmed',  label: 'تم القبول',    icon: 'checkmark-circle-outline',  desc: 'المطعم قبل طلبك' },
-  { key: 'preparing',  label: 'يُحضَّر',       icon: 'flame-outline',             desc: 'يتم تحضير طعامك' },
-  { key: 'ready',      label: 'جاهز',         icon: 'bag-check-outline',         desc: 'طلبك جاهز للاستلام' },
-  { key: 'on_the_way', label: 'في الطريق',    icon: 'bicycle-outline',           desc: 'المندوب في طريقه إليك' },
-  { key: 'delivered',  label: 'تم التسليم',   icon: 'gift-outline',              desc: 'استمتع بطعامك! 🎉' },
-];
+// خطوات حسب نوع الطلب
+const STEPS = {
+  delivery: [
+    { key: 'pending',    label: 'بانتظار المطعم', icon: 'time-outline',            desc: 'طلبك وصل للمطعم وبانتظار التأكيد' },
+    { key: 'confirmed',  label: 'مؤكد',          icon: 'checkmark-circle-outline', desc: 'المطعم أكّد طلبك' },
+    { key: 'preparing',  label: 'قيد التحضير',   icon: 'flame-outline',            desc: 'يتم تحضير طلبك الآن' },
+    { key: 'ready',      label: 'جاهز',          icon: 'bag-check-outline',        desc: 'طلبك جاهز وبانتظار السائق' },
+    { key: 'on_the_way', label: 'في الطريق',     icon: 'bicycle-outline',          desc: 'السائق في طريقه إليك' },
+    { key: 'delivered',  label: 'تم التوصيل',    icon: 'gift-outline',             desc: 'بالهنا والعافية! 🎉' },
+  ],
+  pickup: [
+    { key: 'pending',    label: 'بانتظار المطعم', icon: 'time-outline',            desc: 'طلبك وصل للمطعم وبانتظار التأكيد' },
+    { key: 'confirmed',  label: 'مؤكد',          icon: 'checkmark-circle-outline', desc: 'المطعم أكّد طلبك' },
+    { key: 'preparing',  label: 'قيد التحضير',   icon: 'flame-outline',            desc: 'يتم تحضير طلبك الآن' },
+    { key: 'ready',      label: 'جاهز للاستلام', icon: 'storefront-outline',       desc: 'طلبك جاهز — تفضّل استلمه من المطعم' },
+    { key: 'delivered',  label: 'تم الاستلام',   icon: 'gift-outline',             desc: 'بالهنا والعافية! 🎉' },
+  ],
+  personal: [
+    { key: 'confirmed',  label: 'البحث عن سائق', icon: 'search-outline',           desc: 'عم نبحث عن أقرب سائق متاح' },
+    { key: 'on_the_way', label: 'في الطريق',     icon: 'bicycle-outline',          desc: 'السائق في الطريق' },
+    { key: 'delivered',  label: 'تم التوصيل',    icon: 'flag-outline',             desc: 'تم التوصيل بنجاح 🎉' },
+  ],
+};
 
-function buildMapHTML({ restLat, restLng, custLat, custLng, driverLat, driverLng }) {
-  const safeRestLat = parseFloat(restLat) || null;
-  const safeRestLng = parseFloat(restLng) || null;
-  const safeCustLat = parseFloat(custLat) || null;
-  const safeCustLng = parseFloat(custLng) || null;
-  const safeDriverLat = parseFloat(driverLat) || null;
-  const safeDriverLng = parseFloat(driverLng) || null;
-  const cLat = safeDriverLat || safeRestLat || safeCustLat || 31.9;
-  const cLng = safeDriverLng || safeRestLng || safeCustLng || 35.2;
+const CANCEL_REASONS = ['تأخر الطلب', 'غيّرت رأيي', 'طلبت بالغلط', 'بدي أعدّل الطلب'];
 
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  html,body,#map{width:100%;height:100%;background:#e8e0d8}
-  .leaflet-control-zoom a{font-size:18px!important;width:36px!important;height:36px!important;line-height:36px!important}
-  .custom-popup .leaflet-popup-content-wrapper{border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,0.18)}
-  .custom-popup .leaflet-popup-content{font-family:system-ui;font-size:13px;font-weight:600;direction:rtl;text-align:right}
+function buildMapHTML({ startLat, startLng, startEmoji, startLabel, destLat, destLng, driverLat, driverLng, dark }) {
+  const n = (v) => { const x = parseFloat(v); return Number.isFinite(x) && x !== 0 ? x : null; };
+  const sLat = n(startLat), sLng = n(startLng), dLat = n(destLat), dLng = n(destLng), vLat = n(driverLat), vLng = n(driverLng);
+  const cLat = vLat || sLat || dLat || 31.9;
+  const cLng = vLng || sLng || dLng || 35.2;
+  return leafletPage({
+    dark,
+    style: `.leaflet-control-zoom a{font-size:18px!important;width:34px!important;height:34px!important;line-height:34px!important}
+  .pop .leaflet-popup-content{font-family:system-ui;font-size:13px;font-weight:700;direction:rtl;text-align:right}
   @keyframes pulseRing{0%{transform:scale(.55);opacity:.75}80%,100%{transform:scale(2.3);opacity:0}}
   .drv-wrap{position:relative;width:44px;height:44px}
   .drv-ring{position:absolute;inset:0;border-radius:50%;background:rgba(255,107,0,.45);animation:pulseRing 1.6s ease-out infinite}
-  .drv-badge{position:absolute;inset:0;background:#FF6B00;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;border:3px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.35)}
-</style>
-</head>
-<body>
-<div id="map"></div>
-<script>
-var map = L.map('map',{
-  center:[${cLat},${cLng}],
-  zoom:14,
-  zoomControl:true,
-  dragging:true,
-  touchZoom:true,
-  doubleClickZoom:true,
-  scrollWheelZoom:true,
-  tap:true
-});
-
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-  maxZoom:19,
-  attribution:'© OpenStreetMap'
-}).addTo(map);
-
-// Position zoom control top-left
+  .drv-badge{position:absolute;inset:0;background:#FF6B00;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;border:3px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.35)}`,
+    script: `
+var map=L.map('map',{center:[${cLat},${cLng}],zoom:14,zoomControl:true});
+L.tileLayer('${TILE_URL}',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
 map.zoomControl.setPosition('topleft');
-
-function mkIcon(emoji,size,bg){
-  size=size||32;
-  return L.divIcon({
-    html:'<div style="width:'+size+'px;height:'+size+'px;background:'+(bg||'#fff')+';border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:'+(size*0.55)+'px;border:3px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,0.35)">'+emoji+'</div>',
-    iconSize:[size,size],iconAnchor:[size/2,size/2],popupAnchor:[0,-(size/2)],className:''
-  });
-}
-// أيقونة السائق مع حلقة نبض "لايف"
-function mkDriverIcon(){
-  return L.divIcon({
-    html:'<div class="drv-wrap"><div class="drv-ring"></div><div class="drv-badge">🛵</div></div>',
-    iconSize:[44,44],iconAnchor:[22,22],popupAnchor:[0,-22],className:''
-  });
-}
-
-var pts=[];
-var driverMarker=null;
-var curPos=null;              // الموقع المرسوم حالياً للسائق
-var animFrame=null, startPos=null, endPos=null, animStart=0;
-var ANIM_MS=5000;             // مدة انزلاق الدبوس — تُضبط ديناميكياً حسب الفاصل الحقيقي بين التحديثات
-var lastMoveAt=0;             // وقت آخر تحديث موقع (لحساب سرعة الانزلاق الواقعية)
-var followDriver=true;        // الكاميرا تتبع السائق مثل وضع الملاحة
-
-${safeRestLat && safeRestLng ? `
-L.marker([${safeRestLat},${safeRestLng}],{icon:mkIcon('🏪',40,'#FF6B00')}).addTo(map)
-  .bindPopup('<div style="direction:rtl;font-weight:700">🏪 المطعم</div>',{className:'custom-popup'});
-pts.push([${safeRestLat},${safeRestLng}]);
-` : ''}
-
-${safeCustLat && safeCustLng ? `
-L.marker([${safeCustLat},${safeCustLng}],{icon:mkIcon('📍',40,'#FF3B30')}).addTo(map)
-  .bindPopup('<div style="direction:rtl;font-weight:700">📍 موقع التوصيل</div>',{className:'custom-popup'});
-pts.push([${safeCustLat},${safeCustLng}]);
-` : ''}
-
-${safeDriverLat && safeDriverLng ? `
-driverMarker=L.marker([${safeDriverLat},${safeDriverLng}],{icon:mkDriverIcon()}).addTo(map)
-  .bindPopup('<div style="direction:rtl;font-weight:700;color:#FF6B00">🛵 السائق</div>',{className:'custom-popup'});
-curPos=[${safeDriverLat},${safeDriverLng}];
-pts.push([${safeDriverLat},${safeDriverLng}]);
-` : ''}
-
-${safeRestLat && safeCustLat ? `
-L.polyline([[${safeRestLat},${safeRestLng}],[${safeCustLat},${safeCustLng}]],{
-  color:'#FF6B00',weight:4,dashArray:'10 6',opacity:0.7
-}).addTo(map);
-` : ''}
-
-if(pts.length===1){map.setView(pts[0],15);}
-else if(pts.length>1){map.fitBounds(pts,{padding:[50,50]});}
-
-// لو سحب المستخدم الخريطة يدوياً نوقف التتبع التلقائي حتى يضغط زر التوسيط
-map.on('dragstart',function(){ followDriver=false; });
-
-// إطار الحركة: ينزلق الدبوس تدريجياً من نقطته الحالية للنقطة الجديدة
-function animStep(){
-  var t=(Date.now()-animStart)/ANIM_MS;
-  if(t>1)t=1;
-  var lat=startPos[0]+(endPos[0]-startPos[0])*t;
-  var lng=startPos[1]+(endPos[1]-startPos[1])*t;
-  curPos=[lat,lng];
-  driverMarker.setLatLng(curPos);
-  if(followDriver) map.panTo(curPos,{animate:false});
-  if(t<1){ animFrame=requestAnimationFrame(animStep); }
-}
-
-// استقبال موقع جديد: إنشاء الدبوس أول مرة، أو بدء انزلاق ناعم للنقطة الجديدة
-function moveDriver(lat,lng){
-  var ll=[lat,lng];
-  if(isNaN(lat)||isNaN(lng)) return;
-  if(!driverMarker){
-    driverMarker=L.marker(ll,{icon:mkDriverIcon()}).addTo(map)
-      .bindPopup('<div style="direction:rtl;font-weight:700;color:#FF6B00">🛵 السائق</div>',{className:'custom-popup'});
-    curPos=ll;
-    lastMoveAt=Date.now();
-    if(followDriver) map.setView(ll,16,{animate:true});
-    return;
-  }
-  // مدة الانزلاق = الفاصل الحقيقي بين التحديثات (شوي أطول) ليمشي متواصل بدون توقّف
-  var nowT=Date.now();
-  var interval = lastMoveAt ? (nowT-lastMoveAt) : 5000;
-  lastMoveAt=nowT;
-  ANIM_MS = Math.max(1500, Math.min(interval*1.2, 14000));
-  startPos=curPos ? [curPos[0],curPos[1]] : [lat,lng];
-  endPos=[lat,lng];
-  animStart=Date.now();
-  if(animFrame) cancelAnimationFrame(animFrame);
-  animStep();
-}
-
-function handleMsg(e){
-  try{
-    var d=JSON.parse(e.data||e);
-    if(d.type==='driver_location'){
-      moveDriver(parseFloat(d.lat),parseFloat(d.lng));
-    } else if(d.type==='recenter'){
-      followDriver=true;
-      if(curPos) map.setView(curPos,16,{animate:true});
-    }
-  }catch(err){}
-}
-window.addEventListener('message',handleMsg);
+function mkIcon(emoji,size,bg){size=size||32;return L.divIcon({html:'<div style="width:'+size+'px;height:'+size+'px;background:'+(bg||'#fff')+';border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:'+(size*0.55)+'px;border:3px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,0.35)">'+emoji+'</div>',iconSize:[size,size],iconAnchor:[size/2,size/2],popupAnchor:[0,-(size/2)],className:''});}
+function mkDriverIcon(){return L.divIcon({html:'<div class="drv-wrap"><div class="drv-ring"></div><div class="drv-badge">🛵</div></div>',iconSize:[44,44],iconAnchor:[22,22],popupAnchor:[0,-22],className:''});}
+var pts=[],driverMarker=null,curPos=null,animFrame=null,startPos=null,endPos=null,animStart=0,ANIM_MS=5000,lastMoveAt=0,followDriver=true;
+${sLat && sLng ? `L.marker([${sLat},${sLng}],{icon:mkIcon('${startEmoji}',40,'#FF6B00')}).addTo(map).bindPopup('${startLabel}',{className:'pop'});pts.push([${sLat},${sLng}]);` : ''}
+${dLat && dLng ? `L.marker([${dLat},${dLng}],{icon:mkIcon('📍',40,'#FF3B30')}).addTo(map).bindPopup('موقع التوصيل',{className:'pop'});pts.push([${dLat},${dLng}]);` : ''}
+${vLat && vLng ? `driverMarker=L.marker([${vLat},${vLng}],{icon:mkDriverIcon()}).addTo(map).bindPopup('السائق',{className:'pop'});curPos=[${vLat},${vLng}];pts.push([${vLat},${vLng}]);` : ''}
+${sLat && dLat ? `L.polyline([[${sLat},${sLng}],[${dLat},${dLng}]],{color:'#FF6B00',weight:4,dashArray:'10 6',opacity:0.7}).addTo(map);` : ''}
+if(pts.length===1){map.setView(pts[0],15);}else if(pts.length>1){map.fitBounds(pts,{padding:[50,50]});}
+map.on('dragstart',function(){followDriver=false;});
+function animStep(){var t=(Date.now()-animStart)/ANIM_MS;if(t>1)t=1;var lat=startPos[0]+(endPos[0]-startPos[0])*t;var lng=startPos[1]+(endPos[1]-startPos[1])*t;curPos=[lat,lng];driverMarker.setLatLng(curPos);if(followDriver)map.panTo(curPos,{animate:false});if(t<1){animFrame=requestAnimationFrame(animStep);}}
+function moveDriver(lat,lng){if(isNaN(lat)||isNaN(lng))return;var ll=[lat,lng];
+  if(!driverMarker){driverMarker=L.marker(ll,{icon:mkDriverIcon()}).addTo(map).bindPopup('السائق',{className:'pop'});curPos=ll;lastMoveAt=Date.now();if(followDriver)map.setView(ll,16,{animate:true});return;}
+  var nowT=Date.now();var interval=lastMoveAt?(nowT-lastMoveAt):5000;lastMoveAt=nowT;ANIM_MS=Math.max(1500,Math.min(interval*1.2,14000));
+  startPos=curPos?[curPos[0],curPos[1]]:[lat,lng];endPos=[lat,lng];animStart=Date.now();if(animFrame)cancelAnimationFrame(animFrame);animStep();}
+function handleMsg(raw){try{var d=JSON.parse(raw);if(d.type==='driver_location'){moveDriver(parseFloat(d.lat),parseFloat(d.lng));}else if(d.type==='recenter'){followDriver=true;if(curPos)map.setView(curPos,16,{animate:true});else if(pts.length>1)map.fitBounds(pts,{padding:[50,50]});else if(pts.length)map.setView(pts[0],15);}}catch(err){}}
+window.addEventListener('message',function(e){handleMsg(e.data);});
 document.addEventListener('message',function(e){handleMsg(e.data);});
-</script>
-</body>
-</html>`;
+`,
+  });
 }
 
 export default function OrderTrackingScreen() {
   const route = useRoute();
   const id = route.params?.orderId;
+  const fromCheckout = !!route.params?.fromCheckout;
   const navigation = useNavigation();
-  const { colors: COLORS } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { colors: COLORS, isDark } = useTheme();
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
 
   const [order, setOrder] = useState(null);
   const [driverLoc, setDriverLoc] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [mapKey, setMapKey] = useState(0);
+  const [loadError, setLoadError] = useState('');
   const [now, setNow] = useState(Date.now());
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+  const [mapFailed, setMapFailed] = useState(false);
   const webViewRef = useRef(null);
   const socketRef = useRef(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30000);
-    return () => clearInterval(t);
-  }, []);
+  const goBack = useCallback(() => {
+    if (!fromCheckout && navigation.canGoBack()) navigation.goBack();
+    else navigation.navigate('Main', { screen: 'الرئيسية' });
+    return true;
+  }, [fromCheckout, navigation]);
+
+  // زر الرجوع بأندرويد: بعد الطلب يرجع للرئيسية (مش للسلة الفاضية)
+  useFocusEffect(useCallback(() => {
+    if (!fromCheckout) return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', goBack);
+    return () => sub.remove();
+  }, [fromCheckout, goBack]));
 
   useEffect(() => {
-    fetchOrder();
-    setupSocket();
-    startPulse();
-    const interval = setInterval(fetchOrder, 30000);
-    return () => { clearInterval(interval); socketRef.current?.disconnect(); };
+    const t = setInterval(() => setNow(Date.now()), 30000);
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(pulseAnim, { toValue: 1.15, duration: 700, useNativeDriver: true }),
+      Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => { clearInterval(t); loop.stop(); };
+  }, []);
+
+  const fetchOrder = useCallback(async () => {
+    try {
+      const data = await api.get(`/orders/${id}`);
+      const o = data.data || data;
+      setOrder(o);
+      setLoadError('');
+      if (o.driver_lat && o.driver_lng) setDriverLoc({ lat: parseFloat(o.driver_lat), lng: parseFloat(o.driver_lng) });
+    } catch (e) {
+      setLoadError(e?.message === 'Network error' ? 'تعذّر الاتصال — تأكد من الإنترنت' : (e?.message || 'تعذّر تحميل الطلب'));
+    } finally { setLoading(false); }
   }, [id]);
+
+  // تحديث عند كل رجوع للشاشة (مثلاً بعد التقييم) + كل 30 ثانية احتياطاً
+  useFocusEffect(useCallback(() => {
+    fetchOrder();
+    const interval = setInterval(fetchOrder, 30000);
+    return () => clearInterval(interval);
+  }, [fetchOrder]));
+
+  useEffect(() => {
+    let socket;
+    (async () => {
+      try {
+        const token = await SecureStore.getItemAsync('token');
+        if (!token) return;
+        socket = io(SOCKET_URL, { auth: { token }, transports: ['websocket'] });
+        socketRef.current = socket;
+        socket.on('driver:location', ({ lat, lng, orderId, order_id }) => {
+          const oid = orderId ?? order_id;
+          if (!oid || String(oid) === String(id)) setDriverLoc({ lat: parseFloat(lat), lng: parseFloat(lng) });
+        });
+        socket.on('order_status', ({ order_id, status }) => {
+          if (String(order_id) === String(id)) {
+            setOrder(prev => (prev ? { ...prev, status } : prev));
+            fetchOrder(); // بيانات السائق/الوقت قد تتغير مع الحالة
+          }
+        });
+        socket.on('order_cancelled', ({ order_id }) => {
+          if (String(order_id) === String(id)) { setOrder(prev => (prev ? { ...prev, status: 'cancelled' } : prev)); fetchOrder(); }
+        });
+      } catch {}
+    })();
+    return () => { socket?.disconnect(); socketRef.current = null; };
+  }, [id, fetchOrder]);
 
   useEffect(() => {
     if (!driverLoc || !webViewRef.current) return;
     webViewRef.current.postMessage(JSON.stringify({ type: 'driver_location', lat: driverLoc.lat, lng: driverLoc.lng }));
   }, [driverLoc]);
 
-  const startPulse = () => {
-    Animated.loop(Animated.sequence([
-      Animated.timing(pulseAnim, { toValue: 1.15, duration: 700, useNativeDriver: true }),
-      Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
-    ])).start();
-  };
+  const personal = isPersonalOrder(order);
+  const orderType = personal ? 'personal' : (order?.order_type === 'pickup' ? 'pickup' : 'delivery');
+  const steps = STEPS[orderType];
+  const status = order?.status;
+  const isCancelled = status === 'cancelled';
+  const isDelivered = status === 'delivered';
+  const showMap = !!order && !isCancelled && orderType !== 'pickup' && status !== 'pending';
 
-  const setupSocket = async () => {
-    try {
-      const token = await SecureStore.getItemAsync('token');
-      if (!token) return;
-      const socket = io('https://burger-app-production.up.railway.app', {
-        auth: { token }, transports: ['websocket']
-      });
-      socketRef.current = socket;
-      socket.on('driver:location', ({ lat, lng, orderId }) => {
-        if (!orderId || String(orderId) === String(id)) {
-          setDriverLoc({ lat: parseFloat(lat), lng: parseFloat(lng) });
-        }
-      });
-      socket.on('order_status', ({ order_id, status }) => {
-        if (String(order_id) === String(id)) {
-          setOrder(prev => prev ? { ...prev, status } : prev);
-        }
-      });
-    } catch {}
-  };
-
-  const fetchOrder = async () => {
-    try {
-      const data = await api.get(`/orders/${id}`);
-      const o = data.data || data;
-      setOrder(o);
-      if (o.driver_lat && o.driver_lng) {
-        setDriverLoc({ lat: parseFloat(o.driver_lat), lng: parseFloat(o.driver_lng) });
-      }
-    } catch (e) { console.error('fetchOrder error:', e); }
-    finally { setLoading(false); }
-  };
-
-  // كل الـ hooks يجب أن تُستدعى قبل أي return مبكّر (قاعدة ترتيب React hooks)
-  const showMap = ['confirmed', 'preparing', 'ready', 'on_the_way', 'delivered'].includes(order?.status);
-  // تُبنى الخريطة مرة واحدة فقط؛ حركة السائق تتم عبر postMessage (انزلاق ناعم) لا بإعادة البناء كل 5 ثواني
+  // تُبنى الخريطة مرة واحدة لكل طلب؛ حركة السائق عبر postMessage
+  const startLat = personal ? order?.pickup_lat : order?.restaurant_lat;
+  const startLng = personal ? order?.pickup_lng : order?.restaurant_lng;
   const mapHtml = React.useMemo(
-    () => showMap ? buildMapHTML({
-      restLat: order.restaurant_lat, restLng: order.restaurant_lng,
-      custLat: order.delivery_lat,   custLng: order.delivery_lng,
-      driverLat: order.driver_lat,   driverLng: order.driver_lng,
-    }) : null,
-    [showMap, order?.restaurant_lat, order?.restaurant_lng, order?.delivery_lat, order?.delivery_lng]
+    () => (showMap ? buildMapHTML({
+      startLat, startLng,
+      startEmoji: personal ? '🟢' : '🏪', startLabel: personal ? 'نقطة الاستلام' : 'المطعم',
+      destLat: order.delivery_lat, destLng: order.delivery_lng,
+      driverLat: order.driver_lat, driverLng: order.driver_lng, dark: isDark,
+    }) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [showMap, order?.id, startLat, startLng, order?.delivery_lat, order?.delivery_lng, isDark]
   );
 
+  const cancelOrder = async () => {
+    setCancelling(true);
+    try {
+      await api.patch(`/orders/${id}/cancel`, { reason: cancelReason.trim() || undefined });
+      setCancelOpen(false);
+      setOrder(prev => (prev ? { ...prev, status: 'cancelled' } : prev));
+      fetchOrder();
+      Alert.alert('تم إلغاء الطلب', 'تم إلغاء طلبك، وأي مبلغ من المحفظة أو نقاط مستخدمة رجعت لحسابك.');
+    } catch (e) {
+      Alert.alert('تعذّر الإلغاء', e?.message || 'حاول مرة أخرى');
+      fetchOrder();
+    } finally { setCancelling(false); }
+  };
+
   if (loading) return (
-    <View style={{ flex: 1, backgroundColor: COLORS.bg, paddingTop: 50 }}>
-      <Skeleton w={'100%'} h={260} r={0} />
+    <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
+      <GradientHeader title="تتبع الطلب" onBack={goBack} />
+      <Skeleton w={'100%'} h={240} r={0} />
       <View style={{ padding: 16, gap: 14 }}>
-        <Skeleton w={'40%'} h={16} />
-        {[0,1,2,3].map(i => (
+        <Skeleton w={'40%'} h={16} style={{ alignSelf: 'flex-end' }} />
+        {[0, 1, 2, 3].map(i => (
           <View key={i} style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 12 }}>
             <Skeleton w={40} h={40} r={20} />
-            <View style={{ flex: 1, gap: 6 }}><Skeleton w={'50%'} h={13} /><Skeleton w={'70%'} h={10} /></View>
+            <View style={{ flex: 1, gap: 6, alignItems: 'flex-end' }}><Skeleton w={'50%'} h={13} /><Skeleton w={'70%'} h={10} /></View>
           </View>
         ))}
       </View>
@@ -282,26 +229,36 @@ export default function OrderTrackingScreen() {
   );
 
   if (!order) return (
-    <View style={styles.loadingWrap}>
-      <Text style={{ fontSize: 48 }}>😕</Text>
-      <Text style={styles.loadingText}>لم يُعثر على الطلب</Text>
+    <View style={styles.container}>
+      <GradientHeader title="تتبع الطلب" onBack={goBack} />
+      <View style={styles.loadingWrap}>
+        <Text style={{ fontSize: 48 }}>😕</Text>
+        <Text style={styles.loadingText}>{loadError || 'لم يُعثر على الطلب'}</Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoading(true); fetchOrder(); }}>
+          <Text style={styles.retryTxt}>إعادة المحاولة</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
-  const currentIdx = STATUS_STEPS.findIndex(s => s.key === order.status);
-  const currentStep = STATUS_STEPS[Math.max(currentIdx, 0)];
-  const isDelivered = order.status === 'delivered';
-  const isCancelled = order.status === 'cancelled';
+  const currentIdx = steps.findIndex(s => s.key === status);
+  const knownStatus = currentIdx >= 0 || isCancelled;
+  // طلب شخصي بحالة "pending" أو أي حالة قبل التأكيد → أول خطوة
+  const effIdx = currentIdx >= 0 ? currentIdx : (personal && status === 'pending' ? 0 : -1);
+  const currentStep = effIdx >= 0 ? steps[effIdx] : null;
+  const canCancel = CANCELLABLE_STATUSES.includes(status);
+  const rated = order.rating_restaurant != null || order.rating_driver != null;
+  const paymentPending = order.payment_method === 'card' && order.payment_status !== 'paid' && !isCancelled && !isDelivered;
+  const personalWaiting = personal && status === 'confirmed' && !order.driver_name;
 
   return (
     <View style={styles.container}>
-      <GradientHeader title={`تتبع الطلب #${order.order_number || id}`} onBack={() => navigation.navigate('Main', { screen: 'الرئيسية' })} />
+      <GradientHeader title={personal ? 'تتبع الطلب الشخصي' : 'تتبع الطلب'} subtitle={`#${order.order_number || id}`} onBack={goBack}
+        right={<TouchableOpacity onPress={() => navigation.navigate('SupportChat')} accessibilityLabel="الدعم"><Ionicons name="headset-outline" size={20} color="#FFF" /></TouchableOpacity>} />
 
-      {/* MAP — outside ScrollView so gestures work freely */}
-      {showMap && mapHtml ? (
+      {showMap && mapHtml && !mapFailed ? (
         <View style={styles.mapWrap}>
           <WebView
-            key={mapKey}
             ref={webViewRef}
             source={{ html: mapHtml }}
             style={styles.map}
@@ -309,188 +266,296 @@ export default function OrderTrackingScreen() {
             domStorageEnabled
             originWhitelist={['*']}
             mixedContentMode="always"
-            onMessage={() => {}}
-            onLoadEnd={() => {
-              const dl = driverLoc || (order.driver_lat && { lat: order.driver_lat, lng: order.driver_lng });
-              if (dl) webViewRef.current?.postMessage(JSON.stringify({ type: 'driver_location', lat: dl.lat, lng: dl.lng }));
+            onMessage={(e) => {
+              try {
+                const d = JSON.parse(e.nativeEvent.data);
+                if (d.type === 'map_ready' && driverLoc) webViewRef.current?.postMessage(JSON.stringify({ type: 'driver_location', lat: driverLoc.lat, lng: driverLoc.lng }));
+              } catch {}
             }}
+            onError={() => setMapFailed(true)}
           />
-          {order.status === 'on_the_way' && (
+          {status === 'on_the_way' && (
             <View style={styles.liveBadge}>
               <View style={styles.liveDot} />
-              <Text style={styles.liveText}>LIVE</Text>
+              <Text style={styles.liveText}>مباشر</Text>
             </View>
           )}
-          {/* Re-center button — يعيد التتبع للسائق بنعومة بدون إعادة تحميل الخريطة */}
-          <TouchableOpacity style={styles.recenterBtn} onPress={() => webViewRef.current?.postMessage(JSON.stringify({ type: 'recenter' }))}>
+          <TouchableOpacity style={styles.recenterBtn} onPress={() => webViewRef.current?.postMessage(JSON.stringify({ type: 'recenter' }))} accessibilityLabel="توسيط الخريطة">
             <Ionicons name="locate" size={20} color={COLORS.primary} />
           </TouchableOpacity>
         </View>
       ) : (
         <View style={styles.noMapStatus}>
           <Animated.Text style={[styles.bigEmoji, { transform: [{ scale: pulseAnim }] }]}>
-            {isCancelled ? '❌' : order.status === 'preparing' ? '👨‍🍳' : order.status === 'on_the_way' ? '🛵' : order.status === 'delivered' ? '🎉' : '⏳'}
+            {isCancelled ? '❌' : status === 'preparing' ? '👨‍🍳' : status === 'on_the_way' ? '🛵' : isDelivered ? '🎉' : status === 'ready' ? '🛍️' : '⏳'}
           </Animated.Text>
+          {mapFailed && <Text style={styles.mapFailTxt}>تعذّر تحميل الخريطة — التتبع مستمر</Text>}
         </View>
       )}
 
-      {/* Scrollable content BELOW map */}
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 30 }} showsVerticalScrollIndicator={false}>
 
-        {/* Status Card */}
+        {/* بطاقة الحالة */}
         <FadeIn>
-        <View style={[styles.statusCard, isCancelled && { borderColor: COLORS.red }, isDelivered && { borderColor: COLORS.green }]}>
-          <Text style={[styles.statusTitle, isCancelled && { color: COLORS.red }, isDelivered && { color: COLORS.green }]}>
-            {isCancelled ? '❌ تم إلغاء الطلب' : currentStep?.label}
-          </Text>
-          <Text style={styles.statusDesc}>{isCancelled ? 'للاستفسار تواصل مع الدعم' : currentStep?.desc}</Text>
-          {!isCancelled && !isDelivered && order.estimated_delivery_time && (() => {
-            const mins = Math.round((new Date(order.estimated_delivery_time).getTime() - now) / 60000);
-            return (
-              <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.etaBox}>
-                <Ionicons name="time" size={16} color="#FFF" />
-                <Text style={styles.etaText}>
-                  {mins > 0 ? `الوصول المتوقّع خلال ~${mins} دقيقة` : 'طلبك في طريقه، وصولك قريب جداً 🎉'}
-                </Text>
-              </LinearGradient>
-            );
-          })()}
-        </View>
+          <View style={[styles.statusCard, isCancelled && { borderColor: COLORS.red }, isDelivered && { borderColor: COLORS.green }]}>
+            <Text style={[styles.statusTitle, isCancelled && { color: COLORS.red }, isDelivered && { color: COLORS.green }]}>
+              {isCancelled ? '❌ تم إلغاء الطلب' : (currentStep?.label || statusLabel(status, order))}
+            </Text>
+            <Text style={styles.statusDesc}>
+              {isCancelled
+                ? (order.cancel_reason ? `السبب: ${order.cancel_reason}` : 'للاستفسار تواصل مع الدعم')
+                : !knownStatus ? 'نحدّث حالة طلبك — اسحب للتحديث أو تواصل مع الدعم'
+                  : personalWaiting ? 'عم نبحث عن أقرب سائق متاح، رح نبلغك فور القبول'
+                    : currentStep?.desc}
+            </Text>
+            {!isCancelled && !isDelivered && order.estimated_delivery_time && !personal && (() => {
+              const mins = Math.round((new Date(order.estimated_delivery_time).getTime() - now) / 60000);
+              return (
+                <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.etaBox}>
+                  <Ionicons name="time" size={16} color="#FFF" />
+                  <Text style={styles.etaText}>
+                    {mins > 0 ? `${orderType === 'pickup' ? 'الجاهزية' : 'الوصول'} المتوقّع خلال ~${mins} دقيقة` : 'قرّب كثير، شكراً لصبرك 🙏'}
+                  </Text>
+                </LinearGradient>
+              );
+            })()}
+          </View>
         </FadeIn>
 
-        {/* Progress Steps */}
+        {paymentPending && (
+          <View style={[styles.payCard, { backgroundColor: COLORS.warnBg, borderColor: COLORS.warnBorder }]}>
+            <Ionicons name="card-outline" size={22} color={COLORS.text} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.payTitle}>الدفع بالبطاقة لم يكتمل</Text>
+              <Text style={styles.paySub}>تقدر تدفع الآن، أو تدفع للسائق/المطعم عند الاستلام.</Text>
+            </View>
+            <TouchableOpacity style={styles.payBtn} onPress={() => startCardPayment(navigation, id)}>
+              <Text style={styles.payBtnTxt}>ادفع الآن</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* خطوات التقدّم */}
         {!isCancelled && (
           <FadeIn delay={80}>
-          <View style={styles.card}>
-            {STATUS_STEPS.map((step, idx) => {
-              const done = idx <= currentIdx;
-              const active = idx === currentIdx;
-              return (
-                <View key={step.key} style={styles.stepRow}>
-                  <View style={[styles.stepCircle, done && { backgroundColor: COLORS.primary }, isDelivered && idx === STATUS_STEPS.length - 1 && { backgroundColor: COLORS.green }]}>
-                    <Ionicons name={step.icon} size={13} color={done ? '#FFF' : COLORS.gray} />
+            <View style={styles.card}>
+              {steps.map((step, idx) => {
+                const done = effIdx >= 0 && idx <= effIdx;
+                const active = idx === effIdx;
+                const last = idx === steps.length - 1;
+                return (
+                  <View key={step.key} style={styles.stepRow}>
+                    <View style={{ alignItems: 'center' }}>
+                      <View style={[styles.stepCircle, done && { backgroundColor: COLORS.primary }, isDelivered && last && { backgroundColor: COLORS.green }]}>
+                        <Ionicons name={step.icon} size={14} color={done ? '#FFF' : COLORS.gray} />
+                      </View>
+                      {!last && <View style={[styles.stepLine, effIdx >= 0 && idx < effIdx && { backgroundColor: COLORS.primary }]} />}
+                    </View>
+                    <Text style={[styles.stepLabel, active && { color: COLORS.primary, fontWeight: '900' }, done && !active && { color: COLORS.green }]}>
+                      {step.label}
+                    </Text>
+                    {active && !isDelivered && <View style={styles.activeDot} />}
                   </View>
-                  {idx < STATUS_STEPS.length - 1 && (
-                    <View style={[styles.stepLine, idx < currentIdx && { backgroundColor: COLORS.primary }]} />
-                  )}
-                  <Text style={[styles.stepLabel, active && { color: COLORS.primary, fontWeight: '800' }, done && !active && { color: COLORS.green }]}>
-                    {step.label}
-                  </Text>
-                  {active && <View style={styles.activeDot} />}
-                </View>
-              );
-            })}
-          </View>
+                );
+              })}
+            </View>
           </FadeIn>
         )}
 
-        {/* Driver Card */}
-        {!!order.driver_name && (
+        {/* السائق */}
+        {!!order.driver_name && !isCancelled && (
           <View style={styles.driverCard}>
             <View style={styles.driverAvatar}><Text style={{ fontSize: 26 }}>🛵</Text></View>
             <View style={{ flex: 1 }}>
               <Text style={styles.driverName}>{order.driver_name}</Text>
-              <Text style={styles.driverSub}>{order.vehicle_type || 'دراجة نارية'}</Text>
-              {driverLoc && order.status === 'on_the_way' && <Text style={styles.driverLive}>🟢 يتحرك الآن</Text>}
+              <Text style={styles.driverSub}>{[order.vehicle_type, order.vehicle_plate].filter(Boolean).join(' · ') || 'سائق وصلّي'}</Text>
+              {driverLoc && status === 'on_the_way' && <Text style={styles.driverLive}>🟢 يتحرك الآن</Text>}
             </View>
             {!!order.driver_phone && (
-              <TouchableOpacity style={styles.callBtn} onPress={() => Linking.openURL(`tel:${order.driver_phone}`)}>
+              <TouchableOpacity style={styles.callBtn} onPress={() => Linking.openURL(`tel:${order.driver_phone}`).catch(() => {})} accessibilityLabel="اتصل بالسائق">
                 <Ionicons name="call" size={20} color="#FFF" />
               </TouchableOpacity>
             )}
           </View>
         )}
 
-        {/* Order Details */}
+        {/* التفاصيل */}
         <View style={styles.card}>
-          <View style={styles.infoRow}>
-            <Ionicons name="restaurant-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.infoLabel}>المطعم</Text>
-            <Text style={styles.infoVal}>{order.restaurant_name}</Text>
-          </View>
-          {order.delivery_address ? (
-            <View style={styles.infoRow}>
-              <Ionicons name="location-outline" size={16} color={COLORS.primary} />
-              <Text style={styles.infoLabel}>عنوان التوصيل</Text>
-              <Text style={styles.infoVal} numberOfLines={2}>{order.delivery_address}</Text>
-            </View>
-          ) : null}
-          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
-            <Ionicons name="cash-outline" size={16} color={COLORS.green} />
-            <Text style={styles.infoLabel}>الإجمالي</Text>
-            <Text style={[styles.infoVal, { color: COLORS.primary, fontWeight: '900', fontSize: 16 }]}>
-              {parseFloat(order.total || 0).toFixed(2)}₪
-            </Text>
-          </View>
+          {personal ? (
+            <>
+              <InfoRow styles={styles} icon={order.service_type === 'ride' ? 'person-outline' : 'cube-outline'} color={COLORS.primary}
+                label="الخدمة" value={order.service_type === 'ride' ? `توصيل راكب${order.passengers ? ` · ${order.passengers} راكب` : ''}` : 'توصيل طرد'} />
+              {!!order.pickup_address && <InfoRow styles={styles} icon="radio-button-on-outline" color={COLORS.green} label="الاستلام" value={order.pickup_address} />}
+              {!!order.recipient_name && <InfoRow styles={styles} icon="person-circle-outline" color={COLORS.primary} label="المستلم" value={`${order.recipient_name}${order.recipient_phone ? ` · ${order.recipient_phone}` : ''}`} />}
+            </>
+          ) : (
+            <>
+              <InfoRow styles={styles} icon="restaurant-outline" color={COLORS.primary} label="المطعم" value={order.restaurant_name} />
+              <InfoRow styles={styles} icon={orderType === 'pickup' ? 'storefront-outline' : 'bicycle-outline'} color={COLORS.primary} label="الاستلام" value={orderType === 'pickup' ? 'استلام من المطعم' : 'توصيل'} />
+            </>
+          )}
+          {!!order.delivery_address && <InfoRow styles={styles} icon="location-outline" color={COLORS.red} label={personal ? 'التسليم' : 'العنوان'} value={order.delivery_address} />}
+          <InfoRow styles={styles} icon="wallet-outline" color={COLORS.primary} label="الدفع"
+            value={order.payment_method === 'card' ? (order.payment_status === 'paid' ? 'بطاقة — مدفوع ✅' : 'بطاقة — غير مدفوع') : 'كاش عند الاستلام'} />
+          <InfoRow styles={styles} icon="cash-outline" color={COLORS.green} label="الإجمالي" value={`${parseFloat(order.total || 0).toFixed(2)}₪`} strong last />
         </View>
 
-        {/* Items */}
         {order.items?.length > 0 && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>🧾 تفاصيل الطلب</Text>
-            {order.items.map((item, i) => (
-              <View key={i} style={styles.orderItem}>
-                <Text style={styles.orderItemName}>{item.name_ar || item.name} × {item.quantity}</Text>
-                <Text style={styles.orderItemPrice}>{(parseFloat(item.price || 0) * (item.quantity || 1)).toFixed(2)}₪</Text>
-              </View>
-            ))}
+            {order.items.map((item, i) => {
+              let opts = item.options;
+              if (typeof opts === 'string') { try { opts = JSON.parse(opts); } catch { opts = []; } }
+              return (
+                <View key={item.id || i} style={styles.orderItem}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.orderItemName}>{item.name_ar || item.name} × {item.quantity}</Text>
+                    {Array.isArray(opts) && opts.length > 0 && <Text style={styles.orderItemOpts}>{opts.map(o => o.name).join(' • ')}</Text>}
+                  </View>
+                  <Text style={styles.orderItemPrice}>{(parseFloat(item.subtotal) || parseFloat(item.price || 0) * (item.quantity || 1)).toFixed(2)}₪</Text>
+                </View>
+              );
+            })}
           </View>
         )}
 
-        {isDelivered && (
-          <TouchableOpacity style={styles.rateBtn} onPress={() => navigation.navigate('Rating', {
-            orderId: id,
-            restaurantName: order?.restaurant_name || order?.restaurant?.name_ar,
-            driverName: order?.driver_name,
-          })}>
-            <Text style={styles.rateBtnText}>⭐ قيّم تجربتك</Text>
+        {canCancel && (
+          <TouchableOpacity style={styles.cancelBtn} onPress={() => setCancelOpen(true)} accessibilityRole="button">
+            <Ionicons name="close-circle-outline" size={19} color={COLORS.red} />
+            <Text style={styles.cancelBtnTxt}>إلغاء الطلب</Text>
           </TouchableOpacity>
         )}
+
+        {isDelivered && (rated ? (
+          <View style={[styles.ratedBox, { backgroundColor: COLORS.successBg, borderColor: COLORS.successBorder }]}>
+            <Ionicons name="star" size={18} color={COLORS.star} />
+            <Text style={[styles.ratedTxt, { color: COLORS.successText }]}>شكراً على تقييمك{order.rating_restaurant ? ` (${order.rating_restaurant}/5)` : ''} 💛</Text>
+          </View>
+        ) : (
+          <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate('Rating', {
+            orderId: id,
+            restaurantName: personal ? 'طلب شخصي' : order.restaurant_name,
+            driverName: order.driver_name,
+            isPersonal: personal,
+          })}>
+            <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.rateBtn}>
+              <Text style={styles.rateBtnText}>⭐ قيّم تجربتك</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        ))}
+
+        <TouchableOpacity style={styles.helpRow} onPress={() => Linking.openURL(`tel:${SUPPORT_PHONE}`).catch(() => {})}>
+          <Text style={styles.helpTxt}>محتاج مساعدة؟ اتصل بالدعم</Text>
+          <Ionicons name="call-outline" size={15} color={COLORS.gray} />
+        </TouchableOpacity>
       </ScrollView>
+
+      {/* نافذة تأكيد الإلغاء */}
+      <Modal visible={cancelOpen} transparent animationType="fade" onRequestClose={() => setCancelOpen(false)} statusBarTranslucent>
+        <Pressable style={styles.modalOverlay} onPress={() => !cancelling && setCancelOpen(false)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <View style={styles.modalIcon}><Ionicons name="alert-circle" size={36} color={COLORS.red} /></View>
+            <Text style={styles.modalTitle}>إلغاء الطلب؟</Text>
+            <Text style={styles.modalSub}>متأكد بدك تلغي الطلب #{order.order_number || id}؟ ما بنقدر نرجّعه بعد الإلغاء.</Text>
+            <View style={styles.reasonsWrap}>
+              {CANCEL_REASONS.map(r => (
+                <TouchableOpacity key={r} onPress={() => setCancelReason(cancelReason === r ? '' : r)} style={[styles.reasonChip, cancelReason === r && styles.reasonChipOn]}>
+                  <Text style={[styles.reasonTxt, cancelReason === r && { color: '#FFF' }]}>{r}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput style={styles.reasonInput} placeholder="سبب آخر (اختياري)" placeholderTextColor={COLORS.faint}
+              value={CANCEL_REASONS.includes(cancelReason) ? '' : cancelReason} onChangeText={setCancelReason} textAlign="right" maxLength={150} />
+            <View style={styles.modalBtns}>
+              <TouchableOpacity style={[styles.modalBtn, { backgroundColor: COLORS.red }]} onPress={cancelOrder} disabled={cancelling}>
+                {cancelling ? <ActivityIndicator color="#FFF" /> : <Text style={styles.modalBtnTxt}>نعم، ألغِ الطلب</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalBtn, { backgroundColor: COLORS.inputBg }]} onPress={() => setCancelOpen(false)} disabled={cancelling}>
+                <Text style={[styles.modalBtnTxt, { color: COLORS.text }]}>تراجع</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
-const makeStyles = (COLORS) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg },
-  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, backgroundColor: COLORS.bg },
-  loadingText: { fontSize: 15, color: COLORS.gray, fontWeight: '600' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: COLORS.card, borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: COLORS.inputBg },
-  headerTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text },
-  mapWrap: { height: 280, position: 'relative' },
-  map: { flex: 1 },
-  liveBadge: { position: 'absolute', top: 10, left: 10, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: COLORS.red, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, zIndex: 10 },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#FFF' },
-  liveText: { color: '#FFF', fontWeight: '900', fontSize: 11, letterSpacing: 1 },
-  recenterBtn: { position: 'absolute', bottom: 10, right: 10, backgroundColor: COLORS.card, borderRadius: 10, padding: 8, elevation: 4, zIndex: 10 },
-  noMapStatus: { height: 130, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.tint },
-  bigEmoji: { fontSize: 64 },
-  statusCard: { backgroundColor: COLORS.card, borderRadius: 18, padding: 18, alignItems: 'center', borderWidth: 2, borderColor: '#FFE0CC', elevation: 2 },
-  statusTitle: { fontSize: 20, fontWeight: '900', color: COLORS.primary, marginBottom: 6 },
-  statusDesc: { fontSize: 13, color: COLORS.gray },
-  etaBox: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13, alignSelf: 'flex-start' },
-  etaText: { fontSize: 13, fontWeight: '800', color: '#FFF' },
-  card: { backgroundColor: COLORS.card, borderRadius: 18, padding: 16, elevation: 1 },
-  cardTitle: { fontSize: 14, fontWeight: '800', color: COLORS.text, marginBottom: 10 },
-  stepRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 10 },
-  stepCircle: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.border, justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
-  stepLine: { position: 'absolute', left: 13, top: 28, width: 2, height: 10, backgroundColor: COLORS.border },
-  stepLabel: { flex: 1, fontSize: 13, color: COLORS.gray, fontWeight: '600' },
-  activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.primary },
-  driverCard: { backgroundColor: COLORS.card, borderRadius: 18, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, elevation: 1 },
-  driverAvatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: COLORS.tint, alignItems: 'center', justifyContent: 'center' },
-  driverName: { fontSize: 15, fontWeight: '800', color: COLORS.text },
-  driverSub: { fontSize: 12, color: COLORS.gray, marginTop: 2 },
-  driverLive: { fontSize: 11, color: COLORS.green, fontWeight: '700', marginTop: 3 },
-  callBtn: { backgroundColor: COLORS.primary, borderRadius: 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', elevation: 3 },
-  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  infoLabel: { fontSize: 12, color: COLORS.gray, width: 85 },
-  infoVal: { flex: 1, fontSize: 13, fontWeight: '600', color: COLORS.text },
-  orderItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  orderItemName: { fontSize: 13, color: COLORS.text, flex: 1 },
-  orderItemPrice: { fontSize: 13, fontWeight: '700', color: COLORS.primary },
-  rateBtn: { backgroundColor: COLORS.primary, borderRadius: 16, padding: 16, alignItems: 'center', elevation: 3 },
-  rateBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
-});
+function InfoRow({ styles, icon, color, label, value, strong, last }) {
+  return (
+    <View style={[styles.infoRow, last && { borderBottomWidth: 0 }]}>
+      <Ionicons name={icon} size={16} color={color} />
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={[styles.infoVal, strong && styles.infoValStrong]} numberOfLines={2}>{value || '—'}</Text>
+    </View>
+  );
+}
 
+const makeStyles = (C) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
+  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, padding: 24 },
+  loadingText: { fontSize: 15, color: C.gray, fontWeight: '600', textAlign: 'center' },
+  retryBtn: { backgroundColor: C.primary, borderRadius: 14, paddingHorizontal: 24, paddingVertical: 12, marginTop: 6 },
+  retryTxt: { color: '#FFF', fontWeight: '800' },
+  mapWrap: { height: 260, position: 'relative', marginTop: -16, zIndex: -1 },
+  map: { flex: 1, backgroundColor: C.inputBg },
+  liveBadge: { position: 'absolute', top: 26, right: 12, flexDirection: 'row-reverse', alignItems: 'center', gap: 5, backgroundColor: C.red, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, zIndex: 10 },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#FFF' },
+  liveText: { color: '#FFF', fontWeight: '900', fontSize: 11 },
+  recenterBtn: { position: 'absolute', bottom: 12, right: 12, backgroundColor: C.card, borderRadius: 12, padding: 9, elevation: 4, zIndex: 10 },
+  noMapStatus: { height: 140, justifyContent: 'center', alignItems: 'center', backgroundColor: C.tint, marginTop: -16, paddingTop: 16, zIndex: -1 },
+  mapFailTxt: { fontSize: 12, color: C.gray, fontWeight: '600', marginTop: 4 },
+  bigEmoji: { fontSize: 60 },
+  statusCard: { backgroundColor: C.card, borderRadius: 20, padding: 18, alignItems: 'center', borderWidth: 2, borderColor: C.tintBorder, ...C.shadow.soft },
+  statusTitle: { fontSize: 20, fontWeight: '900', color: C.primary, marginBottom: 6, textAlign: 'center' },
+  statusDesc: { fontSize: 13, color: C.gray, textAlign: 'center', lineHeight: 20 },
+  etaBox: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, marginTop: 12, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13 },
+  etaText: { fontSize: 13, fontWeight: '800', color: '#FFF' },
+  payCard: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10, borderRadius: 16, padding: 14, borderWidth: 1 },
+  payTitle: { fontSize: 14, fontWeight: '900', color: C.text, textAlign: 'right' },
+  paySub: { fontSize: 12, color: C.sub, marginTop: 2, textAlign: 'right' },
+  payBtn: { backgroundColor: C.primary, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
+  payBtnTxt: { color: '#FFF', fontWeight: '900', fontSize: 13 },
+  card: { backgroundColor: C.card, borderRadius: 20, padding: 16, ...C.shadow.soft },
+  cardTitle: { fontSize: 14.5, fontWeight: '800', color: C.text, marginBottom: 10, textAlign: 'right' },
+  stepRow: { flexDirection: 'row-reverse', alignItems: 'flex-start', gap: 12 },
+  stepCircle: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.border, justifyContent: 'center', alignItems: 'center' },
+  stepLine: { width: 2, height: 16, backgroundColor: C.border, marginVertical: 2 },
+  stepLabel: { flex: 1, fontSize: 14, color: C.gray, fontWeight: '700', textAlign: 'right', paddingTop: 6 },
+  activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.primary, marginTop: 11 },
+  driverCard: { backgroundColor: C.card, borderRadius: 20, padding: 14, flexDirection: 'row-reverse', alignItems: 'center', gap: 12, ...C.shadow.soft },
+  driverAvatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center' },
+  driverName: { fontSize: 15, fontWeight: '800', color: C.text, textAlign: 'right' },
+  driverSub: { fontSize: 12, color: C.gray, marginTop: 2, textAlign: 'right' },
+  driverLive: { fontSize: 11.5, color: C.green, fontWeight: '700', marginTop: 3, textAlign: 'right' },
+  callBtn: { backgroundColor: C.green, borderRadius: 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  infoRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.line },
+  infoLabel: { fontSize: 12.5, color: C.gray, width: 70, textAlign: 'right' },
+  infoVal: { flex: 1, fontSize: 13.5, fontWeight: '700', color: C.text, textAlign: 'left' },
+  infoValStrong: { color: C.primary, fontWeight: '900', fontSize: 16 },
+  orderItem: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: C.line },
+  orderItemName: { fontSize: 13.5, color: C.text, fontWeight: '700', textAlign: 'right' },
+  orderItemOpts: { fontSize: 11.5, color: C.gray, marginTop: 2, textAlign: 'right' },
+  orderItemPrice: { fontSize: 13.5, fontWeight: '800', color: C.primary },
+  cancelBtn: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 16, paddingVertical: 14, borderWidth: 1.5, borderColor: C.dangerBorder, backgroundColor: C.dangerBg },
+  cancelBtnTxt: { color: C.red, fontWeight: '900', fontSize: 15 },
+  ratedBox: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 16, padding: 14, borderWidth: 1 },
+  ratedTxt: { fontWeight: '800', fontSize: 14 },
+  rateBtn: { borderRadius: 18, padding: 16, alignItems: 'center', ...C.shadow.float },
+  rateBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
+  helpRow: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8 },
+  helpTxt: { color: C.gray, fontSize: 13, fontWeight: '600' },
+  modalOverlay: { flex: 1, backgroundColor: C.overlay, justifyContent: 'center', padding: 22 },
+  modalCard: { backgroundColor: C.card, borderRadius: 26, padding: 22, alignItems: 'center', ...C.shadow.card },
+  modalIcon: { width: 70, height: 70, borderRadius: 35, backgroundColor: C.dangerBg, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  modalTitle: { fontSize: 20, fontWeight: '900', color: C.text },
+  modalSub: { fontSize: 13.5, color: C.sub, textAlign: 'center', marginTop: 6, lineHeight: 21 },
+  reasonsWrap: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 16 },
+  reasonChip: { borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8, backgroundColor: C.inputBg, borderWidth: 1, borderColor: C.border },
+  reasonChipOn: { backgroundColor: C.primary, borderColor: C.primary },
+  reasonTxt: { fontSize: 12.5, fontWeight: '700', color: C.text },
+  reasonInput: { alignSelf: 'stretch', marginTop: 12, borderWidth: 1.5, borderColor: C.border, borderRadius: 12, padding: 11, fontSize: 14, color: C.text, backgroundColor: C.inputBg },
+  modalBtns: { alignSelf: 'stretch', gap: 10, marginTop: 16 },
+  modalBtn: { borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
+  modalBtnTxt: { color: '#FFF', fontWeight: '900', fontSize: 15 },
+});

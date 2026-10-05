@@ -14,6 +14,7 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.flipper.ReactNativeFlipper
+import com.facebook.react.modules.i18nmanager.I18nUtil
 import com.facebook.soloader.SoLoader
 
 import expo.modules.ApplicationLifecycleDispatcher
@@ -44,6 +45,11 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // اتجاه تخطيط ثابت على كل الأجهزة: الواجهة تكتب اتجاه RTL صراحةً (row-reverse / textAlign right)
+    // فلا نسمح للنظام بقلب التخطيط حسب لغة الجهاز (يُطبَّق قبل تشغيل React — بدون إعادة تحميل).
+    val i18n = I18nUtil.getInstance()
+    i18n.allowRTL(applicationContext, false)
+    i18n.forceRTL(applicationContext, false)
     SoLoader.init(this, false)
     if (!BuildConfig.REACT_NATIVE_UNSTABLE_USE_RUNTIME_SCHEDULER_ALWAYS) {
       ReactFeatureFlags.unstable_useRuntimeSchedulerAlways = false

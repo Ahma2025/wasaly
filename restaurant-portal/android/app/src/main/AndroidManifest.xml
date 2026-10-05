@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:allowBackup="true"
@@ -39,11 +40,24 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- إشعارات الطلبات الجديدة (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- طباعة الطلبات: بلوتوث / USB / شبكة -->
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <!-- ملاحظة: BLUETOOTH بدون maxSdkVersion عن قصد — إضافة الطباعة تفحص hasPermission(BLUETOOTH)
+         قبل كل عملية، ولو حدّدناه بـ 30 تفشل الطباعة على Android 12+ (الإذن عادي ويُمنح تلقائيًا) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" tools:node="replace" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" tools:targetApi="s" />
+
+    <!-- «موقعي الآن» في الإعدادات -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+
+    <!-- الإضافة تعلن usb.host بدون required=false → نستبدلها حتى لا يُستبعد الجهاز من المتجر -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" tools:node="replace" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 </manifest>

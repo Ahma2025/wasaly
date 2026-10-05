@@ -2,7 +2,7 @@
   "expo": {
     "name": "وصلّي - مندوب",
     "slug": "wasaly-driver",
-    "version": "1.0.0",
+    "version": "2.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -48,8 +48,8 @@
         "isAndroidForegroundServiceEnabled": true
       }],
       ["expo-notifications", {
-        "icon": "./assets/icon.png",
-        "color": "#FF6B35",
+        "icon": "./assets/notification-icon.png",
+        "color": "#FF6B00",
         "androidMode": "default",
         "androidCollapsedTitle": "وصلّي - مندوب"
       }]
