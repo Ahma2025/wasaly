@@ -3,10 +3,11 @@ import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import toast from 'react-hot-toast';
 
-const roleLabel = { customer: 'زبون', restaurant: 'مطعم', driver: 'مندوب', admin: 'مدير' };
+const roleLabel = { customer: 'زبون', restaurant: 'مطعم', restaurant_owner: 'صاحب مطعم', driver: 'سائق', admin: 'مدير' };
 const roleColor = {
   customer: 'bg-blue-100 text-blue-700',
   restaurant: 'bg-green-100 text-green-700',
+  restaurant_owner: 'bg-green-100 text-green-700',
   driver: 'bg-orange-100 text-orange-700',
   admin: 'bg-purple-100 text-purple-700'
 };
