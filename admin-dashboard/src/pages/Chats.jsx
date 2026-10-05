@@ -152,7 +152,11 @@ function Thread({ convo, onClose, inline }) {
         <div className="max-w-3xl mx-auto space-y-2">
           {loading && messages.length === 0 ? (
             <div className="space-y-3 py-4">{[60, 40, 70].map((w, i) => <Sk key={i} w={`${w}%`} h={44} r={18} className={i % 2 ? 'mr-auto' : ''} />)}</div>
-          ) : messages.length === 0 ? <p className="text-center text-xs text-ink-3 py-10 font-bold">لا توجد رسائل بعد — ابدأ المحادثة</p>
+          ) : messages.length === 0 ? <div className="text-center py-12 animate-fade-up">
+              <div className="w-14 h-14 mx-auto mb-3 rounded-[18px] bg-white ring-1 ring-orange-100 flex items-center justify-center text-2xl text-brand-500 shadow-soft"><FiMessageCircle /></div>
+              <p className="text-sm font-black text-ink">لا توجد رسائل بعد</p>
+              <p className="text-[12px] text-ink-3 font-medium mt-1">اكتب رسالتك بالأسفل لبدء المحادثة</p>
+            </div>
             : messages.map(m => {
               const mine = m.sender === 'admin';
               return (

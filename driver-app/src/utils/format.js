@@ -129,3 +129,15 @@ export function haversineKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 export const km = (v) => (v == null ? null : `${num(v).toFixed(1)} كم`);
+
+// أرقام عربية/فارسية → لاتينية
+export const toLatinDigits = (t) => String(t ?? '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
+// تنسيق رقم الهاتف للعرض/الإدخال: 05X XXX XXXX (الأرقام الدولية التي تبدأ بـ + تبقى بلا تقسيم)
+export function formatPhone(raw) {
+  const t = toLatinDigits(raw).trim();
+  if (t.startsWith('+')) return `+${t.replace(/\D/g, '').slice(0, 15)}`;
+  const all = t.replace(/\D/g, '');
+  if (!all.startsWith('0') && all.length > 10) return all.slice(0, 15); // رقم دولي بلا + (مثل 970...)
+  const d = all.slice(0, 10);
+  return [d.slice(0, 3), d.slice(3, 6), d.slice(6, 10)].filter(Boolean).join(' ');
+}

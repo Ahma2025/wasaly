@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../utils/api';
 import GradientHeader from '../components/GradientHeader';
-import { FadeIn, Skeleton, Press, LoadingDots, EmptyState } from '../components/Anim';
+import { FadeIn, Skeleton, Press, LoadingDots, EmptyState, haptic } from '../components/Anim';
 import { COLORS, GRADIENTS, SHADOW, RTL, KAV_BEHAVIOR, RADIUS } from '../theme';
 import { fmtTime, fmtDate } from '../utils/format';
 
@@ -64,9 +64,11 @@ export default function SupportChatScreen() {
     try {
       await api.post('/support/chat', { message: msg });
       setText(''); // نمسح النص فقط بعد نجاح الإرسال
+      haptic.success();
       forceScroll.current = true;
       await load();
     } catch (e) {
+      haptic.warn();
       Alert.alert('لم تُرسل الرسالة', e?.message || 'تحقق من الاتصال وحاول مرة أخرى');
     } finally { setSending(false); }
   };
@@ -142,7 +144,7 @@ export default function SupportChatScreen() {
         <View style={[styles.inputWrap, focused && styles.inputWrapFocus]}>
           <TextInput style={styles.input} placeholder="اكتب رسالتك..." placeholderTextColor={COLORS.faint}
             value={text} onChangeText={setText} multiline textAlign="right" maxLength={1000}
-            onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} accessibilityLabel="نص الرسالة" />
+            selectionColor={COLORS.primary} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} accessibilityLabel="نص الرسالة" />
         </View>
         <Press style={[styles.sendBtn, !canSend && { opacity: 0.45 }]} onPress={send} disabled={!canSend} hapticStyle="light" accessibilityLabel="إرسال">
           <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.sendGrad}>

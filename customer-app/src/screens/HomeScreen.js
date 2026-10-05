@@ -509,7 +509,7 @@ export default function HomeScreen() {
           },
         })}
         contentContainerStyle={{ paddingBottom: tabInset + 30 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFF" colors={[C.primary]} progressViewOffset={headerTop} />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFF" colors={[C.primary]} progressViewOffset={headerTop} progressBackgroundColor={C.card} />}>
 
         {Hero}
 

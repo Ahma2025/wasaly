@@ -69,7 +69,7 @@ export function GradientButton({ title, onPress, icon, style, textStyle, colors,
   }, [!!success]);
   const labelOpacity = morph.interpolate({ inputRange: [0, 0.5], outputRange: [1, 0], extrapolate: 'clamp' });
   const checkScale = morph.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] });
-  const inactive = disabled || loading;
+  const inactive = disabled || loading || success; // لا ضغطات إضافية أثناء/بعد النجاح
   return (
     <Press onPress={inactive ? undefined : onPress} disabled={inactive} haptic={!inactive}
       accessibilityRole="button" accessibilityLabel={accessibilityLabel || title}
@@ -82,7 +82,7 @@ export function GradientButton({ title, onPress, icon, style, textStyle, colors,
           {icon}
           <Animated.Text style={[{ color: '#FFF', fontWeight: '900', fontSize: 16 }, textStyle]} numberOfLines={1}>{title}</Animated.Text>
         </Animated.View>
-        {loading && <View style={{ position: 'absolute' }}><ActivityIndicator color="#FFF" /></View>}
+        {loading && !success && <View style={{ position: 'absolute' }}><ActivityIndicator color="#FFF" /></View>}
         <Animated.View pointerEvents="none" style={{ position: 'absolute', opacity: morph, transform: [{ scale: checkScale }] }}>
           <Ionicons name="checkmark-circle" size={28} color="#FFF" />
         </Animated.View>

@@ -67,7 +67,7 @@ export default function FavoritesScreen() {
         />
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchFavs(); }} tintColor={COLORS.primary} />}>
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchFavs(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} progressBackgroundColor={COLORS.card} />}>
           {favs.map((r, i) => (
             <FadeIn key={r.id} index={i} from={16}>
             <Press style={styles.card} scaleTo={0.97} haptic={false} onPress={() => navigation.navigate('Restaurant', { restaurantId: r.id })} accessibilityRole="button" accessibilityLabel={r.name_ar}>

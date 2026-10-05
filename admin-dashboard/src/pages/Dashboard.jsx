@@ -164,7 +164,11 @@ export default function Dashboard() {
           <SectionHeader title="الطلبات حسب الحالة" hint="آخر 30 يوم"
             action={statusTotal > 0 && <span className="text-[11px] font-extrabold text-ink-3 bg-surface-sunken rounded-full px-2.5 py-1 num">{statusTotal}</span>} />
           {statusRows.length === 0 ? (
-            <div className="text-center py-10 text-ink-3"><FiActivity className="mx-auto text-3xl mb-2 text-ink-4" /><p className="text-sm font-bold">لا توجد طلبات في آخر 30 يوم</p></div>
+            <div className="text-center py-10 animate-fade-up">
+              <div className="w-14 h-14 mx-auto mb-3 rounded-[18px] bg-gradient-to-br from-[#FFF3EA] to-white ring-1 ring-orange-100 flex items-center justify-center text-2xl text-brand-500 shadow-soft"><FiActivity /></div>
+              <p className="text-sm font-black text-ink">لا توجد طلبات في آخر 30 يوم</p>
+              <p className="text-[12px] text-ink-3 font-medium mt-1">سيظهر توزيع الحالات هنا مع أول طلب</p>
+            </div>
           ) : (
             <>
               {/* شريط مكدّس */}

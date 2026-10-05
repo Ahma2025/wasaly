@@ -8,3 +8,5 @@ export const DEFAULT_OFFER_SECONDS = 45;
 // أقل فاصل بين رفعات الموقع أثناء التوصيل (سوكِت + REST)
 export const LOCATION_UPLOAD_MS = 5000;
 export const ADMIN_PHONE = '0599039704';
+// واتساب الإدارة (صيغة دولية بدون + أو أصفار) — مشتق من رقم الدعم
+export const ADMIN_WHATSAPP = `970${ADMIN_PHONE.replace(/^0/, '')}`;

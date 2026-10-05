@@ -32,10 +32,23 @@
 html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; -webkit-tap-highlight-color: transparent; }
 body { direction: rtl; background: var(--bg); color: var(--ink); overscroll-behavior-y: none; font-size: 15px; font-weight: 500; }
 .tnum { font-variant-numeric: tabular-nums; }
+::selection { background: #FFE6D1; color: #14142B; }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
+img { -webkit-user-drag: none; }
+/* إخفاء أسهم حقول الأرقام (أنظف داخل حقول السعر) */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+/* خلفية الملء التلقائي بلون الحقل بدل الأصفر/الأزرق الافتراضي */
+input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #14142B; -webkit-box-shadow: 0 0 0 1000px #fff inset; caret-color: #14142B;
+  transition: background-color 9999s ease-out 0s;
+}
 
 /* انتقالات محددة (بدل transition: all) */
 button, a, input, select, textarea, [role="button"] {
-  transition: color .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .22s ease, opacity .18s ease, transform .18s var(--ease-out);
+  transition: color .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .22s ease, opacity .18s ease, filter .18s ease, transform .18s var(--ease-out);
 }
 button:not(:disabled):active:not(.no-press), a.pressable:active { transform: scale(.97); }
 button:disabled { cursor: not-allowed; }
@@ -137,13 +150,15 @@ button:disabled { cursor: not-allowed; }
 /* ═══ مكوّنات ═══ */
 @layer components {
   .card { @apply bg-white rounded-[20px] shadow-soft border border-surface-line/70; }
-  .input { @apply w-full h-12 border-[1.5px] border-surface-line bg-white rounded-[14px] px-3.5 text-[15px] font-medium text-ink placeholder:text-ink-3/80 focus:outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100; }
+  .input { @apply w-full h-12 border-[1.5px] border-surface-line bg-white rounded-[14px] px-3.5 text-[15px] font-medium text-ink placeholder:text-ink-3/80 hover:border-[#DCDFE8] focus:outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100 disabled:bg-surface disabled:text-ink-3 disabled:cursor-not-allowed; }
   textarea.input { @apply h-auto py-3 leading-relaxed; }
   select.input { @apply pe-8; }
   .label { @apply text-[12.5px] font-bold text-ink-2 mb-1.5 block; }
   .btn { @apply inline-flex items-center justify-center gap-2 rounded-[14px] font-bold text-sm px-4 h-11 select-none disabled:opacity-55 whitespace-nowrap; }
   .btn-primary { @apply btn text-white; background: linear-gradient(135deg, #FF8A00 0%, #FF6B00 45%, #FF5E3A 100%); box-shadow: 0 10px 24px rgba(255,107,0,.28), 0 2px 6px rgba(255,107,0,.18); }
-  .btn-primary:not(:disabled):hover { box-shadow: 0 14px 32px rgba(255,107,0,.36), 0 3px 8px rgba(255,107,0,.2); }
+  .btn-primary:not(:disabled):hover { box-shadow: 0 14px 32px rgba(255,107,0,.36), 0 3px 8px rgba(255,107,0,.2); filter: saturate(1.08) brightness(1.03); }
+  .btn-primary:not(:disabled):active { box-shadow: 0 6px 14px rgba(255,107,0,.26); }
+  .btn-ghost:not(:disabled):active, .btn-icon:not(:disabled):active { background-color: #FFF3EA; }
   .btn-ghost { @apply btn bg-white text-ink-2 border-[1.5px] border-surface-line hover:border-brand-300 hover:text-brand-600; }
   .btn-soft { @apply btn bg-brand-50 text-brand-700 hover:bg-brand-100; }
   .btn-dark { @apply btn bg-ink text-white hover:bg-ink-2; }

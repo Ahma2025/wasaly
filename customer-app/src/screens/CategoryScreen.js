@@ -74,7 +74,7 @@ export default function CategoryScreen({ route, navigation }) {
           data={sorted}
           keyExtractor={r => String(r.id)}
           contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} progressBackgroundColor={COLORS.card} />}
           renderItem={({ item, index }) => (
             <FadeIn delay={stagger(index)} from={20}>
               <RestaurantCard restaurant={item} onPress={() => navigation.navigate('Restaurant', { restaurantId: item.id })} />

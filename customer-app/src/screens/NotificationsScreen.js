@@ -110,7 +110,7 @@ export default function NotificationsScreen({ navigation }) {
           keyExtractor={(i, idx) => String(i.id ?? idx)}
           renderItem={renderItem}
           contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: insets.bottom + 24, flexGrow: 1 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} progressBackgroundColor={COLORS.card} />}
           ListEmptyComponent={<EmptyState emoji="🔔" title="لا إشعارات جديدة" subtitle="رح نبلغك هون بكل تحديث على طلباتك" />}
         />
       )}

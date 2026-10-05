@@ -149,7 +149,7 @@ export default function MarketScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: tabInset + 24 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load().finally(() => setRefreshing(false)); }} tintColor={C.primary} colors={[C.primary]} />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load().finally(() => setRefreshing(false)); }} tintColor={C.primary} colors={[C.primary]} progressBackgroundColor={C.card} />}>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.typesRow} accessibilityRole="tablist">
           {TYPES.map((t, i) => (

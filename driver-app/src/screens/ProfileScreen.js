@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTabBarOffset } from '../components/FloatingTabBar';
 import { COLORS, GRADIENTS, SHADOW, RTL, RADIUS } from '../theme';
 import { PopIn, FadeIn, Skeleton, Press, CountUp, LoadingDots, haptic } from '../components/Anim';
-import { money, num } from '../utils/format';
+import { money, num, formatPhone } from '../utils/format';
 
 const TIERS = {
   bronze:   { label: 'برونزي', grad: ['#E8A15C', '#B5651D'] },
@@ -42,6 +42,7 @@ export default function ProfileScreen({ navigation }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [nameErr, setNameErr] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -60,12 +61,14 @@ export default function ProfileScreen({ navigation }) {
 
   const onRefresh = async () => { setRefreshing(true); await load(false); setRefreshing(false); };
 
-  const startEdit = () => { setName(profile?.name || user?.name || ''); setEditing(true); };
-  const cancelEdit = () => { setEditing(false); setName(''); };
+  const startEdit = () => { setName(profile?.name || user?.name || ''); setNameErr(''); setEditing(true); };
+  const cancelEdit = () => { setEditing(false); setName(''); setNameErr(''); };
 
   const save = async () => {
+    if (saving) return;
     const n = name.trim();
-    if (n.length < 2) return Alert.alert('الاسم قصير', 'أدخل اسماً من حرفين على الأقل');
+    if (n.length < 2) { haptic.warn(); setNameErr('أدخل اسماً من حرفين على الأقل'); return; }
+    setNameErr('');
     setSaving(true);
     try {
       await api.put('/users/profile', { name: n });
@@ -76,6 +79,7 @@ export default function ProfileScreen({ navigation }) {
       haptic.success();
       setEditing(false);
     } catch (e) {
+      haptic.warn();
       Alert.alert('تعذّر الحفظ', e?.message || 'حاول مرة أخرى');
     } finally { setSaving(false); }
   };
@@ -111,7 +115,7 @@ export default function ProfileScreen({ navigation }) {
           {!!(profile?.phone || user?.phone) && (
             <View style={[RTL.row, { gap: 5, marginTop: 4 }]}>
               <Ionicons name="call-outline" size={13} color="rgba(255,255,255,0.9)" />
-              <Text style={styles.phone}>{profile?.phone || user?.phone}</Text>
+              <Text style={styles.phone}>{formatPhone(profile?.phone || user?.phone)}</Text>
             </View>
           )}
           {tier && (
@@ -170,8 +174,20 @@ export default function ProfileScreen({ navigation }) {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.fieldLabel, RTL.text]}>الاسم</Text>
                 {editing ? (
-                  <TextInput style={styles.fieldInput} value={name} onChangeText={setName} textAlign="right" autoFocus maxLength={60} returnKeyType="done" onSubmitEditing={save} accessibilityLabel="الاسم" />
-                ) : <Text style={[styles.fieldValue, RTL.text]}>{displayName || '-'}</Text>}
+                  <>
+                    <TextInput style={[styles.fieldInput, !!nameErr && styles.fieldInputErr]} value={name}
+                      onChangeText={(t) => { setName(t); if (nameErr) setNameErr(''); }}
+                      textAlign="right" autoFocus maxLength={60} returnKeyType="done" onSubmitEditing={save}
+                      autoComplete="name" textContentType="name" selectionColor={COLORS.primary} editable={!saving}
+                      accessibilityLabel="الاسم" accessibilityHint={nameErr || undefined} />
+                    {!!nameErr && (
+                      <View style={[RTL.row, { gap: 4, marginTop: 6 }]} accessibilityLiveRegion="polite">
+                        <Ionicons name="alert-circle" size={14} color={COLORS.red} />
+                        <Text style={[styles.fieldErr, RTL.text]}>{nameErr}</Text>
+                      </View>
+                    )}
+                  </>
+                ) :<Text style={[styles.fieldValue, RTL.text]}>{displayName || '-'}</Text>}
               </View>
             </View>
             <View style={styles.field}>
@@ -241,6 +257,8 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: 12, color: COLORS.gray, marginBottom: 3, fontWeight: '500' },
   fieldValue: { fontSize: 15, fontWeight: '700', color: COLORS.text },
   fieldInput: { fontSize: 15.5, color: COLORS.text, borderWidth: 1.5, borderColor: COLORS.primary, borderRadius: RADIUS.sm - 2, paddingHorizontal: 12, height: 46, backgroundColor: COLORS.card },
+  fieldInputErr: { borderColor: COLORS.red, backgroundColor: COLORS.redSoft },
+  fieldErr: { color: COLORS.red, fontSize: 12.5, fontWeight: '700', flexShrink: 1 },
   hintRow: { gap: 5, marginTop: 10 },
   hint: { flex: 1, fontSize: 12, color: COLORS.gray, fontWeight: '500' },
   linkBtn: { flexDirection: 'row-reverse', alignItems: 'center', gap: 12, backgroundColor: COLORS.card, borderRadius: RADIUS.md, padding: 14, marginBottom: 10, minHeight: 68, ...SHADOW.soft },

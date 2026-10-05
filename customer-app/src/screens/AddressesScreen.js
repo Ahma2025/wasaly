@@ -81,7 +81,7 @@ export default function AddressesScreen({ navigation }) {
           ctaLabel="إضافة عنوان" onCta={() => navigation.navigate('AddAddress', { makeDefault: true })} />
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 110 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={C.primary} />}>
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={C.primary} colors={[C.primary]} progressBackgroundColor={C.card} />}>
           {list.map((a, i) => {
             const lbl = addressLabel(a);
             return (

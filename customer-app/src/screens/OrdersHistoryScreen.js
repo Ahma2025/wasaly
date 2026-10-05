@@ -112,7 +112,7 @@ export default function OrdersHistoryScreen() {
         <ScrollView
           contentContainerStyle={{ paddingBottom: tabInset + 24 }}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchOrders(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchOrders(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} progressBackgroundColor={COLORS.card} />}
         >
           <View style={styles.section}>
             <View style={styles.secHead}>

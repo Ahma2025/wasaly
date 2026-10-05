@@ -11,3 +11,5 @@ export const ROUTER_BASENAME = APP_BASE === '/' ? '/' : APP_BASE.replace(/\/$/, 
 export const LOGO_URL = APP_BASE + 'logo.png';
 
 export const SUPPORT_PHONE = '0599039704';
+// رابط واتساب لنفس رقم الدعم (صيغة دولية بدون الصفر الأول — مفتاح فلسطين 970)
+export const SUPPORT_WHATSAPP = 'https://wa.me/970' + SUPPORT_PHONE.replace(/^0/, '');

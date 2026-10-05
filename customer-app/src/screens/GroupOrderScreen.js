@@ -210,7 +210,7 @@ export default function GroupOrderScreen() {
       <GradientHeader title={group.restaurant_name || 'طلب جماعي'} subtitle="طلب جماعي" colors={COLORS.gradients.violet} />
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 120 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchGroup(code, { silent: true }); }} tintColor={COLORS.primary} />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchGroup(code, { silent: true }); }} tintColor={COLORS.primary} colors={[COLORS.primary]} progressBackgroundColor={COLORS.card} />}>
         <PopIn from={0.94} style={styles.codeCard}>
           <View style={styles.codeLblRow}><Ionicons name="key" size={14} color={COLORS.primary} /><Text style={styles.codeCardLbl}>كود المجموعة</Text></View>
           <View style={styles.codeBox}><Text style={styles.codeBig} selectable>{group.code}</Text></View>
