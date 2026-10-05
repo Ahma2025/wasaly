@@ -63,17 +63,18 @@ export const CartProvider = ({ children }) => {
     })();
   }, [items, hydrated, restaurantName]);
 
-  const addItem = useCallback((item, restaurant) => {
+  const addItem = useCallback((item, restaurant, qty = 1) => {
     if (restaurantId && restaurantId !== restaurant.id) {
       return { conflict: true, restaurant: restaurantName };
     }
+    const q = Math.max(1, parseInt(qty) || 1);
     setRestaurantId(restaurant.id);
     if (restaurant.name_ar) setRestaurantName(restaurant.name_ar);
     setItems(prev => {
       const key = item.id + JSON.stringify(item.addons || item.selectedOptions || []);
       const existing = prev.find(i => i._key === key);
-      if (existing) return prev.map(i => i._key === key ? { ...i, quantity: i.quantity + 1 } : i);
-      return [...prev, { ...item, _key: key, quantity: 1 }];
+      if (existing) return prev.map(i => i._key === key ? { ...i, quantity: i.quantity + q } : i);
+      return [...prev, { ...item, _key: key, quantity: q }];
     });
     return { success: true };
   }, [restaurantId, restaurantName]);
@@ -102,10 +103,10 @@ export const CartProvider = ({ children }) => {
     })));
   };
 
-  const clearAndAdd = (item, restaurant) => {
+  const clearAndAdd = (item, restaurant, qty = 1) => {
     setRestaurantId(restaurant.id);
     setRestaurantName(restaurant.name_ar);
-    setItems([{ ...item, _key: item.id + JSON.stringify(item.addons || []), quantity: 1 }]);
+    setItems([{ ...item, _key: item.id + JSON.stringify(item.addons || []), quantity: Math.max(1, parseInt(qty) || 1) }]);
   };
 
   // تحديث ملاحظة صنف معيّن

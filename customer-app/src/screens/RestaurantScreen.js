@@ -31,6 +31,7 @@ export default function RestaurantScreen() {
   const [loading, setLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState(null);
   const [selectedAddons, setSelectedAddons] = useState({});
+  const [qty, setQty] = useState(1);
   const [dietFilter, setDietFilter] = useState('all');
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -65,6 +66,7 @@ export default function RestaurantScreen() {
       }));
       setRestaurant(r);
       setMenu(menu);
+      if (typeof r.is_favorite !== 'undefined') setIsFavorite(!!r.is_favorite);
       writeCache('rest_' + id, { restaurant: r, menu });
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -75,8 +77,11 @@ export default function RestaurantScreen() {
       Alert.alert('المطعم مغلق', 'المطعم مغلق حالياً ولا يستقبل طلبات. جرّب لاحقاً 🕐');
       return;
     }
-    setSelectedItem(item); setSelectedAddons({});
+    setSelectedItem(item); setSelectedAddons({}); setQty(1);
   };
+
+  // سعر الصنف الأساسي (يراعي سعر العرض) — موحّد مع حساب السلة
+  const itemBasePrice = (it) => parseFloat(it?.discount_price || it?.price || 0);
 
   const toggleAddon = (groupName, addon, multiSelect) => {
     setSelectedAddons(prev => {
@@ -105,6 +110,14 @@ export default function RestaurantScreen() {
 
   const confirmAddItem = async () => {
     if (!selectedItem) return;
+    // 🔒 إجبار اختيار المجموعات المطلوبة قبل الإضافة (مثل كل تطبيقات التوصيل)
+    const missing = (selectedItem.addon_groups || []).find(
+      g => g.required && !(selectedAddons[g.name] && selectedAddons[g.name].length > 0)
+    );
+    if (missing) {
+      Alert.alert('اختيار مطلوب', `الرجاء اختيار "${missing.name}" قبل الإضافة`);
+      return;
+    }
     const addonsFlat = Object.entries(selectedAddons).flatMap(([group, items]) => items.map(a => ({ group, ...a })));
     // وضع المجموعة: نضيف الصنف للمجموعة بدل السلّة المحلية
     if (groupId) {
@@ -114,7 +127,7 @@ export default function RestaurantScreen() {
           name: selectedItem.name_ar,
           image: selectedItem.image,
           price: parseFloat(selectedItem.discount_price || selectedItem.price || 0),
-          quantity: 1,
+          quantity: qty,
           options: addonsFlat,
         });
         setSelectedItem(null);
@@ -123,11 +136,11 @@ export default function RestaurantScreen() {
     }
     // نخزّن السعر الأساسي فقط؛ الإضافات تُحسب مرة واحدة في CartContext/CartScreen (تجنّب الحساب المزدوج)
     const itemWithAddons = { ...selectedItem, addons: addonsFlat };
-    const result = addItem(itemWithAddons, restaurant);
+    const result = addItem(itemWithAddons, restaurant, qty);
     if (result?.conflict) {
       Alert.alert('مطعم مختلف', `سلتك من ${result.restaurant}. هل تبدأ من جديد؟`, [
         { text: 'إلغاء', style: 'cancel' },
-        { text: 'نعم', onPress: () => { clearAndAdd(itemWithAddons, restaurant); setSelectedItem(null); } }
+        { text: 'نعم', onPress: () => { clearAndAdd(itemWithAddons, restaurant, qty); setSelectedItem(null); } }
       ]);
     } else {
       setSelectedItem(null);
@@ -315,7 +328,12 @@ export default function RestaurantScreen() {
             <View style={styles.sheetTitleBlock}>
               <View style={styles.sheetTitleRow}>
                 <Text style={styles.sheetItemName}>{selectedItem?.name_ar}</Text>
-                <Text style={styles.sheetItemPrice}>{parseFloat(selectedItem?.price || 0).toFixed(2)}₪</Text>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={styles.sheetItemPrice}>{itemBasePrice(selectedItem).toFixed(2)}₪</Text>
+                  {selectedItem?.discount_price && parseFloat(selectedItem.discount_price) < parseFloat(selectedItem.price) ? (
+                    <Text style={styles.sheetItemPriceOld}>{parseFloat(selectedItem.price).toFixed(2)}₪</Text>
+                  ) : null}
+                </View>
               </View>
               {selectedItem?.description_ar ? <Text style={styles.sheetItemDesc}>{selectedItem.description_ar}</Text> : null}
             </View>
@@ -349,10 +367,19 @@ export default function RestaurantScreen() {
           </ScrollView>
 
           <View style={styles.sheetFooter}>
-            <PressableScale style={styles.addBtn} onPress={confirmAddItem}>
+            <View style={styles.qtyRow}>
+              <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty(q => Math.max(1, q - 1))} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="remove" size={22} color={qty <= 1 ? COLORS.faint : COLORS.primary} />
+              </TouchableOpacity>
+              <Text style={styles.qtyValue}>{qty}</Text>
+              <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty(q => Math.min(50, q + 1))} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="add" size={22} color={COLORS.primary} />
+              </TouchableOpacity>
+            </View>
+            <PressableScale style={[styles.addBtn, { flex: 1 }]} onPress={confirmAddItem}>
               <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.addBtnGrad}>
                 <Text style={styles.addBtnText}>إضافة للسلة</Text>
-                <Text style={styles.addBtnPrice}>{(parseFloat(selectedItem?.price || 0) + getAddonPrice()).toFixed(2)}₪</Text>
+                <Text style={styles.addBtnPrice}>{((itemBasePrice(selectedItem) + getAddonPrice()) * qty).toFixed(2)}₪</Text>
               </LinearGradient>
             </PressableScale>
           </View>
@@ -417,6 +444,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
   sheetItemName: { fontSize: 19, fontWeight: '900', color: COLORS.text, flex: 1, textAlign: 'right' },
   sheetItemDesc: { fontSize: 13.5, color: COLORS.gray, marginTop: 6, lineHeight: 20, textAlign: 'right' },
   sheetItemPrice: { fontSize: 18, fontWeight: '900', color: COLORS.primary },
+  sheetItemPriceOld: { fontSize: 13, color: COLORS.faint, textDecorationLine: 'line-through', marginTop: 1 },
   addonGroup: { paddingHorizontal: 16, paddingTop: 16 },
   addonGroupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   addonGroupTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text },
@@ -427,7 +455,10 @@ const makeStyles = (COLORS) => StyleSheet.create({
   addonCheckSelected: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   addonName: { flex: 1, fontSize: 14, color: COLORS.text, fontWeight: '500' },
   addonPrice: { fontSize: 13, color: COLORS.primary, fontWeight: '700' },
-  sheetFooter: { padding: 16, borderTopWidth: 1, borderTopColor: COLORS.line },
+  sheetFooter: { padding: 16, borderTopWidth: 1, borderTopColor: COLORS.line, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  qtyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.inputBg, borderRadius: 16, borderWidth: 1.5, borderColor: COLORS.border, paddingHorizontal: 6 },
+  qtyBtn: { width: 38, height: 44, alignItems: 'center', justifyContent: 'center' },
+  qtyValue: { minWidth: 26, textAlign: 'center', fontSize: 17, fontWeight: '900', color: COLORS.text, fontVariant: ['tabular-nums'] },
   addBtn: { borderRadius: 18, overflow: 'hidden', elevation: 8, shadowColor: COLORS.primary, shadowOpacity: 0.4, shadowRadius: 14, shadowOffset: { width: 0, height: 8 } },
   addBtnGrad: { padding: 16, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   addBtnText: { color: '#FFF', fontSize: 16, fontWeight: '800' },
