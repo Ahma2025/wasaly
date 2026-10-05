@@ -10,7 +10,7 @@ import { useTheme } from '../context/ThemeContext';
 import GradientHeader from '../components/GradientHeader';
 import EmptyState from '../components/EmptyState';
 import { CardRowSkeleton } from '../components/Skeleton';
-import { FadeIn } from '../components/Anim';
+import { FadeIn, GradientButton } from '../components/Anim';
 
 export const addressLabel = (a) => a?.label || (a?.title && a.title !== a.address ? a.title : '') || 'عنوان';
 const labelIcon = (l) => (String(l).includes('عمل') ? 'briefcase' : String(l).includes('منزل') ? 'home' : 'location');
@@ -75,7 +75,7 @@ export default function AddressesScreen({ navigation }) {
         right={<TouchableOpacity onPress={() => navigation.navigate('AddAddress')} accessibilityLabel="إضافة عنوان"><Ionicons name="add" size={24} color="#FFF" /></TouchableOpacity>} />
 
       {loading ? (
-        <View style={{ padding: 8 }}>{[0, 1, 2].map(i => <CardRowSkeleton key={i} />)}</View>
+        <View style={{ padding: 16 }}>{[0, 1, 2].map(i => <CardRowSkeleton key={i} />)}</View>
       ) : list.length === 0 ? (
         <EmptyState emoji="📍" title="ما في عناوين محفوظة" subtitle="أضف عنوان البيت أو الشغل حتى نوصلك أسرع وبسعر توصيل دقيق"
           ctaLabel="إضافة عنوان" onCta={() => navigation.navigate('AddAddress', { makeDefault: true })} />
@@ -85,12 +85,12 @@ export default function AddressesScreen({ navigation }) {
           {list.map((a, i) => {
             const lbl = addressLabel(a);
             return (
-              <FadeIn key={a.id} delay={Math.min(i, 6) * 50}>
+              <FadeIn key={a.id} index={i} from={18}>
                 <View style={[styles.card, a.is_default && { borderColor: C.primary }]}>
                   <View style={styles.row}>
-                    <View style={[styles.icon, { backgroundColor: a.is_default ? C.primary : C.tint }]}>
+                    <LinearGradient colors={a.is_default ? C.gradients.sunset : [C.tint, C.tint]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.icon}>
                       <Ionicons name={labelIcon(lbl)} size={20} color={a.is_default ? '#FFF' : C.primary} />
-                    </View>
+                    </LinearGradient>
                     <View style={{ flex: 1 }}>
                       <View style={styles.titleRow}>
                         <Text style={styles.title}>{lbl}</Text>
@@ -126,12 +126,9 @@ export default function AddressesScreen({ navigation }) {
       )}
 
       {list.length > 0 && (
-        <TouchableOpacity activeOpacity={0.9} style={[styles.fabWrap, { bottom: insets.bottom + 20 }]} onPress={() => navigation.navigate('AddAddress')}>
-          <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.fab}>
-            <Ionicons name="add-circle" size={20} color="#FFF" />
-            <Text style={styles.fabTxt}>إضافة عنوان جديد</Text>
-          </LinearGradient>
-        </TouchableOpacity>
+        <View style={[styles.fabWrap, { bottom: insets.bottom + 20 }]}>
+          <GradientButton title="إضافة عنوان جديد" icon={<Ionicons name="add-circle" size={20} color="#FFF" />} onPress={() => navigation.navigate('AddAddress')} />
+        </View>
       )}
     </View>
   );
@@ -139,9 +136,9 @@ export default function AddressesScreen({ navigation }) {
 
 const makeStyles = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  card: { backgroundColor: C.card, borderRadius: 20, padding: 14, borderWidth: 1.5, borderColor: C.border, ...C.shadow.soft },
+  card: { backgroundColor: C.card, borderRadius: 24, padding: 16, borderWidth: 1.5, borderColor: C.border, ...C.shadow.soft },
   row: { flexDirection: 'row-reverse', alignItems: 'flex-start', gap: 12 },
-  icon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  icon: { width: 46, height: 46, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   titleRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8 },
   title: { fontSize: 15.5, fontWeight: '900', color: C.text, textAlign: 'right' },
   defPill: { backgroundColor: C.tint, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
@@ -149,7 +146,7 @@ const makeStyles = (C) => StyleSheet.create({
   addr: { fontSize: 13, color: C.sub, marginTop: 3, textAlign: 'right', lineHeight: 19 },
   meta: { fontSize: 11.5, color: C.faint, marginTop: 3, textAlign: 'right' },
   actions: { flexDirection: 'row-reverse', gap: 8, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.line, flexWrap: 'wrap' },
-  action: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: C.inputBg },
+  action: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: C.inputBg },
   actionTxt: { fontSize: 12.5, fontWeight: '800', color: C.primary },
   fabWrap: { position: 'absolute', left: 16, right: 16 },
   fab: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 18, paddingVertical: 16, ...C.shadow.float },

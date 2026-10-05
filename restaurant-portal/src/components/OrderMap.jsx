@@ -51,8 +51,11 @@ export default function OrderMap({ order }) {
     if (custLat && custLng) points.push([custLat, custLng]);
     if (points.length > 1) map.fitBounds(points, { padding: [40, 40] });
     setTimeout(() => map.invalidateSize(), 200);
+    // داخل نافذة متحركة: أعد حساب الحجم عند تغيّر أبعاد الحاوية
+    let ro = null;
+    if (typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(() => map.invalidateSize()); ro.observe(mapContainerRef.current); }
 
-    return () => { map.remove(); mapRef.current = null; markersRef.current = {}; };
+    return () => { ro && ro.disconnect(); map.remove(); mapRef.current = null; markersRef.current = {}; };
   }, [order?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // موقع السائق المباشر عبر اتصال Socket المشترك
@@ -81,7 +84,7 @@ export default function OrderMap({ order }) {
 
   if (!hasMap) {
     return (
-      <div className="flex items-center gap-3 bg-white rounded-2xl p-4 text-gray-400">
+      <div className="flex items-center gap-3 bg-surface rounded-[18px] p-4 text-ink-3">
         <FiMap size={22} aria-hidden />
         <p className="text-xs">الخريطة غير متوفرة — لا توجد إحداثيات لهذا الطلب</p>
       </div>
@@ -89,14 +92,14 @@ export default function OrderMap({ order }) {
   }
 
   return (
-    <div className="relative rounded-2xl overflow-hidden border border-gray-200 bg-white">
-      <div ref={mapContainerRef} style={{ height: 260, width: '100%' }} />
+    <div className="relative isolate rounded-[18px] overflow-hidden border border-surface-line bg-white shadow-soft">
+      <div ref={mapContainerRef} style={{ height: 240, width: '100%', zIndex: 0 }} />
       {driverLoc && order?.status === 'on_the_way' && (
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-rose-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg z-[1000]">
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-coral text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg z-[1000]">
           <span className="w-2 h-2 rounded-full bg-white animate-ping" /> مباشر
         </div>
       )}
-      <div className="absolute bottom-2 right-2 bg-white/95 rounded-xl px-3 py-2 text-[11px] font-bold shadow-md z-[1000] flex flex-col gap-1 text-gray-700">
+      <div className="absolute bottom-2 right-2 glass-light rounded-xl px-3 py-2 text-[11px] font-bold shadow-soft z-[1000] flex flex-col gap-1 text-ink-2">
         {restLat && <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-full bg-brand-500" /> المطعم</span>}
         {custLat && <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-full bg-sky-500" /> الزبون</span>}
         {driverLoc && <span className="flex items-center gap-1.5 text-violet-600"><i className="w-2.5 h-2.5 rounded-full bg-violet-500" /> السائق</span>}

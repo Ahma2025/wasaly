@@ -1,12 +1,13 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../utils/api';
 import GradientHeader from '../components/GradientHeader';
 import { readCache, writeCache } from '../utils/cache';
-import { FadeIn, SkeletonCard } from '../components/Anim';
-import { COLORS, GRADIENTS, SHADOW, RTL } from '../theme';
+import { FadeIn, PopIn, SkeletonCard, Skeleton, CountUp, AnimatedBar, EmptyState } from '../components/Anim';
+import { COLORS, GRADIENTS, SHADOW, RTL, RADIUS } from '../theme';
 import { fmtDate, num } from '../utils/format';
 
 // نجوم آمنة: تقيّد التقييم بين ٠ و٥ (repeat بقيمة سالبة كان يرمي RangeError)
@@ -14,6 +15,22 @@ export const starStr = (n) => {
   const v = Math.max(0, Math.min(5, Math.round(num(n))));
   return '★'.repeat(v) + '☆'.repeat(5 - v);
 };
+
+// نجوم بأيقونات (تدعم أنصاف النجوم) — RTL: تمتلئ من اليمين
+export function Stars({ value, size = 16, color = COLORS.star, empty = COLORS.line }) {
+  const v = Math.max(0, Math.min(5, num(value)));
+  return (
+    <View style={{ flexDirection: 'row-reverse', gap: 2 }} accessibilityLabel={`${v.toFixed(1)} من ٥ نجوم`}>
+      {[1, 2, 3, 4, 5].map(i => {
+        const name = v >= i ? 'star' : v >= i - 0.5 ? 'star-half' : 'star';
+        const c = v >= i - 0.5 ? color : empty;
+        // نصف النجمة في Ionicons يملأ اليسار — نعكسها لتمتلئ من اليمين
+        const flip = name === 'star-half' ? { transform: [{ scaleX: -1 }] } : null;
+        return <Ionicons key={i} name={name} size={size} color={c} style={flip} />;
+      })}
+    </View>
+  );
+}
 
 export default function ReviewsScreen() {
   const insets = useSafeAreaInsets();
@@ -42,17 +59,45 @@ export default function ReviewsScreen() {
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
+  // توزيع التقييمات من القائمة المحمّلة
+  const dist = useMemo(() => {
+    const d = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    list.forEach(r => { const s = Math.round(num(r.driver_rating)); if (s >= 1 && s <= 5) d[s] += 1; });
+    return d;
+  }, [list]);
+  const distMax = Math.max(1, ...Object.values(dist));
+
   const header = (
-    <LinearGradient colors={GRADIENTS.gold} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.summary}>
-      <Text style={styles.avg}>{avg > 0 ? avg.toFixed(1) : '—'}</Text>
-      <Text style={styles.stars}>{starStr(avg)}</Text>
-      <Text style={styles.count}>{count} تقييم من الزبائن</Text>
-    </LinearGradient>
+    <PopIn>
+      <LinearGradient colors={GRADIENTS.gold} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.summary}>
+        <View style={styles.orb} />
+        <LinearGradient colors={GRADIENTS.sheen} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={styles.sheen} pointerEvents="none" />
+        <View style={styles.summaryTop}>
+          <View style={{ alignItems: 'center', minWidth: 110 }}>
+            {loading && !avg ? <Skeleton width={80} height={48} tone="dark" radius={12} />
+              : <CountUp value={avg} format={(n) => (avg > 0 ? n.toFixed(1) : '—')} style={styles.avg} />}
+            <Stars value={avg} size={17} color="#FFF" empty="rgba(255,255,255,0.4)" />
+            <Text style={styles.count}>{count} تقييم</Text>
+          </View>
+          <View style={{ flex: 1, gap: 5 }}>
+            {[5, 4, 3, 2, 1].map((s, i) => (
+              <View key={s} style={[RTL.row, { gap: 6 }]}>
+                <Text style={styles.distLabel}>{s}</Text>
+                <Ionicons name="star" size={10} color="#FFF" />
+                <View style={{ flex: 1 }}>
+                  <AnimatedBar pct={dist[s] / distMax} color="#FFF" track="rgba(255,255,255,0.3)" height={6} delay={i * 60} />
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+      </LinearGradient>
+    </PopIn>
   );
 
   return (
     <View style={styles.container}>
-      <GradientHeader title="تقييماتي" />
+      <GradientHeader title="تقييماتي" subtitle="آراء الزبائن في خدمتك" />
       <FlatList
         data={loading ? [] : list}
         keyExtractor={(r, i) => String(r.id ?? i)}
@@ -62,22 +107,31 @@ export default function ReviewsScreen() {
         ListEmptyComponent={loading ? (
           <View style={{ gap: 10 }}>{[0, 1, 2].map(i => <SkeletonCard key={i} lines={3} />)}</View>
         ) : (
-          <View style={styles.empty}>
-            <Text style={{ fontSize: 52 }}>⭐</Text>
-            <Text style={styles.emptyText}>لا توجد تقييمات بعد</Text>
-          </View>
+          <EmptyState icon="star-outline" tone="gold" title="لا توجد تقييمات بعد" text="بعد كل توصيلة يمكن للزبون تقييم خدمتك — ستظهر التقييمات هنا" />
         )}
         renderItem={({ item, index }) => (
           <FadeIn delay={Math.min(index, 8) * 45}>
-            <View style={styles.card}>
-              <View style={[RTL.row, { justifyContent: 'space-between' }]}>
-                <Text style={styles.name}>{item.customer_name || 'زبون'}</Text>
-                <Text style={styles.itemStars}>{starStr(item.driver_rating)}</Text>
+            <View style={[styles.card, SHADOW.soft]}>
+              <View style={[RTL.row, { gap: 10 }]}>
+                <View style={styles.avatar}><Text style={styles.avatarText}>{(item.customer_name || 'ز')[0]}</Text></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.name, RTL.text]} numberOfLines={1}>{item.customer_name || 'زبون'}</Text>
+                  <Text style={[styles.rest, RTL.text]} numberOfLines={1}>
+                    {[item.restaurant_name || (item.order_type === 'personal' ? 'طلب توصيل' : null), fmtDate(item.created_at, false)].filter(Boolean).join(' · ')}
+                  </Text>
+                </View>
+                <View style={styles.ratePill}>
+                  <Ionicons name="star" size={12} color={COLORS.star} />
+                  <Text style={styles.rateText}>{Math.max(0, Math.min(5, Math.round(num(item.driver_rating))))}</Text>
+                </View>
               </View>
-              <Text style={[styles.rest, RTL.text]}>
-                {[item.restaurant_name || (item.order_type === 'personal' ? 'طلب توصيل' : null), fmtDate(item.created_at, false)].filter(Boolean).join(' · ')}
-              </Text>
-              {!!item.comment && <Text style={[styles.comment, RTL.text]}>{item.comment}</Text>}
+              <View style={{ marginTop: 10, alignItems: 'flex-end' }}><Stars value={Math.round(num(item.driver_rating))} size={15} /></View>
+              {!!item.comment && (
+                <View style={styles.comment}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={14} color={COLORS.gray} style={{ marginTop: 3 }} />
+                  <Text style={[styles.commentText, RTL.text]}>{item.comment}</Text>
+                </View>
+              )}
             </View>
           </FadeIn>
         )}
@@ -88,15 +142,20 @@ export default function ReviewsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  summary: { borderRadius: 24, padding: 22, alignItems: 'center', marginBottom: 16, ...SHADOW.card },
-  avg: { color: '#FFF', fontSize: 44, fontWeight: '900' },
-  stars: { color: '#FFF', fontSize: 22, letterSpacing: 2 },
-  count: { color: 'rgba(255,255,255,0.92)', fontSize: 14, marginTop: 4, fontWeight: '700' },
-  empty: { alignItems: 'center', marginTop: 30, gap: 10 },
-  emptyText: { color: COLORS.gray, fontSize: 15, fontWeight: '700' },
-  card: { backgroundColor: COLORS.card, borderRadius: 18, padding: 14, marginBottom: 10, ...SHADOW.soft },
+  summary: { borderRadius: RADIUS.lg, padding: 18, marginBottom: 16, overflow: 'hidden', backgroundColor: COLORS.amber, ...SHADOW.card },
+  orb: { position: 'absolute', top: -50, left: -40, width: 160, height: 160, borderRadius: 80, backgroundColor: 'rgba(255,255,255,0.14)' },
+  sheen: { position: 'absolute', top: 0, left: 0, right: 0, height: 70 },
+  summaryTop: { flexDirection: 'row-reverse', alignItems: 'center', gap: 16 },
+  avg: { color: '#FFF', fontSize: 48, fontWeight: '900', lineHeight: 56, textShadowColor: 'rgba(0,0,0,0.12)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 8 },
+  count: { color: '#FFF', fontSize: 12.5, marginTop: 6, fontWeight: '700' },
+  distLabel: { color: '#FFF', fontSize: 12, fontWeight: '800', width: 10, textAlign: 'center' },
+  card: { backgroundColor: COLORS.card, borderRadius: RADIUS.md + 2, padding: 14, marginBottom: 10 },
+  avatar: { width: 42, height: 42, borderRadius: 14, backgroundColor: COLORS.sec, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontSize: 17, fontWeight: '900', color: COLORS.primary },
   name: { fontSize: 15, fontWeight: '900', color: COLORS.text },
-  itemStars: { fontSize: 15, color: COLORS.star },
-  rest: { fontSize: 12, color: COLORS.gray, marginTop: 4 },
-  comment: { fontSize: 14, color: COLORS.text, marginTop: 8, backgroundColor: COLORS.inputBg, borderRadius: 12, padding: 10, lineHeight: 20 },
+  rest: { fontSize: 12, color: COLORS.gray, marginTop: 2, fontWeight: '500' },
+  ratePill: { flexDirection: 'row-reverse', alignItems: 'center', gap: 3, backgroundColor: COLORS.amberSoft, borderRadius: RADIUS.pill, paddingHorizontal: 9, paddingVertical: 3 },
+  rateText: { fontSize: 13, fontWeight: '900', color: COLORS.amberDeep },
+  comment: { flexDirection: 'row-reverse', gap: 8, marginTop: 10, backgroundColor: COLORS.inputBg, borderRadius: RADIUS.sm, padding: 12 },
+  commentText: { flex: 1, fontSize: 14, color: COLORS.text, lineHeight: 21 },
 });

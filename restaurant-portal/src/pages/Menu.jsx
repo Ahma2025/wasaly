@@ -2,12 +2,13 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import toast from 'react-hot-toast';
 import {
   FiPlus, FiEdit2, FiTrash2, FiEye, FiEyeOff, FiChevronDown, FiSliders, FiImage, FiSearch, FiCheck, FiX, FiInfo,
+  FiUploadCloud, FiLayers, FiTag, FiGrid,
 } from 'react-icons/fi';
 import { MdOutlineRestaurantMenu } from 'react-icons/md';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { useRestaurant } from '../context/RestaurantContext';
-import { PageHeader, EmptyState, ErrorState, ListSkeleton, Spinner, useConfirm } from '../components/ui';
+import { PageHeader, EmptyState, ErrorState, ListSkeleton, Spinner, useConfirm, Sheet, Button, Toggle, Tabs, cx } from '../components/ui';
 import { arCount, num } from '../utils/format';
 
 const ITEM_WORDS = ['صنف واحد', 'صنفان', 'أصناف', 'صنفًا'];
@@ -43,6 +44,7 @@ export default function Menu() {
   const [fullMode, setFullMode] = useState(true); // false = السيرفر القديم (لا يعرض المخفي)
   const [showAddCat, setShowAddCat] = useState(false);
   const [newCatName, setNewCatName] = useState('');
+  const [addingCat, setAddingCat] = useState(false);
   const [expandedCat, setExpandedCat] = useState(null);
   const [renaming, setRenaming] = useState(null); // {id, name}
   const [showAddItem, setShowAddItem] = useState(null);
@@ -76,6 +78,8 @@ export default function Menu() {
   }, [restaurant.id, cacheKey]);
 
   useEffect(() => { fetchMenu(); }, [fetchMenu]);
+  // افتح أول فئة تلقائيًا لعرض فوري
+  useEffect(() => { if (expandedCat == null && categories.length) setExpandedCat(categories[0].id); }, [categories]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const patchItem = (id, patch) => setCategories(cs => cs.map(c => ({ ...c, items: c.items.map(it => (it.id === id ? { ...it, ...patch } : it)) })));
 
@@ -83,12 +87,14 @@ export default function Menu() {
   const addCategory = async () => {
     const name = newCatName.trim();
     if (!name) return toast.error('اكتب اسم الفئة');
+    setAddingCat(true);
     try {
       await api.post('/menu/categories', { restaurant_id: restaurant.id, name_ar: name, name_en: name, sort_order: categories.length });
       toast.success('تمت إضافة الفئة');
       setNewCatName(''); setShowAddCat(false);
       fetchMenu();
     } catch (e) { toast.error(e.message || 'فشل'); }
+    finally { setAddingCat(false); }
   };
 
   const saveCategory = async (cat, patch) => {
@@ -181,40 +187,48 @@ export default function Menu() {
   const totalItems = categories.reduce((s, c) => s + (c.items?.length || 0), 0);
   const hiddenItems = categories.reduce((s, c) => s + c.items.filter(i => !i.is_available).length, 0);
 
+  // محرر الصنف (إضافة/تعديل) — نحتفظ بآخر حالة أثناء حركة الإغلاق
+  const editorNow = showAddItem != null ? { mode: 'new', catId: showAddItem } : editItem ? { mode: 'edit', item: editItem } : null;
+  const lastEditor = useRef(null);
+  if (editorNow) lastEditor.current = editorNow;
+  const editor = editorNow || lastEditor.current;
+
+  const optionsItemNow = showOptions != null ? categories.flatMap(c => c.items).find(i => i.id === showOptions) : null;
+  const lastOptItem = useRef(null);
+  if (optionsItemNow) lastOptItem.current = optionsItemNow;
+  const optionsItem = optionsItemNow || lastOptItem.current;
+
   return (
-    <div className="p-4 space-y-4" dir="rtl">
+    <div className="space-y-4" dir="rtl">
       {dialog}
       <PageHeader title="المنيو" icon={MdOutlineRestaurantMenu}
-        subtitle={`${arCount(totalItems, ITEM_WORDS)} · ${arCount(categories.length, CAT_WORDS)}${hiddenItems ? ` · ${hiddenItems} مخفي` : ''}`}
+        subtitle={`${arCount(totalItems, ITEM_WORDS)} · ${arCount(categories.length, CAT_WORDS)}`}
         onRefresh={() => { setRefreshing(true); fetchMenu(); }} refreshing={refreshing}>
-        <button onClick={() => setShowAddCat(s => !s)} className="btn-primary px-3.5" aria-label="إضافة فئة">
-          <FiPlus aria-hidden /> فئة
+        <button onClick={() => setShowAddCat(true)} className="btn-primary px-3.5" aria-label="إضافة فئة">
+          <FiPlus aria-hidden /> <span>فئة</span>
         </button>
       </PageHeader>
 
+      {!loading && !error && categories.length > 0 && (
+        <div className="grid grid-cols-3 gap-2 lg:gap-3 stagger">
+          <MiniStat icon={FiLayers} label="الفئات" value={categories.length} />
+          <MiniStat icon={FiGrid} label="الأصناف" value={totalItems} />
+          <MiniStat icon={FiEyeOff} label="مخفي" value={hiddenItems} tone={hiddenItems ? 'amber' : 'gray'} />
+        </div>
+      )}
+
       {!fullMode && (
-        <div className="flex items-start gap-2 bg-sky-50 border border-sky-100 text-sky-800 rounded-2xl p-3 text-xs font-semibold">
+        <div className="flex items-start gap-2 bg-info-soft border border-info/15 text-sky-800 rounded-[18px] p-3 text-xs font-semibold">
           <FiInfo className="mt-0.5 flex-shrink-0" aria-hidden />
           يتم عرض الأصناف الظاهرة فقط حاليًا. ستظهر الأصناف المخفية هنا تلقائيًا بعد تحديث الخادم.
         </div>
       )}
 
-      {showAddCat && (
-        <div className="card p-3 space-y-2 animate-fade-up">
-          <input className="input" placeholder="اسم الفئة (مثال: برجر، مشروبات…)" aria-label="اسم الفئة الجديدة"
-            value={newCatName} onChange={e => setNewCatName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && addCategory()} autoFocus />
-          <div className="flex gap-2">
-            <button onClick={addCategory} className="btn-primary flex-1">إضافة الفئة</button>
-            <button onClick={() => setShowAddCat(false)} className="btn-ghost px-4">إلغاء</button>
-          </div>
-        </div>
-      )}
-
       {totalItems > 6 && (
         <div className="relative">
-          <FiSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden />
-          <input className="input pr-10" placeholder="ابحث عن صنف…" value={query} onChange={e => setQuery(e.target.value)} aria-label="بحث في المنيو" />
+          <FiSearch className="absolute start-4 top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none" aria-hidden />
+          <input className="input ps-11 pe-11 shadow-soft" placeholder="ابحث عن صنف…" value={query} onChange={e => setQuery(e.target.value)} aria-label="بحث في المنيو" />
+          {query && <button onClick={() => setQuery('')} className="absolute end-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full hover:bg-surface text-ink-3 flex items-center justify-center" aria-label="مسح البحث"><FiX size={15} /></button>}
         </div>
       )}
 
@@ -222,134 +236,160 @@ export default function Menu() {
         : error ? <ErrorState text="تعذّر تحميل المنيو" onRetry={fetchMenu} />
         : categories.length === 0 ? (
           <EmptyState icon={MdOutlineRestaurantMenu} title="ابدأ ببناء منيوك" text="أضف أول فئة (مثل: برجر، مشروبات) ثم أضف أصنافها"
-            action={<button onClick={() => setShowAddCat(true)} className="btn-primary px-6 py-3"><FiPlus /> أضف أول فئة</button>} />
+            action={<button onClick={() => setShowAddCat(true)} className="btn-primary px-6 h-12"><FiPlus /> أضف أول فئة</button>} />
         ) : (
           <div className="space-y-3 stagger">
             {visibleCats.map((cat, ci) => {
               const open = expandedCat === cat.id || !!q;
               const count = cat.items?.length || 0;
+              const hidden = cat.items.filter(i => !i.is_available).length;
               return (
-                <section key={cat.id} className={`bg-white rounded-3xl shadow-soft overflow-hidden ${!cat.is_active ? 'opacity-80' : ''}`}>
+                <section key={cat.id} className={cx('card overflow-hidden transition-shadow', open && 'shadow-card', !cat.is_active && 'opacity-80')}>
                   {renaming?.id === cat.id ? (
                     <div className="flex items-center gap-2 p-3">
                       <input className="input flex-1" value={renaming.name} autoFocus aria-label="اسم الفئة"
                         onChange={e => setRenaming({ ...renaming, name: e.target.value })}
                         onKeyDown={e => { if (e.key === 'Enter') renameCategory(); if (e.key === 'Escape') setRenaming(null); }} />
-                      <button onClick={renameCategory} className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center" aria-label="حفظ الاسم"><FiCheck /></button>
-                      <button onClick={() => setRenaming(null)} className="w-10 h-10 rounded-xl bg-gray-100 text-gray-500 flex items-center justify-center" aria-label="إلغاء"><FiX /></button>
+                      <button onClick={renameCategory} className="w-12 h-12 rounded-[14px] bg-success text-white flex items-center justify-center" aria-label="حفظ الاسم"><FiCheck size={18} /></button>
+                      <button onClick={() => setRenaming(null)} className="w-12 h-12 rounded-[14px] bg-surface text-ink-2 flex items-center justify-center" aria-label="إلغاء"><FiX size={18} /></button>
                     </div>
                   ) : (
-                    <button type="button" className={`no-press w-full flex items-center gap-3 p-4 text-right ${open ? 'bg-brand-50/50' : ''}`}
+                    <button type="button" className={cx('no-press w-full flex items-center gap-3 p-4 text-right', open ? 'bg-gradient-to-l from-brand-50/80 to-transparent' : 'hover:bg-surface/60')}
                       onClick={() => setExpandedCat(open && !q ? null : cat.id)} aria-expanded={open}>
-                      <div className="w-11 h-11 rounded-2xl grad-brand shadow-brand flex items-center justify-center text-white font-black flex-shrink-0">{ci + 1}</div>
+                      <div className={cx('w-11 h-11 rounded-[14px] flex items-center justify-center font-black flex-shrink-0 tnum transition-all duration-300',
+                        open ? 'grad-brand text-white shadow-brand' : 'bg-brand-50 text-brand-600')}>{ci + 1}</div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-black text-gray-900 text-base truncate flex items-center gap-2">
+                        <p className="font-extrabold text-ink text-[16px] truncate flex items-center gap-2">
                           {cat.name_ar}
-                          {!cat.is_active && <span className="chip bg-gray-100 text-gray-500"><FiEyeOff size={11} /> مخفية</span>}
+                          {!cat.is_active && <span className="chip bg-gray-100 text-ink-2"><FiEyeOff size={11} /> مخفية</span>}
                         </p>
-                        <p className="text-xs text-gray-400">{arCount(count, ITEM_WORDS)}</p>
+                        <p className="text-[12px] text-ink-3 mt-0.5">{arCount(count, ITEM_WORDS)}{hidden ? ` · ${hidden} مخفي` : ''}</p>
                       </div>
-                      <span className={`w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 transition-transform duration-300 ${open ? 'rotate-180' : ''}`}><FiChevronDown aria-hidden /></span>
+                      <span className={cx('w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300', open ? 'rotate-180 bg-white text-brand-600 shadow-soft' : 'bg-surface text-ink-3')}><FiChevronDown aria-hidden /></span>
                     </button>
                   )}
 
-                  {open && (
-                    <div className="px-3 pb-3 space-y-2.5 animate-fade-up">
-                      {showAddItem === cat.id ? (
-                        <ItemForm onSave={(payload) => addItem(cat.id, payload)} onCancel={() => setShowAddItem(null)} />
-                      ) : (
-                        <button onClick={() => { setShowAddItem(cat.id); setEditItem(null); }}
-                          className="w-full border-2 border-dashed border-brand-200 text-brand-600 rounded-2xl py-3 font-black text-sm hover:bg-brand-50 flex items-center justify-center gap-2">
-                          <FiPlus aria-hidden /> أضف صنف جديد
-                        </button>
-                      )}
+                  <div className={cx('collapse-grid', open && 'open')}>
+                    <div>
+                      <div className="px-3 pb-3 lg:px-4 lg:pb-4 pt-1">
+                        {/* أدوات الفئة */}
+                        <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                          <button onClick={() => setRenaming({ id: cat.id, name: cat.name_ar })} className="btn h-9 px-3 text-xs bg-surface text-ink-2 hover:bg-gray-200" tabIndex={open ? 0 : -1}><FiEdit2 size={13} /> تعديل الاسم</button>
+                          <button onClick={() => toggleCategory(cat)} className="btn h-9 px-3 text-xs bg-surface text-ink-2 hover:bg-gray-200" tabIndex={open ? 0 : -1}>
+                            {cat.is_active ? <><FiEyeOff size={13} /> إخفاء الفئة</> : <><FiEye size={13} /> إظهار الفئة</>}
+                          </button>
+                          <button onClick={() => deleteCategory(cat)} className="btn h-9 px-3 text-xs bg-danger-soft text-danger hover:bg-danger/10 ms-auto" tabIndex={open ? 0 : -1} aria-label={`حذف فئة ${cat.name_ar}`}><FiTrash2 size={13} /> حذف</button>
+                        </div>
 
-                      {count === 0 && showAddItem !== cat.id && (
-                        <p className="text-center text-gray-400 text-sm py-3">لا أصناف بعد — اضغط «أضف صنف جديد»</p>
-                      )}
-
-                      {cat.items.map(item => (
-                        editItem?.id === item.id ? (
-                          <ItemForm key={item.id} initial={item} onSave={(payload) => updateItem(item.id, payload)} onCancel={() => setEditItem(null)} />
-                        ) : (
-                          <ItemRow key={item.id} item={item}
-                            optionsOpen={showOptions === item.id}
-                            onEdit={() => { setEditItem(item); setShowAddItem(null); }}
-                            onToggle={() => toggleItem(item)}
-                            onDelete={() => deleteItem(item)}
-                            onOptions={() => setShowOptions(showOptions === item.id ? null : item.id)}
-                            onOptionsChanged={fetchMenu}
-                            confirm={confirm} />
-                        )
-                      ))}
-
-                      <div className="flex gap-2 pt-1">
-                        <button onClick={() => setRenaming({ id: cat.id, name: cat.name_ar })} className="btn-ghost flex-1 text-xs py-2"><FiEdit2 size={13} /> تعديل الاسم</button>
-                        <button onClick={() => toggleCategory(cat)} className="btn-ghost flex-1 text-xs py-2">
-                          {cat.is_active ? <><FiEyeOff size={13} /> إخفاء الفئة</> : <><FiEye size={13} /> إظهار الفئة</>}
-                        </button>
-                        <button onClick={() => deleteCategory(cat)} className="btn-danger px-3 text-xs py-2" aria-label={`حذف فئة ${cat.name_ar}`}><FiTrash2 size={13} /></button>
+                        <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+                          {cat.items.map(item => (
+                            <ItemCard key={item.id} item={item} tabIndex={open ? 0 : -1}
+                              onEdit={() => { setEditItem(item); setShowAddItem(null); }}
+                              onToggle={() => toggleItem(item)}
+                              onDelete={() => deleteItem(item)}
+                              onOptions={() => setShowOptions(item.id)} />
+                          ))}
+                          <button onClick={() => { setShowAddItem(cat.id); setEditItem(null); }} tabIndex={open ? 0 : -1}
+                            className={cx('rounded-[18px] border-2 border-dashed border-brand-200 text-brand-600 font-extrabold text-sm hover:bg-brand-50 hover:border-brand-300 flex items-center justify-center gap-2',
+                              count === 0 ? 'py-8 sm:col-span-2 xl:col-span-3 flex-col' : 'min-h-[64px] py-4')}>
+                            <span className="w-9 h-9 rounded-full bg-brand-50 flex items-center justify-center"><FiPlus aria-hidden /></span>
+                            أضف صنف جديد
+                            {count === 0 && <span className="text-[12px] font-bold text-ink-3">لا أصناف بعد في هذه الفئة</span>}
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  )}
+                  </div>
                 </section>
               );
             })}
-            {q && visibleCats.length === 0 && <p className="text-center text-sm text-gray-400 py-6">لا نتائج لـ «{q}»</p>}
+            {q && visibleCats.length === 0 && <EmptyState compact icon={FiSearch} title={`لا نتائج لـ «${q}»`} text="جرّب كلمة أخرى" />}
           </div>
         )}
+
+      {/* فئة جديدة */}
+      <Sheet open={showAddCat} onClose={() => setShowAddCat(false)} title="فئة جديدة" subtitle="مثال: برجر، مشروبات، حلويات" size="sm"
+        footer={<div className="flex gap-2"><Button loading={addingCat} onClick={addCategory} icon={FiCheck} className="flex-1 h-12">إضافة الفئة</Button><button onClick={() => setShowAddCat(false)} className="btn-ghost h-12 px-5">إلغاء</button></div>}>
+        <label className="label" htmlFor="new-cat">اسم الفئة</label>
+        <input id="new-cat" className="input h-[52px]" placeholder="اسم الفئة" value={newCatName} onChange={e => setNewCatName(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && addCategory()} autoFocus />
+      </Sheet>
+
+      {/* محرر الصنف */}
+      {editor && (
+        <ItemEditorSheet key={editor.mode === 'new' ? `new-${editor.catId}` : `edit-${editor.item.id}`}
+          open={!!editorNow}
+          initial={editor.mode === 'edit' ? editor.item : null}
+          onSave={(payload) => (editor.mode === 'new' ? addItem(editor.catId, payload) : updateItem(editor.item.id, payload))}
+          onClose={() => { setShowAddItem(null); setEditItem(null); }} />
+      )}
+
+      {/* الإضافات */}
+      {optionsItem && (
+        <Sheet open={!!optionsItemNow} onClose={() => setShowOptions(null)} size="lg"
+          title={`الإضافات · ${optionsItem.name_ar}`} subtitle="مجموعات مثل «الحجم» أو «إضافات البرجر» يختار منها الزبون">
+          <ItemOptions itemId={optionsItem.id} options={optionsItem.options || []} onUpdate={fetchMenu} confirm={confirm} />
+        </Sheet>
+      )}
     </div>
   );
 }
 
-function ItemRow({ item, optionsOpen, onEdit, onToggle, onDelete, onOptions, onOptionsChanged, confirm }) {
+function MiniStat({ icon: Icon, label, value, tone = 'brand' }) {
+  const t = tone === 'amber' ? 'bg-warning-soft text-amber-600' : tone === 'gray' ? 'bg-surface text-ink-3' : 'bg-brand-50 text-brand-600';
+  return (
+    <div className="card p-3 flex items-center gap-2.5 max-sm:flex-col max-sm:items-start max-sm:gap-2">
+      <span className={cx('w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0', t)}><Icon size={16} aria-hidden /></span>
+      <div className="min-w-0">
+        <p className="text-lg font-extrabold text-ink leading-none tnum">{value}</p>
+        <p className="text-[11px] font-bold text-ink-3 mt-1 truncate">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+function ItemCard({ item, onEdit, onToggle, onDelete, onOptions, tabIndex }) {
   const hasDiscount = item.discount_price != null && num(item.discount_price) > 0 && num(item.discount_price) < num(item.price);
   const optCount = item.options?.length || 0;
   return (
-    <div className={`rounded-2xl p-3 border transition-colors ${item.is_available ? 'bg-gray-50/70 border-gray-100' : 'bg-gray-100 border-gray-200 border-dashed'}`}>
+    <div className={cx('rounded-[18px] p-3 border transition-all duration-200 flex flex-col',
+      item.is_available ? 'bg-white border-surface-line hover:shadow-card hover:border-brand-100' : 'bg-surface/70 border-dashed border-gray-300')}>
       <div className="flex gap-3">
-        {item.image ? (
-          <img src={item.image} className={`w-[72px] h-[72px] rounded-2xl object-cover flex-shrink-0 ${!item.is_available ? 'opacity-50 grayscale' : ''}`} alt="" loading="lazy" />
-        ) : (
-          <div className="w-[72px] h-[72px] rounded-2xl bg-white border border-gray-100 flex items-center justify-center text-gray-300 flex-shrink-0"><FiImage size={24} aria-hidden /></div>
-        )}
+        <div className="relative flex-shrink-0">
+          {item.image ? (
+            <img src={item.image} className={cx('w-[76px] h-[76px] rounded-[14px] object-cover bg-surface', !item.is_available && 'opacity-50 grayscale')} alt="" loading="lazy" width="76" height="76" />
+          ) : (
+            <div className="w-[76px] h-[76px] rounded-[14px] bg-gradient-to-br from-brand-50 to-surface flex items-center justify-center text-brand-300"><FiImage size={24} aria-hidden /></div>
+          )}
+          {hasDiscount && <span className="absolute -top-1.5 -start-1.5 chip bg-coral text-white shadow-soft tnum">-{Math.round((1 - num(item.discount_price) / num(item.price)) * 100)}%</span>}
+        </div>
         <div className="flex-1 min-w-0">
-          <p className={`font-black text-sm ${item.is_available ? 'text-gray-900' : 'text-gray-500'}`}>{item.name_ar}</p>
-          {item.description_ar && <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{item.description_ar}</p>}
+          <div className="flex items-start justify-between gap-2">
+            <p className={cx('font-extrabold text-[14.5px] leading-snug', item.is_available ? 'text-ink' : 'text-ink-3')}>{item.name_ar}</p>
+            <Toggle checked={item.is_available} onChange={onToggle} label={item.is_available ? `إخفاء ${item.name_ar}` : `إظهار ${item.name_ar}`} tone="emerald" />
+          </div>
+          {item.description_ar && <p className="text-[12px] text-ink-3 mt-0.5 line-clamp-2 leading-relaxed">{item.description_ar}</p>}
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             {hasDiscount ? (
               <>
-                <span className="text-base font-black text-brand-600">{num(item.discount_price).toFixed(2)}₪</span>
-                <span className="text-xs text-gray-400 line-through">{num(item.price).toFixed(2)}₪</span>
-                <span className="chip bg-rose-50 text-rose-600">-{Math.round((1 - num(item.discount_price) / num(item.price)) * 100)}%</span>
+                <span className="text-[15px] font-black text-brand-600 tnum">{num(item.discount_price).toFixed(2)}₪</span>
+                <span className="text-xs text-ink-3 line-through tnum">{num(item.price).toFixed(2)}₪</span>
               </>
             ) : (
-              <span className="text-base font-black text-brand-600">{num(item.price).toFixed(2)}₪</span>
+              <span className="text-[15px] font-black text-brand-600 tnum">{num(item.price).toFixed(2)}₪</span>
             )}
+            {!item.is_available && <span className="chip bg-gray-200 text-ink-2"><FiEyeOff size={11} /> مخفي</span>}
           </div>
         </div>
-        <button onClick={onToggle} aria-pressed={!item.is_available} aria-label={item.is_available ? `إخفاء ${item.name_ar}` : `إظهار ${item.name_ar}`}
-          className={`flex-shrink-0 self-start flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-black ${item.is_available ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'bg-white text-gray-500 ring-1 ring-gray-300'}`}>
-          {item.is_available ? <FiEye size={13} aria-hidden /> : <FiEyeOff size={13} aria-hidden />}
-          {item.is_available ? 'ظاهر' : 'مخفي'}
-        </button>
-      </div>
-      {!item.is_available && <p className="text-[11px] text-gray-500 mt-2">هذا الصنف مخفي عن الزبائن — اضغط «مخفي» لإظهاره مجددًا</p>}
-
-      <div className="flex gap-2 mt-3">
-        <button onClick={onEdit} className="btn-ghost flex-1 py-2 text-xs"><FiEdit2 size={13} aria-hidden /> تعديل</button>
-        <button onClick={onOptions} aria-expanded={optionsOpen}
-          className={`flex-1 py-2 text-xs ${optionsOpen ? 'btn-primary' : 'btn-ghost'}`}>
-          <FiSliders size={13} aria-hidden /> الإضافات{optCount ? ` (${optCount})` : ''}
-        </button>
-        <button onClick={onDelete} className="btn-danger w-11 px-0 py-2" aria-label={`حذف ${item.name_ar}`}><FiTrash2 size={14} /></button>
       </div>
 
-      {optionsOpen && (
-        <div className="mt-2">
-          <ItemOptions itemId={item.id} options={item.options || []} onUpdate={onOptionsChanged} confirm={confirm} />
-        </div>
-      )}
+      <div className="flex gap-1.5 mt-3 pt-3 border-t border-surface-line">
+        <button onClick={onEdit} tabIndex={tabIndex} className="btn h-9 flex-1 text-xs bg-surface text-ink-2 hover:bg-brand-50 hover:text-brand-700"><FiEdit2 size={13} aria-hidden /> تعديل</button>
+        <button onClick={onOptions} tabIndex={tabIndex} className="btn h-9 flex-1 text-xs bg-surface text-ink-2 hover:bg-violet-50 hover:text-violet-700">
+          <FiSliders size={13} aria-hidden /> الإضافات{optCount ? <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-violet-500 text-white text-[10px] font-black flex items-center justify-center tnum">{optCount}</span> : null}
+        </button>
+        <button onClick={onDelete} tabIndex={tabIndex} className="btn h-9 w-10 px-0 bg-surface text-ink-3 hover:bg-danger-soft hover:text-danger" aria-label={`حذف ${item.name_ar}`}><FiTrash2 size={14} /></button>
+      </div>
     </div>
   );
 }
@@ -366,7 +406,16 @@ function validateItem(form) {
   return null;
 }
 
-function ItemForm({ initial, onSave, onCancel }) {
+function MoneyInput({ id, value, onChange, placeholder, ...rest }) {
+  return (
+    <div className="relative">
+      <input id={id} className="input pe-10 tnum" type="number" inputMode="decimal" min="0" step="0.5" placeholder={placeholder} value={value} onChange={onChange} {...rest} />
+      <span className="absolute end-3.5 top-1/2 -translate-y-1/2 text-ink-3 font-bold pointer-events-none">₪</span>
+    </div>
+  );
+}
+
+function ItemEditorSheet({ open, initial, onSave, onClose }) {
   const [form, setForm] = useState({
     name_ar: initial?.name_ar || '',
     description_ar: initial?.description_ar || '',
@@ -413,59 +462,76 @@ function ItemForm({ initial, onSave, onCancel }) {
   const showPreview = Number.isFinite(p) && Number.isFinite(d) && p > 0 && d > 0;
 
   return (
-    <div className="bg-brand-50/60 border border-brand-100 rounded-2xl p-4 space-y-3 animate-fade-up">
-      <p className="text-sm font-black text-brand-700">{initial ? 'تعديل الصنف' : 'صنف جديد'}</p>
-
-      <div className="flex items-center gap-3">
-        <button type="button" onClick={() => fileInputRef.current?.click()} aria-label="رفع صورة الصنف"
-          className="w-16 h-16 rounded-xl bg-white border-2 border-dashed border-brand-300 flex items-center justify-center overflow-hidden flex-shrink-0 text-brand-400">
-          {uploading ? <Spinner size={20} className="text-brand-500" /> : form.image ? <img src={form.image} className="w-full h-full object-cover" alt="" /> : <FiImage size={22} />}
-        </button>
-        <div className="flex-1 flex gap-2">
-          <button type="button" onClick={() => fileInputRef.current?.click()} className="btn-ghost flex-1 text-xs py-2">
-            {uploading ? 'جاري الرفع…' : form.image ? 'تغيير الصورة' : 'رفع صورة الصنف'}
-          </button>
-          {form.image && !uploading && (
-            <button type="button" onClick={() => setForm(f => ({ ...f, image: '' }))} className="btn-danger px-3 py-2" aria-label="إزالة الصورة"><FiX size={14} /></button>
-          )}
+    <Sheet open={open} onClose={onClose} size="md" title={initial ? 'تعديل الصنف' : 'صنف جديد'} subtitle={initial ? initial.name_ar : 'أضف صورة جذابة واسمًا واضحًا وسعرًا'}
+      footer={(
+        <div className="flex gap-2">
+          <Button onClick={submit} loading={saving} disabled={uploading} icon={FiCheck} className="flex-1 h-12">{initial ? 'حفظ التعديلات' : 'إضافة الصنف'}</Button>
+          <button onClick={onClose} className="btn-ghost h-12 px-5">إلغاء</button>
         </div>
-        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={e => { uploadImage(e.target.files?.[0]); e.target.value = ''; }} />
-      </div>
-
-      <div>
-        <label className="label">اسم الصنف *</label>
-        <input className="input" value={form.name_ar} onChange={set('name_ar')} placeholder="مثال: برجر كلاسيك" />
-      </div>
-      <div>
-        <label className="label">وصف مختصر</label>
-        <textarea className="input" rows={2} value={form.description_ar} onChange={set('description_ar')} placeholder="المكوّنات أو ما يميّز الصنف (اختياري)" />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
+      )}>
+      <div className="space-y-4">
+        {/* صورة الصنف مع معاينة */}
         <div>
-          <label className="label">السعر (₪) *</label>
-          <input className="input" type="number" inputMode="decimal" min="0" step="0.5" placeholder="10.00" value={form.price} onChange={set('price')} />
-        </div>
-        <div>
-          <label className="label">سعر بعد الخصم (₪)</label>
-          <input className="input" type="number" inputMode="decimal" min="0" step="0.5" placeholder="بدون خصم" value={form.discount_price} onChange={set('discount_price')} />
-        </div>
-      </div>
-      {showPreview && (
-        d < p ? (
-          <div className="bg-white border border-rose-100 rounded-xl p-2 text-center text-xs font-bold text-rose-600">
-            خصم {Math.round((1 - d / p) * 100)}% · <span className="line-through text-gray-400">{p.toFixed(2)}₪</span> ← <span className="text-brand-600">{d.toFixed(2)}₪</span>
+          <p className="label">صورة الصنف</p>
+          <div className="relative group">
+            <button type="button" onClick={() => fileInputRef.current?.click()} aria-label={form.image ? 'تغيير صورة الصنف' : 'رفع صورة الصنف'}
+              className={cx('no-press w-full aspect-[16/9] rounded-[20px] overflow-hidden flex flex-col items-center justify-center gap-2 transition-colors',
+                form.image ? 'bg-surface' : 'border-2 border-dashed border-brand-200 bg-brand-50/50 hover:bg-brand-50 hover:border-brand-300 text-brand-500')}>
+              {form.image ? (
+                <img src={form.image} className="w-full h-full object-cover" alt="معاينة صورة الصنف" />
+              ) : (
+                <>
+                  <span className="w-14 h-14 rounded-[18px] bg-white shadow-soft flex items-center justify-center"><FiUploadCloud size={26} aria-hidden /></span>
+                  <span className="font-extrabold text-sm">اضغط لرفع صورة</span>
+                  <span className="text-[11.5px] text-ink-3 font-bold">صورة أفقية واضحة تزيد الطلبات</span>
+                </>
+              )}
+            </button>
+            {uploading && (
+              <div className="absolute inset-0 rounded-[20px] bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2 text-brand-600 animate-fade-in">
+                <Spinner size={26} /> <span className="text-sm font-extrabold">جاري الرفع…</span>
+              </div>
+            )}
+            {form.image && !uploading && (
+              <div className="absolute bottom-2.5 inset-x-2.5 flex gap-2 justify-end">
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="btn h-9 px-3 text-xs glass-light text-ink shadow-soft"><FiImage size={13} aria-hidden /> تغيير</button>
+                <button type="button" onClick={() => setForm(f => ({ ...f, image: '' }))} className="btn h-9 px-3 text-xs bg-danger text-white shadow-soft" aria-label="إزالة الصورة"><FiX size={14} /> إزالة</button>
+              </div>
+            )}
           </div>
-        ) : (
-          <p className="text-xs font-bold text-rose-600">سعر الخصم يجب أن يكون أقل من السعر الأصلي</p>
-        )
-      )}
-      <div className="flex gap-2">
-        <button onClick={submit} disabled={saving || uploading} className="btn-primary flex-1">
-          {saving ? <Spinner size={15} /> : <FiCheck aria-hidden />} {initial ? 'حفظ التعديلات' : 'إضافة الصنف'}
-        </button>
-        <button onClick={onCancel} className="btn-ghost flex-1">إلغاء</button>
+          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={e => { uploadImage(e.target.files?.[0]); e.target.value = ''; }} />
+        </div>
+
+        <div>
+          <label className="label" htmlFor="it-name">اسم الصنف <span className="text-coral">*</span></label>
+          <input id="it-name" className="input" value={form.name_ar} onChange={set('name_ar')} placeholder="مثال: برجر كلاسيك" />
+        </div>
+        <div>
+          <label className="label" htmlFor="it-desc">وصف مختصر</label>
+          <textarea id="it-desc" className="input" rows={2} value={form.description_ar} onChange={set('description_ar')} placeholder="المكوّنات أو ما يميّز الصنف (اختياري)" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label" htmlFor="it-price">السعر <span className="text-coral">*</span></label>
+            <MoneyInput id="it-price" placeholder="10.00" value={form.price} onChange={set('price')} />
+          </div>
+          <div>
+            <label className="label" htmlFor="it-disc">سعر بعد الخصم</label>
+            <MoneyInput id="it-disc" placeholder="بدون خصم" value={form.discount_price} onChange={set('discount_price')} />
+          </div>
+        </div>
+        {showPreview && (
+          d < p ? (
+            <div className="rounded-[14px] bg-gradient-to-l from-coral-50 to-brand-50 border border-coral/15 p-3 flex items-center justify-between gap-2 animate-fade-up">
+              <span className="chip bg-coral text-white text-[12px] py-1 px-2.5"><FiTag size={12} aria-hidden /> خصم {Math.round((1 - d / p) * 100)}%</span>
+              <span className="text-sm font-bold tnum"><span className="line-through text-ink-3">{p.toFixed(2)}₪</span> <span className="text-ink-3">←</span> <span className="text-brand-600 font-black text-base">{d.toFixed(2)}₪</span></span>
+            </div>
+          ) : (
+            <p className="text-xs font-bold text-danger flex items-center gap-1.5"><FiInfo aria-hidden /> سعر الخصم يجب أن يكون أقل من السعر الأصلي</p>
+          )
+        )}
       </div>
-    </div>
+    </Sheet>
   );
 }
 
@@ -552,41 +618,39 @@ function ItemOptions({ itemId, options, onUpdate, confirm }) {
   };
 
   return (
-    <div className="bg-violet-50/70 border border-violet-100 rounded-2xl p-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-black text-violet-700">الإضافات والخيارات</p>
-        {editing !== 'new' && (
-          <button onClick={() => setEditing('new')} className="btn bg-violet-500 text-white text-xs px-3 py-1.5"><FiPlus size={13} /> مجموعة</button>
-        )}
-      </div>
-
+    <div className="space-y-3">
       {options.length === 0 && editing !== 'new' && (
-        <p className="text-xs text-violet-500 py-2 text-center">لا توجد إضافات — مثال: «الحجم» أو «إضافات البرجر»</p>
+        <EmptyState compact icon={FiSliders} title="لا توجد إضافات بعد" text="مثال: «الحجم» (صغير/وسط/كبير) أو «إضافات البرجر» (جبنة، بيض…)"
+          action={<button onClick={() => setEditing('new')} className="btn bg-violet-500 text-white h-11 px-5 shadow-[0_10px_22px_rgba(139,92,246,.25)]"><FiPlus /> أضف أول مجموعة</button>} />
       )}
 
       {options.map(opt => (
         editing === opt.id ? (
           <OptionForm key={opt.id} initial={opt} busy={busy} onSave={(f) => save(f, opt)} onCancel={() => setEditing(null)} />
         ) : (
-          <div key={opt.id} className="bg-white rounded-xl p-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-bold text-gray-800 truncate">{opt.name_ar}</p>
+          <div key={opt.id} className="rounded-[18px] border border-surface-line bg-white p-3.5 animate-fade-up">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[15px] font-extrabold text-ink truncate">{opt.name_ar}</p>
+                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                  {opt.is_required ? <span className="chip bg-danger-soft text-danger">إجباري</span> : <span className="chip bg-gray-100 text-ink-2">اختياري</span>}
+                  <span className="chip bg-violet-50 text-violet-700">
+                    {opt.type === 'multiple' ? `متعدد${opt.max_selections ? ` (حتى ${opt.max_selections})` : ''}` : 'اختيار واحد'}
+                  </span>
+                </div>
+              </div>
               <div className="flex items-center gap-1 flex-shrink-0">
-                {opt.is_required ? <span className="chip bg-rose-50 text-rose-600">مطلوب</span> : <span className="chip bg-gray-100 text-gray-500">اختياري</span>}
-                <span className="chip bg-gray-100 text-gray-500">
-                  {opt.type === 'multiple' ? `متعدد${opt.max_selections ? ` (حتى ${opt.max_selections})` : ''}` : 'اختيار واحد'}
-                </span>
-                <button onClick={() => setEditing(opt.id)} className="w-7 h-7 rounded-lg text-gray-500 hover:bg-gray-100 flex items-center justify-center" aria-label={`تعديل ${opt.name_ar}`}><FiEdit2 size={13} /></button>
-                <button onClick={() => deleteGroup(opt)} className="w-7 h-7 rounded-lg text-rose-500 hover:bg-rose-50 flex items-center justify-center" aria-label={`حذف ${opt.name_ar}`}><FiTrash2 size={13} /></button>
+                <button onClick={() => setEditing(opt.id)} className="w-9 h-9 rounded-xl text-ink-2 bg-surface hover:bg-violet-50 hover:text-violet-700 flex items-center justify-center" aria-label={`تعديل ${opt.name_ar}`}><FiEdit2 size={14} /></button>
+                <button onClick={() => deleteGroup(opt)} className="w-9 h-9 rounded-xl text-danger bg-danger-soft hover:bg-danger/10 flex items-center justify-center" aria-label={`حذف ${opt.name_ar}`}><FiTrash2 size={14} /></button>
               </div>
             </div>
-            <div className="flex flex-wrap gap-1.5 mt-2">
+            <div className="flex flex-wrap gap-1.5 mt-3">
               {opt.values.map((v, j) => (
-                <span key={v.id || j} className="inline-flex items-center gap-1 text-xs bg-violet-100/70 text-violet-800 pr-2 pl-1 py-0.5 rounded-full">
-                  {v.name_ar} <b className="font-bold">{num(v.extra_price) > 0 ? `+${num(v.extra_price).toFixed(2)}₪` : 'مجاناً'}</b>
-                  {v.id && (
-                    <button onClick={() => deleteValue(opt, v)} className="w-4 h-4 rounded-full hover:bg-violet-200 flex items-center justify-center" aria-label={`حذف خيار ${v.name_ar}`}><FiX size={10} /></button>
-                  )}
+                <span key={v.id || j} className="inline-flex items-center gap-1.5 text-[12.5px] bg-surface text-ink-2 ps-3 pe-1 h-8 rounded-full border border-surface-line">
+                  {v.name_ar} <b dir="ltr" className={cx('font-extrabold tnum', num(v.extra_price) > 0 ? 'text-brand-600' : 'text-emerald-600')}>{num(v.extra_price) > 0 ? `+${num(v.extra_price).toFixed(2)}₪` : 'مجاناً'}</b>
+                  {v.id ? (
+                    <button onClick={() => deleteValue(opt, v)} className="w-6 h-6 rounded-full hover:bg-danger-soft hover:text-danger text-ink-3 flex items-center justify-center" aria-label={`حذف خيار ${v.name_ar}`}><FiX size={12} /></button>
+                  ) : <span className="w-1" />}
                 </span>
               ))}
             </div>
@@ -595,6 +659,12 @@ function ItemOptions({ itemId, options, onUpdate, confirm }) {
       ))}
 
       {editing === 'new' && <OptionForm busy={busy} onSave={(f) => save(f, null)} onCancel={() => setEditing(null)} />}
+
+      {options.length > 0 && editing !== 'new' && (
+        <button onClick={() => setEditing('new')} className="w-full h-12 rounded-[16px] border-2 border-dashed border-violet-200 text-violet-600 font-extrabold text-sm hover:bg-violet-50 flex items-center justify-center gap-2">
+          <FiPlus aria-hidden /> مجموعة إضافات جديدة
+        </button>
+      )}
     </div>
   );
 }
@@ -611,43 +681,56 @@ function OptionForm({ initial, busy, onSave, onCancel }) {
   const setVal = (i, patch) => setForm(f => ({ ...f, values: f.values.map((v, j) => (j === i ? { ...v, ...patch } : v)) }));
 
   return (
-    <div className="bg-white rounded-xl p-3 space-y-3 animate-fade-up">
+    <div className="rounded-[20px] border-[1.5px] border-violet-200 bg-violet-50/40 p-4 space-y-4 animate-pop">
+      <p className="text-sm font-extrabold text-violet-700 flex items-center gap-1.5"><FiSliders size={14} aria-hidden /> {initial ? 'تعديل المجموعة' : 'مجموعة جديدة'}</p>
       <div>
-        <label className="label">اسم المجموعة</label>
-        <input className="input" placeholder="مثال: الحجم، الإضافات، نوع الخبز" value={form.name_ar} onChange={e => setForm(f => ({ ...f, name_ar: e.target.value }))} />
+        <label className="label" htmlFor="og-name">اسم المجموعة</label>
+        <input id="og-name" className="input" placeholder="مثال: الحجم، الإضافات، نوع الخبز" value={form.name_ar} onChange={e => setForm(f => ({ ...f, name_ar: e.target.value }))} />
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <select className="input" aria-label="نوع الاختيار" value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
-          <option value="single">اختيار واحد</option>
-          <option value="multiple">اختيار متعدد</option>
-        </select>
-        <label className="flex items-center gap-2 border-[1.5px] border-gray-200 rounded-xl px-3 cursor-pointer">
-          <input type="checkbox" className="w-4 h-4 accent-brand-500" checked={form.is_required} onChange={e => setForm(f => ({ ...f, is_required: e.target.checked }))} />
-          <span className="text-sm text-gray-700 font-semibold">إجباري</span>
-        </label>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div>
+          <p className="label">نوع الاختيار</p>
+          <Tabs size="sm" value={form.type} onChange={(v) => setForm(f => ({ ...f, type: v }))} ariaLabel="نوع الاختيار"
+            tabs={[{ key: 'single', label: 'اختيار واحد' }, { key: 'multiple', label: 'متعدد' }]} />
+        </div>
+        <div>
+          <p className="label">إجباري؟</p>
+          <div className="h-10 rounded-2xl bg-white border border-surface-line px-3 flex items-center justify-between">
+            <span className="text-[13px] font-bold text-ink-2">{form.is_required ? 'يجب على الزبون الاختيار' : 'اختياري للزبون'}</span>
+            <Toggle checked={form.is_required} onChange={(v) => setForm(f => ({ ...f, is_required: v }))} label="مجموعة إجبارية" />
+          </div>
+        </div>
       </div>
       {form.type === 'multiple' && (
-        <div>
-          <label className="label">الحد الأقصى للاختيارات</label>
-          <input className="input" type="number" min="1" inputMode="numeric" placeholder="فارغ = بلا حد (كل الخيارات)"
+        <div className="animate-fade-up">
+          <label className="label" htmlFor="og-max">الحد الأقصى للاختيارات</label>
+          <input id="og-max" className="input tnum" type="number" min="1" inputMode="numeric" placeholder="فارغ = بلا حد (كل الخيارات)"
             value={form.max_selections} onChange={e => setForm(f => ({ ...f, max_selections: e.target.value }))} />
         </div>
       )}
       <div className="space-y-2">
-        <p className="label">الخيارات (السعر الإضافي — فارغ = مجاناً)</p>
+        <div className="flex items-center justify-between">
+          <p className="label mb-0">الخيارات</p>
+          <span className="text-[11px] font-bold text-ink-3">السعر الإضافي — فارغ = مجاناً</span>
+        </div>
         {form.values.map((v, i) => (
-          <div key={v.id || `n${i}`} className="flex gap-2 items-center">
-            <input className="input flex-1" placeholder="اسم الخيار" aria-label="اسم الخيار" value={v.name_ar} onChange={e => setVal(i, { name_ar: e.target.value })} />
-            <input className="input w-24" type="number" min="0" step="0.5" inputMode="decimal" placeholder="0" aria-label="السعر الإضافي" value={v.extra_price} onChange={e => setVal(i, { extra_price: e.target.value })} />
+          <div key={v.id || `n${i}`} className="flex gap-2 items-center animate-fade-up">
+            <span className="w-6 text-center text-[12px] font-black text-violet-400 tnum">{i + 1}</span>
+            <input className="input flex-1" placeholder="اسم الخيار" aria-label={`اسم الخيار ${i + 1}`} value={v.name_ar} onChange={e => setVal(i, { name_ar: e.target.value })} />
+            <div className="relative w-28 flex-shrink-0">
+              <input className="input pe-8 tnum" type="number" min="0" step="0.5" inputMode="decimal" placeholder="0" aria-label={`السعر الإضافي للخيار ${i + 1}`} value={v.extra_price} onChange={e => setVal(i, { extra_price: e.target.value })} />
+              <span className="absolute end-3 top-1/2 -translate-y-1/2 text-ink-3 text-sm font-bold pointer-events-none">₪</span>
+            </div>
             <button onClick={() => setForm(f => ({ ...f, values: f.values.filter((_, j) => j !== i) }))} disabled={form.values.length <= 1}
-              className="w-9 h-9 rounded-lg text-rose-500 hover:bg-rose-50 flex items-center justify-center disabled:opacity-30" aria-label="حذف الخيار"><FiX /></button>
+              className="w-10 h-10 rounded-xl text-danger hover:bg-danger-soft flex items-center justify-center disabled:opacity-30 flex-shrink-0" aria-label={`حذف الخيار ${i + 1}`}><FiX /></button>
           </div>
         ))}
-        <button onClick={() => setForm(f => ({ ...f, values: [...f.values, { name_ar: '', extra_price: '' }] }))} className="text-violet-600 text-sm font-bold flex items-center gap-1"><FiPlus size={14} /> خيار آخر</button>
+        <button onClick={() => setForm(f => ({ ...f, values: [...f.values, { name_ar: '', extra_price: '' }] }))}
+          className="h-10 px-3 rounded-xl text-violet-600 text-sm font-extrabold flex items-center gap-1.5 hover:bg-violet-50"><FiPlus size={15} /> خيار آخر</button>
       </div>
-      <div className="flex gap-2">
-        <button onClick={() => onSave(form)} disabled={busy} className="btn flex-1 bg-violet-500 text-white">{busy ? <Spinner size={14} /> : <FiCheck />} حفظ</button>
-        <button onClick={onCancel} className="btn-ghost flex-1">إلغاء</button>
+      <div className="flex gap-2 pt-1">
+        <Button variant="violet" loading={busy} icon={FiCheck} onClick={() => onSave(form)} className="flex-1 h-12">حفظ المجموعة</Button>
+        <button onClick={onCancel} className="btn-ghost h-12 px-5">إلغاء</button>
       </div>
     </div>
   );

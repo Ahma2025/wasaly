@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FiPlus, FiBarChart2, FiEdit2, FiSlash, FiTrash2, FiCheck } from 'react-icons/fi';
+import { FiPlus, FiBarChart2, FiEdit2, FiSlash, FiTrash2, FiCheck, FiTruck, FiWifi, FiActivity, FiUsers, FiPhone } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { normalizePhone, truthy, num, fmtDate } from '../utils/format';
-import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, StatTile, useConfirm } from '../components/ui';
+import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, StatTile, Avatar, useConfirm } from '../components/ui';
 import { Sk } from '../components/Skeleton';
 
 const PAGE = 30;
@@ -106,57 +106,58 @@ export default function Drivers() {
   const shown = filtered.slice(0, visible);
 
   return (
-    <div className="p-4 space-y-4 animate-fade-up">
-      <PageHeader icon="🛵" title="السائقون" subtitle={`${drivers.length} سائق مسجّل`}
-        action={<PrimaryBtn onClick={() => setShowForm(true)} className="flex items-center gap-1.5"><FiPlus /> سائق</PrimaryBtn>} />
+    <div className="page">
+      <PageHeader icon={<FiTruck />} title="السائقون" subtitle={`${drivers.length} سائق مسجّل · ${stats.online} متصل الآن`}
+        action={<PrimaryBtn onClick={() => setShowForm(true)}><FiPlus /> <span>سائق<span className="hidden sm:inline"> جديد</span></span></PrimaryBtn>} />
 
-      <div className="grid grid-cols-3 gap-3">
-        <StatTile label="متصل" value={stats.online} tone="green" />
-        <StatTile label="مشغول" value={stats.busy} tone="orange" />
-        <StatTile label="الكل" value={drivers.length} tone="violet" />
+      <div className="grid grid-cols-3 lg:grid-cols-4 gap-3 lg:gap-4">
+        <StatTile label="متصل" value={stats.online} tone="green" icon={<FiWifi />} />
+        <StatTile label="مشغول" value={stats.busy} tone="orange" icon={<FiActivity />} />
+        <StatTile label="الكل" value={drivers.length} tone="violet" icon={<FiUsers />} />
+        <div className="hidden lg:block"><StatTile label="محظور" value={stats.blocked} tone="slate" icon={<FiSlash />} /></div>
       </div>
 
-      <SearchInput value={search} onChange={setSearch} placeholder="ابحث بالاسم أو الهاتف أو اللوحة…" loading={refreshing} />
-      <Chips value={filter} onChange={setFilter} options={[
-        ['', 'الكل', drivers.length], ['online', 'متصل', stats.online], ['busy', 'مشغول', stats.busy], ['blocked', 'محظور', stats.blocked],
-      ]} />
+      <div className="lg:card lg:p-4 space-y-3">
+        <SearchInput value={search} onChange={setSearch} placeholder="ابحث بالاسم أو الهاتف أو اللوحة…" loading={refreshing} />
+        <Chips value={filter} onChange={setFilter} options={[
+          ['', 'الكل', drivers.length], ['online', 'متصل', stats.online], ['busy', 'مشغول', stats.busy], ['blocked', 'محظور', stats.blocked],
+        ]} />
+      </div>
 
-      {loading && drivers.length === 0 ? <ListSkeleton rows={6} />
-        : filtered.length === 0 ? <EmptyState icon="🛵" title="لا يوجد سائقون" hint={search ? 'لا نتائج مطابقة' : 'أضف أول سائق من زر «سائق»'} />
+      {loading && drivers.length === 0 ? <ListSkeleton rows={6} grid />
+        : filtered.length === 0 ? <EmptyState icon={<FiTruck />} title="لا يوجد سائقون" hint={search ? 'لا نتائج مطابقة' : 'أضف أول سائق من زر «سائق»'}
+            action={!search && <PrimaryBtn onClick={() => setShowForm(true)}><FiPlus /> إضافة سائق</PrimaryBtn>} />
         : (
-          <div className="space-y-3">
+          <div className="grid gap-3 lg:gap-4 sm:grid-cols-2 2xl:grid-cols-3 items-start stagger">
             {shown.map(d => {
               const online = truthy(d.is_online), busy = truthy(d.is_busy), blocked = truthy(d.is_blocked);
               const open = expanded === uid(d);
               return (
-                <div key={d.id} className="card p-4">
+                <div key={d.id} className={`card card-hover p-4 ${blocked ? 'bg-[#FFFBFB] border-red-100' : ''}`}>
                   <div className="flex items-center gap-3">
-                    <div className="relative w-12 h-12 rounded-2xl bg-violet-50 flex items-center justify-center text-violet-600 font-black text-lg flex-shrink-0">
-                      {d.name?.[0] || '🛵'}
-                      <span className={`absolute -bottom-0.5 -left-0.5 w-3.5 h-3.5 rounded-full ring-2 ring-white ${online ? 'bg-green-500' : 'bg-gray-300'}`} />
-                    </div>
+                    <Avatar name={d.name || 'س'} size={52} rounded={17} tint={blocked ? '#F04438' : '#8B5CF6'} status={online ? (busy ? 'busy' : 'online') : 'off'} />
                     <div className="flex-1 min-w-0">
-                      <p className="font-black text-gray-900 truncate">{d.name}</p>
+                      <p className="font-black text-ink text-[15.5px] truncate">{d.name}</p>
                       <div className="flex items-center gap-1 flex-wrap mt-0.5">
                         <Badge className={online ? 'bg-green-50 text-green-700 ring-green-200' : 'bg-gray-100 text-gray-500 ring-gray-200'}>{online ? 'متصل' : 'غير متصل'}</Badge>
                         {busy && <Badge className="bg-orange-50 text-orange-700 ring-orange-200">مشغول</Badge>}
                         {blocked && <Badge className="bg-red-50 text-red-600 ring-red-200">محظور</Badge>}
                       </div>
-                      <p className="text-xs text-gray-400 mt-1 truncate"><span dir="ltr">{d.phone}</span> · {d.vehicle_type || '—'} · {d.vehicle_plate || 'بدون لوحة'}</p>
+                      <p className="text-[11.5px] text-ink-3 mt-1.5 truncate font-medium flex items-center gap-1.5"><FiPhone className="flex-shrink-0" /><span dir="ltr" className="num">{d.phone}</span> · {d.vehicle_type || '—'} · <span className="font-mono">{d.vehicle_plate || 'بدون لوحة'}</span></p>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-50 text-center">
-                    <div><p className="text-sm font-black text-orange-500 tabular-nums">{d.total_orders || 0}</p><p className="text-[10px] text-gray-400">توصيلة</p></div>
-                    <div><p className="text-sm font-black text-green-600 tabular-nums">{num(d.total_earnings).toFixed(1)}₪</p><p className="text-[10px] text-gray-400">أرباح</p></div>
-                    <div><p className="text-sm font-black text-blue-600 tabular-nums">{num(d.rating).toFixed(1)} ⭐</p><p className="text-[10px] text-gray-400">تقييم</p></div>
+                  <div className="grid grid-cols-3 mt-4 rounded-2xl bg-surface divide-x divide-x-reverse divide-surface-line text-center py-2.5">
+                    <div><p className="text-[15px] font-black text-ink num">{d.total_orders || 0}</p><p className="text-[10.5px] text-ink-3 font-bold">توصيلة</p></div>
+                    <div><p className="text-[15px] font-black text-ink num">{num(d.total_earnings).toFixed(1)}<span className="text-[11px] text-ink-3">₪</span></p><p className="text-[10.5px] text-ink-3 font-bold">أرباح</p></div>
+                    <div><p className="text-[15px] font-black text-ink num">{num(d.rating).toFixed(1)}<span className="text-amber-400 text-[12px]"> ★</span></p><p className="text-[10.5px] text-ink-3 font-bold">تقييم</p></div>
                   </div>
 
-                  <div className="grid grid-cols-4 gap-2 mt-3">
-                    <button onClick={() => setExpanded(open ? null : uid(d))} className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 ${open ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600'}`}><FiBarChart2 /> تفاصيل</button>
-                    <button onClick={() => setEditing(d)} className="py-2 rounded-xl text-xs font-bold bg-orange-50 text-orange-600 flex items-center justify-center gap-1"><FiEdit2 /> المركبة</button>
-                    <button onClick={() => blockDriver(d)} className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 ${blocked ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-700'}`}>{blocked ? <><FiCheck /> رفع</> : <><FiSlash /> حظر</>}</button>
-                    <button onClick={() => deleteDriver(d)} className="py-2 rounded-xl text-xs font-bold bg-red-50 text-red-600 flex items-center justify-center gap-1"><FiTrash2 /> حذف</button>
+                  <div className="grid grid-cols-4 gap-1.5 mt-3">
+                    <button onClick={() => setExpanded(open ? null : uid(d))} aria-expanded={open} className={`btn btn-sm !px-1 ${open ? 'btn-dark' : 'bg-sky-50 text-sky-700 hover:bg-sky-100'}`}><FiBarChart2 /> تفاصيل</button>
+                    <button onClick={() => setEditing(d)} className="btn btn-sm !px-1 btn-soft"><FiEdit2 /> المركبة</button>
+                    <button onClick={() => blockDriver(d)} className={`btn btn-sm !px-1 ${blocked ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>{blocked ? <><FiCheck /> رفع</> : <><FiSlash /> حظر</>}</button>
+                    <button onClick={() => deleteDriver(d)} className="btn btn-sm !px-1 btn-danger"><FiTrash2 /> حذف</button>
                   </div>
 
                   {open && <DriverStats driverId={uid(d)} />}
@@ -168,7 +169,7 @@ export default function Drivers() {
 
       <LoadMore shown={shown.length} total={filtered.length} onMore={() => setVisible(v => v + PAGE)} />
 
-      <Modal open={showForm} onClose={() => setShowForm(false)} title="سائق جديد" subtitle="ينشئ حساب السائق وملف المركبة">
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="سائق جديد" subtitle="ينشئ حساب السائق وملف المركبة" icon={<FiTruck />}>
         <div className="space-y-3">
           <Field label="الاسم الكامل *"><input className="inp" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>
           <Field label="رقم الهاتف *"><input className="inp" inputMode="tel" dir="ltr" style={{ textAlign: 'right' }} placeholder="05XXXXXXXX" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></Field>
@@ -215,7 +216,7 @@ function EditVehicle({ driver, onClose, onSaved }) {
 
   const options = VEHICLES.includes(v.vehicle_type) ? VEHICLES : [v.vehicle_type, ...VEHICLES];
   return (
-    <Modal open onClose={onClose} title="تعديل المركبة" subtitle={driver.name} size="sm">
+    <Modal open onClose={onClose} title="تعديل المركبة" subtitle={driver.name} size="sm" icon={<FiEdit2 />}>
       <div className="space-y-3">
         <Field label="نوع المركبة">
           <select className="inp" value={v.vehicle_type} onChange={e => setV(p => ({ ...p, vehicle_type: e.target.value }))}>
@@ -236,27 +237,33 @@ function DriverStats({ driverId }) {
     api.get(`/admin/driver-stats/${driverId}`).then(r => setStats(r.data || {})).catch(() => setFailed(true));
   }, [driverId]);
 
-  if (failed) return <p className="mt-3 text-xs text-center text-gray-400">تعذّر تحميل الإحصائيات</p>;
+  if (failed) return <p className="mt-3 text-xs text-center text-ink-3 bg-surface rounded-xl py-3 font-bold">تعذّر تحميل الإحصائيات</p>;
   if (!stats) return <div className="mt-3 flex gap-2"><Sk h={44} r={12} className="flex-1" /><Sk h={44} r={12} className="flex-1" /><Sk h={44} r={12} className="flex-1" /></div>;
 
   return (
-    <div className="mt-3 bg-gradient-to-br from-orange-50 to-rose-50 rounded-2xl p-3 space-y-2 animate-fade-up">
+    <div className="mt-3 grad-ink text-white rounded-2xl p-4 space-y-3 animate-fade-up">
       <div className="grid grid-cols-3 gap-2 text-center">
-        <div><p className="font-black text-orange-600 tabular-nums">{stats.total_orders || 0}</p><p className="text-[10px] text-gray-500">إجمالي الطلبات</p></div>
-        <div><p className="font-black text-green-600 tabular-nums">{num(stats.total_earnings).toFixed(2)}₪</p><p className="text-[10px] text-gray-500">إجمالي الأرباح</p></div>
-        <div><p className="font-black text-blue-600 tabular-nums">{num(stats.avg_per_delivery).toFixed(2)}₪</p><p className="text-[10px] text-gray-500">متوسط التوصيلة</p></div>
+        <div><p className="font-black num text-[15px]">{stats.total_orders || 0}</p><p className="text-[10px] text-white/55 font-bold">إجمالي الطلبات</p></div>
+        <div><p className="font-black num text-[15px] text-green-300">{num(stats.total_earnings).toFixed(2)}₪</p><p className="text-[10px] text-white/55 font-bold">إجمالي الأرباح</p></div>
+        <div><p className="font-black num text-[15px] text-orange-300">{num(stats.avg_per_delivery).toFixed(2)}₪</p><p className="text-[10px] text-white/55 font-bold">متوسط التوصيلة</p></div>
       </div>
-      {stats.weekly?.length > 0 && (
-        <div className="space-y-1 pt-2 border-t border-orange-100">
-          <p className="text-xs font-bold text-gray-600">آخر 7 أيام</p>
-          {stats.weekly.map((w, i) => (
-            <div key={i} className="flex justify-between text-xs">
-              <span className="text-gray-500">{fmtDate(w.date, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
-              <span className="tabular-nums">{w.orders} طلب · <strong>{num(w.earnings).toFixed(2)}₪</strong></span>
+      {stats.weekly?.length > 0 && (() => {
+        const max = Math.max(1, ...stats.weekly.map(w => num(w.earnings)));
+        return (
+          <div className="pt-3 border-t border-white/10">
+            <p className="text-[11px] font-bold text-white/60 mb-2">آخر 7 أيام</p>
+            <div className="flex items-end gap-1.5 h-24" dir="ltr">
+              {stats.weekly.map((w, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end" title={`${fmtDate(w.date)} · ${w.orders} طلب · ${num(w.earnings).toFixed(2)}₪`}>
+                  <span className="text-[9px] text-white/60 num">{num(w.earnings).toFixed(0)}</span>
+                  <div className="w-full rounded-t-md grad-sunset grow-y" style={{ height: `${Math.max(4, (num(w.earnings) / max) * 70)}%`, animationDelay: `${i * 50}ms` }} />
+                  <span className="text-[9px] text-white/50">{fmtDate(w.date, { weekday: 'short' })}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

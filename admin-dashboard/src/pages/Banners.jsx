@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { FiImage, FiTrash2, FiPlus } from 'react-icons/fi';
+import { FiImage, FiTrash2, FiPlus, FiUploadCloud } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { truthy } from '../utils/format';
-import { PageHeader, EmptyState, Field, Badge, useConfirm } from '../components/ui';
+import { PageHeader, EmptyState, Field, Button, Switch, SectionHeader, useConfirm } from '../components/ui';
 import { Sk } from '../components/Skeleton';
 
 export default function Banners() {
@@ -81,58 +81,66 @@ export default function Banners() {
   };
 
   return (
-    <div className="p-4 space-y-4 animate-fade-up">
-      <PageHeader icon="🖼️" title="الإعلانات" subtitle={`${banners.length} إعلان · تظهر في واجهة تطبيق الزبون`} />
+    <div className="page">
+      <PageHeader icon={<FiImage />} title="الإعلانات" subtitle={`${banners.length} إعلان · ${banners.filter(b => truthy(b.is_active)).length} نشط · تظهر في واجهة تطبيق الزبون`} />
 
-      <form onSubmit={submit} className="card p-4 space-y-3">
-        <h2 className="font-black text-gray-900 text-sm">إضافة إعلان جديد</h2>
-        <button type="button" onClick={() => fileRef.current?.click()}
-          className="w-full border-2 border-dashed border-orange-200 rounded-2xl overflow-hidden bg-orange-50/60 hover:bg-orange-50" style={{ minHeight: 140 }}>
-          {preview ? (
-            <img src={preview} alt="معاينة" className="w-full object-cover" style={{ maxHeight: 200 }} />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-36 text-orange-400">
-              <FiImage className="text-4xl mb-2" />
-              <span className="text-sm font-bold">اضغط لاختيار صورة الإعلان</span>
-              <span className="text-xs text-orange-300 mt-1">JPG, PNG, WEBP — حتى 10MB</span>
-            </div>
-          )}
-        </button>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickImage} />
-        <Field label="عنوان الإعلان *"><input className="inp" value={form.title_ar} onChange={e => setForm(p => ({ ...p, title_ar: e.target.value }))} placeholder="مثال: عروض رمضان 🌙" /></Field>
-        <Field label="الترتيب" hint="(1 = أولاً · فارغ = في النهاية)"><input className="inp" type="number" min="1" value={form.sort_order} placeholder="تلقائي" onChange={e => setForm(p => ({ ...p, sort_order: e.target.value }))} /></Field>
-        <button type="submit" disabled={uploading} className="w-full btn-lux py-3 disabled:opacity-60 flex items-center justify-center gap-2">
-          {uploading ? <><span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" /> جاري الرفع…</> : <><FiPlus /> إضافة الإعلان</>}
-        </button>
-      </form>
-
-      {loading && banners.length === 0 ? (
-        <div className="space-y-3">{[...Array(3)].map((_, i) => <Sk key={i} h={84} r={18} />)}</div>
-      ) : banners.length === 0 ? (
-        <EmptyState icon="🖼️" title="لا توجد إعلانات بعد" />
-      ) : (
-        <div className="card divide-y divide-gray-50 overflow-hidden">
-          {[...banners].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).map(b => {
-            const active = truthy(b.is_active);
-            return (
-              <div key={b.id} className="flex items-center gap-3 p-3">
-                <div className="w-24 h-16 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
-                  {b.image ? <img src={b.image} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-400 text-xl"><FiImage /></div>}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-gray-800 text-sm truncate">{b.title_ar || 'بدون عنوان'}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">الترتيب: {b.sort_order ?? 0}</p>
-                  <Badge className={`mt-1 ${active ? 'bg-green-50 text-green-700 ring-green-200' : 'bg-gray-100 text-gray-500 ring-gray-200'}`}>{active ? '● نشط' : '○ متوقف'}</Badge>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <button onClick={() => toggleActive(b)} className={`text-xs font-bold px-3 py-1.5 rounded-lg ${active ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'}`}>{active ? 'إيقاف' : 'تفعيل'}</button>
-                  <button onClick={() => deleteBanner(b)} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-red-50 text-red-500 flex items-center justify-center gap-1"><FiTrash2 /> حذف</button>
-                </div>
+      <div className="grid gap-4 lg:gap-6 lg:grid-cols-[380px_minmax(0,1fr)] items-start">
+        <form onSubmit={submit} className="card p-4 sm:p-5 space-y-3.5 lg:sticky lg:top-[92px]">
+          <SectionHeader title="إضافة إعلان جديد" hint="نسبة 16:9 تعطي أفضل نتيجة" />
+          <button type="button" onClick={() => fileRef.current?.click()}
+            className="group relative w-full aspect-[16/9] border-2 border-dashed border-orange-200 rounded-[18px] overflow-hidden bg-gradient-to-br from-orange-50/80 to-rose-50/50 hover:border-orange-300">
+            {preview ? (
+              <>
+                <img src={preview} alt="معاينة" className="absolute inset-0 w-full h-full object-cover" />
+                <span className="absolute bottom-2 left-2 glass-light rounded-full px-3 py-1 text-[11px] font-extrabold text-ink opacity-0 group-hover:opacity-100 transition-opacity">تغيير الصورة</span>
+              </>
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-brand-500">
+                <span className="w-14 h-14 rounded-2xl bg-white shadow-soft flex items-center justify-center text-2xl mb-2 transition-transform duration-300 ease-spring group-hover:scale-110 group-hover:-translate-y-0.5"><FiUploadCloud /></span>
+                <span className="text-sm font-extrabold">اضغط لاختيار صورة الإعلان</span>
+                <span className="text-[11px] text-orange-400 mt-1">JPG, PNG, WEBP — حتى 10MB</span>
               </div>
-            );
-          })}
-        </div>
-      )}
+            )}
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickImage} />
+          <Field label="عنوان الإعلان *"><input className="inp" value={form.title_ar} onChange={e => setForm(p => ({ ...p, title_ar: e.target.value }))} placeholder="مثال: عروض رمضان 🌙" /></Field>
+          <Field label="الترتيب" hint="(1 = أولاً · فارغ = في النهاية)"><input className="inp" type="number" min="1" value={form.sort_order} placeholder="تلقائي" onChange={e => setForm(p => ({ ...p, sort_order: e.target.value }))} /></Field>
+          <Button type="submit" size="lg" className="w-full" loading={uploading} icon={<FiPlus />}>{uploading ? 'جاري الرفع…' : 'إضافة الإعلان'}</Button>
+        </form>
+
+        {loading && banners.length === 0 ? (
+          <div className="grid gap-4 sm:grid-cols-2">{[...Array(4)].map((_, i) => <Sk key={i} h={220} r={20} />)}</div>
+        ) : banners.length === 0 ? (
+          <EmptyState icon={<FiImage />} title="لا توجد إعلانات بعد" hint="ارفع أول إعلان ليظهر في واجهة تطبيق الزبون" />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 stagger">
+            {[...banners].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).map(b => {
+              const active = truthy(b.is_active);
+              return (
+                <article key={b.id} className="card overflow-hidden group">
+                  <div className="relative aspect-[16/9] bg-surface-sunken overflow-hidden">
+                    {b.image ? <img src={b.image} alt="" loading="lazy" className={`w-full h-full object-cover transition-transform duration-500 ease-lux group-hover:scale-105 ${active ? '' : 'grayscale opacity-60'}`} />
+                      : <div className="w-full h-full flex items-center justify-center text-ink-4 text-3xl"><FiImage /></div>}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/0 to-black/0" />
+                    <span className="absolute top-3 right-3 w-8 h-8 rounded-xl glass-light text-ink font-black text-sm flex items-center justify-center num shadow-soft" title="الترتيب">{b.sort_order ?? 0}</span>
+                    <span className={`absolute top-3 left-3 rounded-full px-2.5 py-1 text-[10.5px] font-extrabold flex items-center gap-1.5 ${active ? 'bg-green-500 text-white' : 'bg-white/90 text-ink-2'}`}>
+                      {active ? <><span className="live-dot !bg-white" /> نشط</> : 'متوقف'}
+                    </span>
+                    <p className="absolute bottom-3 right-3 left-3 text-white font-extrabold text-[15px] truncate drop-shadow">{b.title_ar || 'بدون عنوان'}</p>
+                  </div>
+                  <div className="p-3 flex items-center gap-2">
+                    <div className="flex-1 flex items-center gap-2.5">
+                      <Switch checked={active} onChange={() => toggleActive(b)} label={active ? 'إيقاف الإعلان' : 'تفعيل الإعلان'} />
+                      <span className="text-xs font-bold text-ink-2">{active ? 'ظاهر للزبائن' : 'مخفي'}</span>
+                    </div>
+                    <button onClick={() => deleteBanner(b)} className="btn btn-sm btn-danger"><FiTrash2 /> حذف</button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

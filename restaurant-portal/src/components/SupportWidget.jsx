@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { FiHeadphones, FiX, FiMessageCircle, FiPhone, FiSend } from 'react-icons/fi';
+import { FiHeadphones, FiX, FiMessageCircle, FiPhone, FiSend, FiChevronLeft } from 'react-icons/fi';
 import api from '../utils/api';
 import { SUPPORT_PHONE } from '../utils/config';
 import { formatDateTime } from '../utils/format';
+import { cx } from './ui';
 
 const SEEN_KEY = 'support_seen_admin';
 const isMine = (m) => m.sender === 'user' || m.sender === 'restaurant' || m.is_mine === true;
+const QUICK = ['مشكلة في طلب', 'تعديل بيانات المطعم', 'استفسار عن المستحقات', 'مشكلة في الطابعة'];
 
 // زر الدعم العائم — فوق القائمة السفلية ويحترم المساحة الآمنة
 export default function SupportWidget() {
@@ -16,6 +18,7 @@ export default function SupportWidget() {
   const [sending, setSending] = useState(false);
   const [unread, setUnread] = useState(0);
   const endRef = useRef(null);
+  const inputRef = useRef(null);
   const loggedIn = !!localStorage.getItem('token');
 
   const load = useCallback(() => api.get('/support/chat').then(r => {
@@ -52,6 +55,14 @@ export default function SupportWidget() {
 
   useEffect(() => { if (chat) endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, chat]);
 
+  // Esc يغلق اللوحة
+  useEffect(() => {
+    if (!menu && !chat) return;
+    const onKey = (e) => { if (e.key === 'Escape') { setMenu(false); setChat(false); } };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menu, chat]);
+
   const send = async () => {
     const msg = text.trim();
     if (!msg || sending) return;
@@ -64,47 +75,67 @@ export default function SupportWidget() {
 
   if (!loggedIn) return null;
 
-  const fabBottom = 'calc(var(--nav-h) + var(--sab) + 14px)';
-  const panelBottom = 'calc(var(--nav-h) + var(--sab) + 78px)';
+  const fabBottom = 'calc(var(--nav-offset) + 14px)';
+  const panelBottom = 'calc(var(--nav-offset) + 78px)';
+  const open = menu || chat;
 
   return (
     <div dir="rtl">
-      {(menu || chat) && <div className="fixed inset-0 z-[55] bg-black/10 animate-fade-in" onClick={() => { setMenu(false); setChat(false); }} />}
+      {open && <div className="fixed inset-0 z-[55] bg-ink/20 backdrop-blur-[1px] animate-fade-in" onClick={() => { setMenu(false); setChat(false); }} />}
 
       {chat && (
         <div role="dialog" aria-label="محادثة الدعم"
-          className="fixed left-4 z-[60] bg-white rounded-3xl shadow-card border border-gray-100 flex flex-col overflow-hidden animate-sheet"
-          style={{ bottom: panelBottom, width: 'min(360px, calc(100vw - 32px))', height: 'min(480px, calc(100vh - var(--sat) - var(--nav-h) - var(--sab) - 120px))' }}>
-          <div className="grad-brand text-white px-4 py-3 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl glass flex items-center justify-center"><FiHeadphones aria-hidden /></div>
-            <div className="flex-1">
-              <p className="font-black leading-none">دعم وصلّي</p>
-              <p className="text-[11px] text-white/85 mt-1">نرد عليك بأسرع وقت</p>
+          className="fixed left-4 z-[60] bg-white rounded-[28px] shadow-lift border border-surface-line flex flex-col overflow-hidden animate-pop origin-bottom-left"
+          style={{ bottom: panelBottom, width: 'min(380px, calc(100vw - 32px))', height: 'min(540px, calc(100vh - var(--sat) - var(--nav-offset) - 120px))' }}>
+          <div className="grad-mesh text-white px-4 py-3.5 flex items-center gap-3 sheen">
+            <div className="relative z-[1] w-11 h-11 rounded-[14px] glass flex items-center justify-center">
+              <FiHeadphones size={19} aria-hidden />
+              <span className="absolute -bottom-0.5 -left-0.5 w-3 h-3 rounded-full bg-emerald-300 ring-2 ring-white/80" aria-hidden />
             </div>
-            <button onClick={() => setChat(false)} aria-label="إغلاق المحادثة" className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center"><FiX /></button>
+            <div className="flex-1 relative z-[1]">
+              <p className="font-extrabold leading-none">دعم وصلّي</p>
+              <p className="text-[11.5px] text-white/85 mt-1.5">فريقنا يرد عليك بأسرع وقت</p>
+            </div>
+            <button onClick={() => setChat(false)} aria-label="إغلاق المحادثة" className="relative z-[1] w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center"><FiX /></button>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 bg-gray-50">
-            {messages.length === 0 && <p className="text-center text-gray-400 text-sm mt-8">ابدأ محادثة مع فريق وصلّي</p>}
+          <div className="flex-1 overflow-y-auto p-3.5 flex flex-col gap-2.5 bg-surface" aria-live="polite">
+            {messages.length === 0 && (
+              <div className="text-center mt-6 px-4 animate-fade-up">
+                <div className="w-16 h-16 mx-auto rounded-[20px] bg-white shadow-soft text-brand-500 flex items-center justify-center mb-3"><FiMessageCircle size={28} aria-hidden /></div>
+                <p className="font-extrabold text-ink">كيف نقدر نساعدك؟</p>
+                <p className="text-[12.5px] text-ink-3 mt-1">اختر موضوعًا أو اكتب رسالتك</p>
+                <div className="flex flex-wrap justify-center gap-1.5 mt-4">
+                  {QUICK.map(q => (
+                    <button key={q} onClick={() => { setText(q + ': '); inputRef.current?.focus(); }}
+                      className="h-8 px-3 rounded-full bg-white border border-surface-line text-[12px] font-bold text-ink-2 hover:border-brand-300 hover:text-brand-600">{q}</button>
+                  ))}
+                </div>
+              </div>
+            )}
             {messages.map(m => {
               const mine = isMine(m);
               return (
                 // في RTL: رسائلي على اليمين (start) ورسائل الإدارة على اليسار (end)
-                <div key={m.id} className={`max-w-[82%] ${mine ? 'self-start' : 'self-end'}`}>
-                  <div className={`px-3.5 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${mine ? 'bg-brand-500 text-white rounded-tr-md' : 'bg-white border border-gray-200 text-gray-800 rounded-tl-md'} ${m.pending ? 'opacity-70' : ''}`}>
+                <div key={m.id} className={cx('max-w-[82%] animate-fade-up', mine ? 'self-start' : 'self-end')}>
+                  <div className={cx('px-3.5 py-2.5 text-[14px] leading-relaxed whitespace-pre-wrap break-words',
+                    mine ? 'grad-brand text-white rounded-[18px] rounded-tr-md shadow-[0_6px_16px_rgba(255,107,0,.2)]' : 'bg-white border border-surface-line text-ink rounded-[18px] rounded-tl-md shadow-soft',
+                    m.pending && 'opacity-70')}>
                     {m.message}
                   </div>
-                  {m.created_at && <p className={`text-[10px] text-gray-400 mt-0.5 ${mine ? 'text-right' : 'text-left'}`}>{formatDateTime(m.created_at)}</p>}
+                  <p className={cx('text-[10px] text-ink-3 mt-1 px-1', mine ? 'text-right' : 'text-left')}>
+                    {m.pending ? 'جارٍ الإرسال…' : m.created_at ? formatDateTime(m.created_at) : ''}
+                  </p>
                 </div>
               );
             })}
             <div ref={endRef} />
           </div>
-          <div className="p-2 border-t border-gray-100 flex items-end gap-2 bg-white">
-            <textarea rows={1} className="input flex-1 resize-none max-h-28" placeholder="اكتب رسالتك…" value={text} aria-label="نص الرسالة"
+          <div className="p-2.5 border-t border-surface-line flex items-end gap-2 bg-white">
+            <textarea ref={inputRef} rows={1} className="input flex-1 resize-none max-h-28 !h-auto min-h-[46px] py-2.5 rounded-[18px] bg-surface border-transparent focus:bg-white" placeholder="اكتب رسالتك…" value={text} aria-label="نص الرسالة"
               onChange={e => setText(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
             <button onClick={send} disabled={!text.trim() || sending} aria-label="إرسال"
-              className="w-11 h-11 rounded-full grad-brand text-white flex-shrink-0 flex items-center justify-center shadow-brand disabled:opacity-50">
+              className="w-[46px] h-[46px] rounded-full grad-brand text-white flex-shrink-0 flex items-center justify-center shadow-brand disabled:opacity-40 disabled:shadow-none">
               <FiSend className="-scale-x-100" aria-hidden />
             </button>
           </div>
@@ -112,28 +143,32 @@ export default function SupportWidget() {
       )}
 
       {menu && !chat && (
-        <div className="fixed left-4 z-[60] flex flex-col gap-2 items-start animate-sheet" style={{ bottom: panelBottom }}>
+        <div className="fixed left-4 z-[60] flex flex-col gap-2 items-start stagger" style={{ bottom: panelBottom }}>
           <button onClick={() => { setMenu(false); setChat(true); }}
-            className="flex items-center gap-2 bg-white text-gray-800 px-4 py-3 rounded-2xl font-bold text-sm shadow-card border border-gray-100">
-            <span className="w-8 h-8 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center"><FiMessageCircle aria-hidden /></span>
-            محادثة مع الإدارة
-            {unread > 0 && <span className="chip bg-rose-500 text-white">{unread}</span>}
+            className="flex items-center gap-3 bg-white text-ink ps-2 pe-3 h-14 rounded-[18px] font-bold text-sm shadow-lift border border-surface-line min-w-[230px]">
+            <span className="w-10 h-10 rounded-[12px] bg-brand-50 text-brand-600 flex items-center justify-center"><FiMessageCircle size={18} aria-hidden /></span>
+            <span className="flex-1 text-right">محادثة مع الإدارة</span>
+            {unread > 0 ? <span className="chip bg-coral text-white tnum">{unread}</span> : <FiChevronLeft className="text-ink-3" aria-hidden />}
           </button>
           <a href={`tel:${SUPPORT_PHONE}`} onClick={() => setMenu(false)}
-            className="flex items-center gap-2 bg-white text-gray-800 px-4 py-3 rounded-2xl font-bold text-sm shadow-card border border-gray-100">
-            <span className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center"><FiPhone aria-hidden /></span>
-            اتصل بوصلّي
+            className="pressable flex items-center gap-3 bg-white text-ink ps-2 pe-3 h-14 rounded-[18px] font-bold text-sm shadow-lift border border-surface-line min-w-[230px]">
+            <span className="w-10 h-10 rounded-[12px] bg-success-soft text-success flex items-center justify-center"><FiPhone size={18} aria-hidden /></span>
+            <span className="flex-1">اتصل بوصلّي</span>
+            <span dir="ltr" className="text-[11px] text-ink-3 tnum">{SUPPORT_PHONE}</span>
           </a>
         </div>
       )}
 
       <button onClick={() => (chat ? setChat(false) : setMenu(m => !m))}
-        aria-label={menu || chat ? 'إغلاق الدعم' : 'الدعم الفني'} aria-expanded={menu || chat}
-        className="fixed left-4 z-[60] w-12 h-12 rounded-2xl grad-brand text-white shadow-brand flex items-center justify-center"
+        aria-label={open ? 'إغلاق الدعم' : 'الدعم الفني'} aria-expanded={open}
+        className={cx('fixed left-4 z-[60] w-[52px] h-[52px] rounded-[18px] text-white flex items-center justify-center',
+          open ? 'bg-ink shadow-lift' : 'grad-brand shadow-brand', unread > 0 && !open && 'pulse-dot')}
         style={{ bottom: fabBottom }}>
-        {(menu || chat) ? <FiX size={22} aria-hidden /> : <FiHeadphones size={22} aria-hidden />}
-        {unread > 0 && !menu && !chat && (
-          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-black flex items-center justify-center ring-2 ring-white">{unread}</span>
+        <span className={cx('transition-transform duration-300 ease-spring', open && 'rotate-90')}>
+          {open ? <FiX size={22} aria-hidden /> : <FiHeadphones size={22} aria-hidden />}
+        </span>
+        {unread > 0 && !open && (
+          <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-coral text-[10.5px] font-black flex items-center justify-center ring-2 ring-white tnum">{unread}</span>
         )}
       </button>
     </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Linking, Alert, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, Linking, Alert, ScrollView, RefreshControl, Animated, Easing } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -7,15 +7,15 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import GradientHeader from '../components/GradientHeader';
-import OrderMoney from '../components/OrderMoney';
+import OrderMoney, { CashBadge } from '../components/OrderMoney';
 import StatusBadge from '../components/StatusBadge';
-import { Skeleton, SkeletonCard } from '../components/Anim';
+import { Skeleton, SkeletonCard, FadeIn, PopIn, Pulse, Press, GradientButton, EmptyState, Burst, isReducedMotion } from '../components/Anim';
 import api from '../utils/api';
 import { useSocketEvent } from '../utils/socket';
 import { useAuth } from '../context/AuthContext';
 import { useDriver } from '../context/DriverContext';
 import { useDriverLocation } from '../context/LocationContext';
-import { COLORS, GRADIENTS, SHADOW, RTL } from '../theme';
+import { COLORS, GRADIENTS, SHADOW, RTL, RADIUS } from '../theme';
 import { SERVER_URL } from '../config';
 import {
   isPersonal, isRide, isAccepted, pickupPoint, orderNo, orderTitle, money, cashToCollect,
@@ -34,18 +34,18 @@ function getSteps(o) {
   else pickupDesc = 'توجّه إلى المطعم لاستلام الطلب';
   return [
     {
-      next: 'on_the_way', icon: '🏍️',
+      next: 'on_the_way', icon: p ? 'flag' : 'storefront',
       label: p ? 'التوجّه لنقطة الاستلام' : 'التوجّه للمطعم',
       desc: pickupDesc,
       button: p ? (ride ? 'ركب الراكب — ابدأ الرحلة' : 'استلمت الطرد') : 'استلمت الطلب من المطعم',
     },
     {
-      next: 'delivered', icon: '📦',
+      next: 'delivered', icon: 'bicycle',
       label: p ? 'في الطريق لنقطة التسليم' : 'في الطريق للزبون',
       desc: p ? 'توجّه إلى نقطة التسليم' : 'توجّه إلى موقع الزبون',
       button: p ? (ride ? 'وصلنا الوجهة' : 'تم تسليم الطرد') : 'تم التوصيل للزبون',
     },
-    { next: null, icon: '✅', label: p ? 'تم التسليم' : 'تم التوصيل', desc: 'اكتمل الطلب بنجاح', button: null },
+    { next: null, icon: 'checkmark-done', label: p ? 'تم التسليم' : 'تم التوصيل', desc: 'اكتمل الطلب بنجاح', button: null },
   ];
 }
 
@@ -143,6 +143,7 @@ export default function DeliveryScreen({ route, navigation }) {
   const [loadError, setLoadError] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [celebrate, setCelebrate] = useState(false);
   const webViewRef = useRef(null);
   const updatingRef = useRef(false);
   const mounted = useRef(true);
@@ -239,6 +240,7 @@ export default function DeliveryScreen({ route, navigation }) {
       if (next === 'delivered') {
         setOrder(o => ({ ...o, status: 'delivered' }));
         setActive(null);
+        setCelebrate(true);
         const earned = driverFee(order) + tipOf(order);
         Alert.alert('رائع! 🎉', `${personal ? 'تم إكمال الطلب' : 'تم إكمال التوصيل'} بنجاح\nأُضيف أجرك ${money(earned)} لمحفظتك`, [
           { text: 'حسناً', onPress: leave },
@@ -289,125 +291,144 @@ export default function DeliveryScreen({ route, navigation }) {
   const target = current === 0 ? pick : { lat: dropLat, lng: dropLng };
   const onRefresh = async () => { setRefreshing(true); await loadOrder(); setRefreshing(false); };
 
+  const earnedTotal = order ? driverFee(order) + tipOf(order) : 0;
+
   return (
     <View style={styles.container}>
       <GradientHeader
         title={order ? `${personal ? 'طلب' : 'توصيل'} #${orderNo(order)}` : 'تفاصيل التوصيل'}
         subtitle={order ? orderTitle(order) : undefined}
-        right={order ? <Ionicons name="refresh" size={20} color="#FFF" onPress={onRefresh} /> : null}
+        rightIcon={order ? 'refresh' : undefined}
+        onRightPress={onRefresh}
+        rightLabel="تحديث الطلب"
       />
 
-      <View style={styles.mapWrap}>
-        {order ? (
-          <WebView
-            ref={webViewRef}
-            source={{ html: mapHtml, baseUrl: SERVER_URL }}
-            style={styles.map}
-            javaScriptEnabled
-            domStorageEnabled
-            originWhitelist={['*']}
-            mixedContentMode="always"
-            onMessage={() => {}}
-            onLoadEnd={() => {
-              if (coords) webViewRef.current?.postMessage(JSON.stringify({ type: 'driver_location', lat: coords.lat, lng: coords.lng }));
-            }}
-          />
-        ) : <Skeleton height="100%" radius={0} />}
-        {current === 1 && (
-          <View style={styles.liveBadge}>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveText}>مباشر</Text>
-          </View>
-        )}
-        <TouchableOpacity style={styles.recenterBtn} onPress={() => webViewRef.current?.postMessage(JSON.stringify({ type: 'recenter' }))}>
-          <Ionicons name="locate" size={20} color={COLORS.primary} />
-        </TouchableOpacity>
-        {order && current < 2 && (
-          <TouchableOpacity style={styles.navBtn} onPress={() => openMaps(target.lat, target.lng)} activeOpacity={0.9}>
-            <Ionicons name="navigate" size={16} color="#FFF" />
-            <Text style={styles.navBtnText}>{current === 0 ? (personal ? 'ملاحة لنقطة الاستلام' : 'ملاحة للمطعم') : (personal ? 'ملاحة لنقطة التسليم' : 'ملاحة للزبون')}</Text>
-          </TouchableOpacity>
-        )}
+      {/* الخريطة */}
+      <View style={[styles.mapShell, SHADOW.card]}>
+        <View style={styles.mapWrap}>
+          {order ? (
+            <WebView
+              ref={webViewRef}
+              source={{ html: mapHtml, baseUrl: SERVER_URL }}
+              style={styles.map}
+              javaScriptEnabled
+              domStorageEnabled
+              originWhitelist={['*']}
+              mixedContentMode="always"
+              onMessage={() => {}}
+              onLoadEnd={() => {
+                if (coords) webViewRef.current?.postMessage(JSON.stringify({ type: 'driver_location', lat: coords.lat, lng: coords.lng }));
+              }}
+            />
+          ) : <Skeleton height="100%" radius={0} />}
+          <LinearGradient colors={['rgba(20,20,43,0.28)', 'rgba(20,20,43,0)']} style={styles.mapScrim} pointerEvents="none" />
+          {current === 1 && (
+            <View style={styles.liveBadge} accessibilityLabel="تتبّع مباشر">
+              <Pulse to={1.6} duration={700}><View style={styles.liveDot} /></Pulse>
+              <Text style={styles.liveText}>مباشر</Text>
+            </View>
+          )}
+          <Press style={styles.recenterBtn} onPress={() => webViewRef.current?.postMessage(JSON.stringify({ type: 'recenter' }))} accessibilityLabel="توسيط الخريطة على موقعي">
+            <Ionicons name="locate" size={21} color={COLORS.primary} />
+          </Press>
+          {order && current < 2 && (
+            <Press style={[styles.navBtn, SHADOW.float]} onPress={() => openMaps(target.lat, target.lng)} hapticStyle="medium"
+              accessibilityLabel={current === 0 ? 'ملاحة إلى نقطة الاستلام' : 'ملاحة إلى نقطة التسليم'}>
+              <LinearGradient colors={GRADIENTS.sunset} start={{ x: 1, y: 0 }} end={{ x: 0, y: 1 }} style={styles.navBtnGrad}>
+                <Ionicons name="navigate" size={17} color="#FFF" />
+                <Text style={styles.navBtnText}>{current === 0 ? (personal ? 'ملاحة لنقطة الاستلام' : 'ملاحة للمطعم') : (personal ? 'ملاحة لنقطة التسليم' : 'ملاحة للزبون')}</Text>
+              </LinearGradient>
+            </Press>
+          )}
+        </View>
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 14, paddingBottom: 24, gap: 12 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />}>
         {!order ? (
           loadError ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>تعذّر تحميل الطلب</Text>
-              <TouchableOpacity style={styles.retryBtn} onPress={loadOrder}><Text style={styles.retryText}>إعادة المحاولة</Text></TouchableOpacity>
-            </View>
-          ) : (<><SkeletonCard lines={4} /><SkeletonCard lines={3} /></>)
+            <EmptyState icon="cloud-offline-outline" tone="red" title="تعذّر تحميل الطلب" text="تحقّق من الاتصال بالإنترنت ثم أعد المحاولة" actionLabel="إعادة المحاولة" actionIcon="refresh" onAction={loadOrder} />
+          ) : (<><SkeletonCard lines={2} /><SkeletonCard lines={4} /><SkeletonCard lines={3} /></>)
         ) : (
           <>
+            {/* مبلغ التحصيل — أول ما تراه العين */}
+            {current < 2 && (
+              <FadeIn>
+                <CashBadge order={order} />
+              </FadeIn>
+            )}
+
             {/* جاهزية المطعم */}
-            {!personal && current === 0 && (order.status === 'ready' ? (
-              <View style={[styles.banner, { backgroundColor: COLORS.greenSoft }]}>
-                <Ionicons name="checkmark-done-circle" size={22} color={COLORS.greenDeep} />
-                <Text style={[styles.bannerText, { color: COLORS.greenDeep }, RTL.text]}>المطعم جاهز — الطلب بانتظارك</Text>
-              </View>
-            ) : (
-              <View style={[styles.banner, { backgroundColor: COLORS.amberSoft }]}>
-                <Ionicons name="time" size={22} color={COLORS.amber} />
-                <Text style={[styles.bannerText, { color: COLORS.text }, RTL.text]}>المطعم ما زال يحضّر الطلب</Text>
-              </View>
-            ))}
+            {!personal && current === 0 && (
+              <FadeIn key={order.status}>
+                {order.status === 'ready' ? (
+                  <View style={[styles.banner, { backgroundColor: COLORS.greenSoft, borderColor: COLORS.greenLine }]}>
+                    <View style={[styles.bannerIcon, { backgroundColor: COLORS.green }]}><Ionicons name="bag-check" size={18} color="#FFF" /></View>
+                    <Text style={[styles.bannerText, { color: COLORS.greenDeep }, RTL.text]}>المطعم جاهز — الطلب بانتظارك</Text>
+                  </View>
+                ) : (
+                  <View style={[styles.banner, { backgroundColor: COLORS.amberSoft, borderColor: '#FFE3A3' }]}>
+                    <Pulse to={1.1}><View style={[styles.bannerIcon, { backgroundColor: COLORS.amber }]}><Ionicons name="flame" size={18} color="#FFF" /></View></Pulse>
+                    <Text style={[styles.bannerText, { color: COLORS.text }, RTL.text]}>المطعم ما زال يحضّر الطلب</Text>
+                  </View>
+                )}
+              </FadeIn>
+            )}
 
             {/* التقدّم */}
-            <View style={[styles.card, SHADOW.soft]}>
-              <View style={[RTL.row, { justifyContent: 'space-between', marginBottom: 6 }]}>
-                <Text style={styles.cardTitle}>تقدّم {personal ? 'الطلب' : 'التوصيل'}</Text>
-                <StatusBadge status={order.status} />
-              </View>
-              {steps.map((s, i) => (
-                <View key={i} style={styles.stepRow}>
-                  <View style={[styles.stepCircle, i < current && styles.stepDone, i === current && styles.stepActive]}>
-                    <Text style={{ fontSize: 16 }}>{i < current ? '✅' : s.icon}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.stepLabel, RTL.text, i === current && { color: COLORS.primary, fontWeight: '900' }]}>{s.label}</Text>
-                    {i === current && <Text style={[styles.stepDesc, RTL.text]}>{s.desc}</Text>}
-                  </View>
+            <FadeIn delay={60}>
+              <View style={[styles.card, SHADOW.soft]}>
+                <View style={[RTL.row, { justifyContent: 'space-between', marginBottom: 14 }]}>
+                  <Text style={styles.cardTitle}>تقدّم {personal ? 'الطلب' : 'التوصيل'}</Text>
+                  <StatusBadge status={order.status} size="lg" />
                 </View>
-              ))}
-            </View>
+                {steps.map((s, i) => (
+                  <StepRow key={i} step={s} index={i} current={current} last={i === steps.length - 1} />
+                ))}
+              </View>
+            </FadeIn>
 
             {/* المال */}
-            <View style={[styles.card, SHADOW.soft]}>
-              <Text style={[styles.cardTitle, RTL.text, { marginBottom: 10 }]}>الحساب</Text>
-              <OrderMoney order={order} />
-            </View>
+            <FadeIn delay={120}>
+              <View style={[styles.card, SHADOW.soft]}>
+                <Text style={[styles.cardTitle, RTL.text, { marginBottom: 12 }]}>الحساب</Text>
+                <OrderMoney order={order} showCash={current === 2} />
+              </View>
+            </FadeIn>
 
             {/* التفاصيل */}
-            <View style={[styles.card, SHADOW.soft]}>
-              {personal ? (
-                <>
-                  <InfoRow icon={isRide(order) ? 'people-outline' : 'cube-outline'} label="نوع الطلب"
-                    value={isRide(order) ? `توصيل راكب (${order.passengers || 1})` : 'توصيل طرد'} />
-                  <InfoRow icon="person-outline" label="صاحب الطلب" value={order.customer_name || '-'} />
-                  <InfoRow icon="ellipse" iconColor={COLORS.green} label="نقطة الاستلام" value={order.pickup_address || 'محدّدة على الخريطة'} />
-                  {!isRide(order) && (order.parcel_desc || order.recipient_name || order.recipient_phone) ? (
-                    <InfoRow icon="reader-outline" label="تفاصيل الطرد"
-                      value={[order.parcel_desc, order.recipient_name, order.recipient_phone].filter(Boolean).join(' · ')} />
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <InfoRow icon="restaurant-outline" label="المطعم" value={order.restaurant_name || '-'} />
-                  <InfoRow icon="person-outline" label="الزبون" value={order.customer_name || '-'} />
-                </>
-              )}
-              <InfoRow icon="location-outline" iconColor={COLORS.red} label={personal ? 'نقطة التسليم' : 'عنوان الزبون'} value={order.delivery_address || '-'} last />
-            </View>
+            <FadeIn delay={180}>
+              <View style={[styles.card, SHADOW.soft, { paddingVertical: 6 }]}>
+                {personal ? (
+                  <>
+                    <InfoRow icon={isRide(order) ? 'people-outline' : 'cube-outline'} label="نوع الطلب"
+                      value={isRide(order) ? `توصيل راكب (${order.passengers || 1})` : 'توصيل طرد'} />
+                    <InfoRow icon="person-outline" label="صاحب الطلب" value={order.customer_name || '-'} />
+                    <InfoRow icon="flag" iconColor={COLORS.green} label="نقطة الاستلام" value={order.pickup_address || 'محدّدة على الخريطة'} />
+                    {!isRide(order) && (order.parcel_desc || order.recipient_name || order.recipient_phone) ? (
+                      <InfoRow icon="reader-outline" label="تفاصيل الطرد"
+                        value={[order.parcel_desc, order.recipient_name, order.recipient_phone].filter(Boolean).join(' · ')} />
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <InfoRow icon="restaurant-outline" label="المطعم" value={order.restaurant_name || '-'} />
+                    <InfoRow icon="person-outline" label="الزبون" value={order.customer_name || '-'} />
+                  </>
+                )}
+                <InfoRow icon="location" iconColor={COLORS.red} label={personal ? 'نقطة التسليم' : 'عنوان الزبون'} value={order.delivery_address || '-'} last />
+              </View>
+            </FadeIn>
 
             {/* اتصال */}
-            <View style={styles.actionsRow}>
-              <ActionBtn icon="call" label={personal ? 'اتصل بصاحب الطلب' : 'اتصل بالزبون'} onPress={() => callNumber(order.customer_phone)} />
-              {personal
-                ? (!isRide(order) && order.recipient_phone ? <ActionBtn icon="call-outline" label="اتصل بالمستلِم" onPress={() => callNumber(order.recipient_phone)} /> : null)
-                : <ActionBtn icon="restaurant" label="اتصل بالمطعم" onPress={() => callNumber(order.restaurant_phone)} />}
-            </View>
+            <FadeIn delay={240}>
+              <View style={styles.actionsRow}>
+                <ActionBtn icon="call" tone="green" label={personal ? 'اتصل بصاحب الطلب' : 'اتصل بالزبون'} onPress={() => callNumber(order.customer_phone)} />
+                {personal
+                  ? (!isRide(order) && order.recipient_phone ? <ActionBtn icon="call-outline" tone="blue" label="اتصل بالمستلِم" onPress={() => callNumber(order.recipient_phone)} /> : null)
+                  : <ActionBtn icon="restaurant" tone="brand" label="اتصل بالمطعم" onPress={() => callNumber(order.restaurant_phone)} />}
+              </View>
+            </FadeIn>
           </>
         )}
       </ScrollView>
@@ -415,25 +436,86 @@ export default function DeliveryScreen({ route, navigation }) {
       {order && step?.button && (
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) + 12 }]}>
           {cash > 0 && current === 1 && (
-            <Text style={[styles.footerCash, RTL.text]}>💵 حصّل {money(cash)} من الزبون قبل التأكيد</Text>
+            <View style={[RTL.row, styles.footerCash]}>
+              <Ionicons name="cash" size={16} color={COLORS.amberDeep} />
+              <Text style={[styles.footerCashText, RTL.text]}>حصّل {money(cash)} من الزبون قبل التأكيد</Text>
+            </View>
           )}
-          <TouchableOpacity onPress={onStepPress} disabled={updating} activeOpacity={0.9} style={[styles.nextWrap, updating && { opacity: 0.7 }]}>
-            <LinearGradient colors={current === 1 ? GRADIENTS.green : GRADIENTS.sunset} start={{ x: 1, y: 0 }} end={{ x: 0, y: 1 }} style={styles.nextBtn}>
-              {updating ? <ActivityIndicator color="#FFF" /> : <Ionicons name="checkmark-circle" size={22} color="#FFF" />}
-              <Text style={styles.nextBtnText}>{updating ? 'جاري التحديث...' : step.button}</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+          <GradientButton
+            label={step.button}
+            icon="checkmark-circle"
+            onPress={onStepPress}
+            loading={updating}
+            loadingLabel="جاري التحديث..."
+            colors={current === 1 ? GRADIENTS.green : GRADIENTS.sunset}
+            shadow={current === 1 ? SHADOW.green : SHADOW.float}
+            height={62}
+            hapticStyle="medium"
+          />
         </View>
       )}
 
       {order && current === 2 && (
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) + 12 }]}>
-          <View style={styles.doneBox}>
-            <Text style={styles.doneText}>✅ {personal ? 'اكتمل الطلب بنجاح!' : 'تم التوصيل بنجاح!'}</Text>
-            <Text style={styles.doneSubText}>أُضيف {money(driverFee(order) + tipOf(order))} لمحفظتك</Text>
-          </View>
+          <PopIn>
+            <LinearGradient colors={GRADIENTS.green} start={{ x: 1, y: 0 }} end={{ x: 0, y: 1 }} style={styles.doneBox}>
+              <LinearGradient colors={GRADIENTS.sheen} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={styles.doneSheen} pointerEvents="none" />
+              <View style={styles.doneIcon}><Ionicons name="checkmark-done" size={26} color={COLORS.green} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.doneText, RTL.text]}>{personal ? 'اكتمل الطلب بنجاح!' : 'تم التوصيل بنجاح!'}</Text>
+                <Text style={[styles.doneSubText, RTL.text]}>أُضيف {money(earnedTotal)} لمحفظتك</Text>
+              </View>
+            </LinearGradient>
+          </PopIn>
         </View>
       )}
+
+      <Burst play={celebrate} />
+    </View>
+  );
+}
+
+// خطوة في خط التقدّم: دائرة + خط واصل يمتلئ بحركة عند الإنجاز
+function StepRow({ step, index, current, last }) {
+  const done = index < current;
+  const active = index === current;
+  const final = active && last; // اكتمل الطلب
+  return (
+    <View style={styles.stepRow}>
+      <View style={styles.stepRail}>
+        {active && !final ? (
+          <Pulse to={1.08}>
+            <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.stepCircle, SHADOW.glow]}>
+              <Ionicons name={step.icon} size={19} color="#FFF" />
+            </LinearGradient>
+          </Pulse>
+        ) : (
+          <View style={[styles.stepCircle, (done || final) ? styles.stepDone : styles.stepTodo]}>
+            <Ionicons name={(done || final) ? 'checkmark' : step.icon} size={(done || final) ? 20 : 18} color={(done || final) ? '#FFF' : COLORS.faint} />
+          </View>
+        )}
+        {!last && <Connector filled={done} delay={index * 120} />}
+      </View>
+      <View style={{ flex: 1, paddingBottom: last ? 0 : 18, paddingTop: 2 }}>
+        <Text style={[styles.stepLabel, RTL.text, active && { color: final ? COLORS.greenDeep : COLORS.text, fontWeight: '900' }, done && { color: COLORS.sub }]}>{step.label}</Text>
+        {active && <Text style={[styles.stepDesc, RTL.text, final && { color: COLORS.greenDeep }]}>{step.desc}</Text>}
+        {done && <Text style={[styles.stepDoneText, RTL.text]}>تم ✓</Text>}
+      </View>
+    </View>
+  );
+}
+
+function Connector({ filled, delay }) {
+  const [h, setH] = useState(0);
+  const v = useRef(new Animated.Value(filled ? 1 : 0)).current;
+  useEffect(() => {
+    if (isReducedMotion()) { v.setValue(filled ? 1 : 0); return; }
+    Animated.timing(v, { toValue: filled ? 1 : 0, duration: 520, delay, easing: Easing.bezier(0.2, 0.8, 0.2, 1), useNativeDriver: true }).start();
+  }, [filled, v, delay]);
+  const translateY = v.interpolate({ inputRange: [0, 1], outputRange: [-h, 0] });
+  return (
+    <View style={styles.connector} onLayout={(e) => setH(e.nativeEvent.layout.height)}>
+      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: COLORS.green, transform: [{ translateY }] }]} />
     </View>
   );
 }
@@ -441,7 +523,7 @@ export default function DeliveryScreen({ route, navigation }) {
 function InfoRow({ icon, iconColor, label, value, last }) {
   return (
     <View style={[styles.infoRow, last && { borderBottomWidth: 0 }]}>
-      <View style={styles.infoIcon}><Ionicons name={icon} size={icon === 'ellipse' ? 12 : 18} color={iconColor || COLORS.primary} /></View>
+      <View style={styles.infoIcon}><Ionicons name={icon} size={17} color={iconColor || COLORS.primary} /></View>
       <View style={{ flex: 1 }}>
         <Text style={[styles.infoLabel, RTL.text]}>{label}</Text>
         <Text style={[styles.infoValue, RTL.text]}>{value}</Text>
@@ -450,53 +532,62 @@ function InfoRow({ icon, iconColor, label, value, last }) {
   );
 }
 
-function ActionBtn({ icon, label, onPress }) {
+const TONES = {
+  green: { bg: COLORS.greenSoft, c: COLORS.greenDeep },
+  blue: { bg: COLORS.blueSoft, c: COLORS.blue },
+  brand: { bg: COLORS.sec, c: COLORS.primary },
+};
+function ActionBtn({ icon, label, onPress, tone = 'brand' }) {
+  const t = TONES[tone] || TONES.brand;
   return (
-    <TouchableOpacity style={[styles.actionBtn, SHADOW.soft]} onPress={onPress} activeOpacity={0.85}>
-      <View style={styles.actionIcon}><Ionicons name={icon} size={20} color={COLORS.primary} /></View>
-      <Text style={styles.actionLabel}>{label}</Text>
-    </TouchableOpacity>
+    <Press style={[styles.actionBtn, SHADOW.soft]} onPress={onPress} hapticStyle="medium" accessibilityLabel={label}>
+      <View style={[styles.actionIcon, { backgroundColor: t.bg }]}><Ionicons name={icon} size={21} color={t.c} /></View>
+      <Text style={styles.actionLabel} numberOfLines={2}>{label}</Text>
+    </Press>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  mapWrap: { height: 250, marginTop: 10, marginHorizontal: 14, borderRadius: 22, overflow: 'hidden', backgroundColor: COLORS.skeleton },
+  mapShell: { height: 250, marginTop: 12, marginHorizontal: 14, borderRadius: RADIUS.lg, backgroundColor: COLORS.card },
+  mapWrap: { flex: 1, borderRadius: RADIUS.lg, overflow: 'hidden', backgroundColor: COLORS.skeleton, borderWidth: 1, borderColor: COLORS.line },
   map: { flex: 1 },
-  liveBadge: { position: 'absolute', top: 10, right: 10, flexDirection: 'row-reverse', alignItems: 'center', gap: 5, backgroundColor: COLORS.red, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, zIndex: 10 },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#FFF' },
-  liveText: { color: '#FFF', fontWeight: '900', fontSize: 11 },
-  recenterBtn: { position: 'absolute', top: 10, left: 56, backgroundColor: '#FFF', borderRadius: 12, padding: 9, zIndex: 10, ...SHADOW.soft },
-  navBtn: { position: 'absolute', bottom: 12, right: 10, backgroundColor: COLORS.primary, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 9, flexDirection: 'row-reverse', alignItems: 'center', gap: 6, zIndex: 10, ...SHADOW.float },
-  navBtnText: { color: '#FFF', fontWeight: '800', fontSize: 12.5 },
-  banner: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10, borderRadius: 16, padding: 14 },
-  bannerText: { flex: 1, fontWeight: '800', fontSize: 14 },
-  card: { backgroundColor: COLORS.card, borderRadius: 20, padding: 16 },
-  cardTitle: { fontSize: 15, fontWeight: '900', color: COLORS.text },
-  stepRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 12, paddingVertical: 8 },
-  stepCircle: { width: 42, height: 42, borderRadius: 21, backgroundColor: COLORS.inputBg, alignItems: 'center', justifyContent: 'center' },
-  stepActive: { backgroundColor: COLORS.sec, borderWidth: 2, borderColor: COLORS.primary },
-  stepDone: { backgroundColor: COLORS.greenSoft },
-  stepLabel: { fontSize: 14, fontWeight: '700', color: COLORS.gray },
-  stepDesc: { fontSize: 12, color: COLORS.primary, marginTop: 2, fontWeight: '600' },
+  mapScrim: { position: 'absolute', top: 0, left: 0, right: 0, height: 56 },
+  liveBadge: { position: 'absolute', top: 10, right: 10, flexDirection: 'row-reverse', alignItems: 'center', gap: 6, backgroundColor: COLORS.red, borderRadius: RADIUS.pill, paddingHorizontal: 11, paddingVertical: 5, zIndex: 10, ...SHADOW.soft },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFF' },
+  liveText: { color: '#FFF', fontWeight: '900', fontSize: 12 },
+  recenterBtn: { position: 'absolute', top: 10, left: 56, width: 46, height: 46, backgroundColor: '#FFF', borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', zIndex: 10, ...SHADOW.card },
+  navBtn: { position: 'absolute', bottom: 12, right: 12, borderRadius: RADIUS.pill, zIndex: 10, backgroundColor: COLORS.primary },
+  navBtnGrad: { flexDirection: 'row-reverse', alignItems: 'center', gap: 7, height: 46, paddingHorizontal: 16, borderRadius: RADIUS.pill },
+  navBtnText: { color: '#FFF', fontWeight: '800', fontSize: 13.5 },
+  banner: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10, borderRadius: RADIUS.md, padding: 12, borderWidth: 1 },
+  bannerIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  bannerText: { flex: 1, fontWeight: '800', fontSize: 14.5 },
+  card: { backgroundColor: COLORS.card, borderRadius: RADIUS.lg - 4, padding: 16 },
+  cardTitle: { fontSize: 16, fontWeight: '900', color: COLORS.text },
+  stepRow: { flexDirection: 'row-reverse', alignItems: 'stretch', gap: 12 },
+  stepRail: { width: 42, alignItems: 'center' },
+  stepCircle: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  stepTodo: { backgroundColor: COLORS.inputBg, borderWidth: 1.5, borderColor: COLORS.line },
+  stepDone: { backgroundColor: COLORS.green },
+  connector: { flex: 1, width: 3, minHeight: 16, borderRadius: 2, backgroundColor: COLORS.line, overflow: 'hidden', marginVertical: 3 },
+  stepLabel: { fontSize: 15, fontWeight: '700', color: COLORS.gray },
+  stepDesc: { fontSize: 13, color: COLORS.primary, marginTop: 3, fontWeight: '700', lineHeight: 19 },
+  stepDoneText: { fontSize: 12, color: COLORS.greenDeep, marginTop: 2, fontWeight: '700' },
   infoRow: { flexDirection: 'row-reverse', alignItems: 'flex-start', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  infoIcon: { width: 34, height: 34, borderRadius: 12, backgroundColor: COLORS.sec, alignItems: 'center', justifyContent: 'center' },
-  infoLabel: { fontSize: 11.5, color: COLORS.gray, marginBottom: 2, fontWeight: '600' },
-  infoValue: { fontSize: 14, fontWeight: '800', color: COLORS.text, lineHeight: 20 },
+  infoIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: COLORS.sec, alignItems: 'center', justifyContent: 'center' },
+  infoLabel: { fontSize: 12, color: COLORS.gray, marginBottom: 2, fontWeight: '500' },
+  infoValue: { fontSize: 14.5, fontWeight: '800', color: COLORS.text, lineHeight: 21 },
   actionsRow: { flexDirection: 'row-reverse', gap: 10 },
-  actionBtn: { flex: 1, backgroundColor: COLORS.card, borderRadius: 18, padding: 14, alignItems: 'center', gap: 6 },
-  actionIcon: { width: 40, height: 40, borderRadius: 14, backgroundColor: COLORS.sec, alignItems: 'center', justifyContent: 'center' },
-  actionLabel: { fontSize: 12, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
-  footer: { paddingHorizontal: 16, paddingTop: 12, backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.line },
-  footerCash: { color: COLORS.amber, fontWeight: '800', fontSize: 13, marginBottom: 8 },
-  nextWrap: { borderRadius: 18, overflow: 'hidden', ...SHADOW.float },
-  nextBtn: { borderRadius: 18, paddingVertical: 17, paddingHorizontal: 16, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 10 },
-  nextBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
-  doneBox: { backgroundColor: COLORS.greenSoft, borderRadius: 18, padding: 18, alignItems: 'center', borderWidth: 1, borderColor: '#C3F0D6' },
-  doneText: { fontSize: 18, fontWeight: '900', color: COLORS.greenDeep },
-  doneSubText: { fontSize: 13, color: COLORS.greenDeep, marginTop: 4, fontWeight: '600' },
-  errorBox: { backgroundColor: COLORS.redSoft, borderRadius: 16, padding: 18, alignItems: 'center' },
-  errorText: { color: COLORS.red, fontWeight: '800', marginBottom: 10 },
-  retryBtn: { backgroundColor: COLORS.primary, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 9 },
-  retryText: { color: '#FFF', fontWeight: '800' },
+  actionBtn: { flex: 1, backgroundColor: COLORS.card, borderRadius: RADIUS.md, padding: 14, alignItems: 'center', gap: 8, minHeight: 96, justifyContent: 'center' },
+  actionIcon: { width: 46, height: 46, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  actionLabel: { fontSize: 13, fontWeight: '800', color: COLORS.text, textAlign: 'center' },
+  footer: { paddingHorizontal: 16, paddingTop: 12, backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.line, borderTopLeftRadius: RADIUS.sheet, borderTopRightRadius: RADIUS.sheet, ...SHADOW.card },
+  footerCash: { gap: 6, alignSelf: 'stretch', backgroundColor: COLORS.amberSoft, borderRadius: RADIUS.sm, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 },
+  footerCashText: { flex: 1, color: COLORS.amberDeep, fontWeight: '800', fontSize: 13.5 },
+  doneBox: { flexDirection: 'row-reverse', alignItems: 'center', gap: 14, borderRadius: RADIUS.md + 2, padding: 16, overflow: 'hidden' },
+  doneSheen: { position: 'absolute', top: 0, left: 0, right: 0, height: '50%' },
+  doneIcon: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center' },
+  doneText: { fontSize: 18, fontWeight: '900', color: '#FFF' },
+  doneSubText: { fontSize: 13.5, color: 'rgba(255,255,255,0.95)', marginTop: 3, fontWeight: '700' },
 });

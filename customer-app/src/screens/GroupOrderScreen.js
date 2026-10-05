@@ -13,6 +13,9 @@ import EmptyState from '../components/EmptyState';
 import { useCart } from '../context/CartContext';
 import { useTheme } from '../context/ThemeContext';
 import { SOCKET_URL } from '../config';
+import { FadeIn, PopIn, Press, GradientButton } from '../components/Anim';
+import { AnimatedNumber } from '../components/UI';
+import { stagger } from '../utils/motion';
 
 const lineTotal = (it) => {
   const addons = (it.options || []).reduce((a, o) => a + (parseFloat(o.price) || 0), 0);
@@ -127,13 +130,27 @@ export default function GroupOrderScreen() {
   if (!code) {
     return (
       <View style={styles.container}>
-        <GradientHeader title="طلب جماعي 👥" />
+        <GradientHeader title="طلب جماعي" colors={COLORS.gradients.violet} />
         <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center' }} keyboardShouldPersistTaps="handled">
-          <Text style={{ fontSize: 64, marginTop: 20 }}>🧑‍🤝‍🧑</Text>
-          <Text style={styles.bigTitle}>اطلبوا سوا من نفس المطعم</Text>
-          <Text style={styles.sub}>واحد يفتح مجموعة من صفحة المطعم، وكل واحد يزيد أكله من موبايله، وكل شخص بيشوف حسابه 😋</Text>
+          <PopIn>
+            <LinearGradient colors={COLORS.gradients.violet} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.heroIcon}>
+              <Ionicons name="people" size={46} color="#FFF" />
+            </LinearGradient>
+          </PopIn>
+          <FadeIn delay={80} style={{ alignItems: 'center' }}>
+            <Text style={styles.bigTitle}>اطلبوا سوا من نفس المطعم</Text>
+            <Text style={styles.sub}>واحد يفتح مجموعة من صفحة المطعم، وكل واحد يزيد أكله من موبايله، وكل شخص بيشوف حسابه 😋</Text>
+          </FadeIn>
+          <FadeIn delay={140} style={styles.steps}>
+            {[['storefront', 'افتح مطعم'], ['share-social', 'شارك الكود'], ['bag-add', 'كل واحد يضيف']].map(([ic, l], i) => (
+              <View key={l} style={styles.step}>
+                <View style={styles.stepIcon}><Ionicons name={ic} size={18} color={COLORS.primary} /></View>
+                <Text style={styles.stepTxt}>{i + 1}. {l}</Text>
+              </View>
+            ))}
+          </FadeIn>
 
-          <View style={styles.joinCard}>
+          <FadeIn delay={200} style={styles.joinCard}>
             <Text style={styles.joinLbl}>عندك كود مجموعة؟</Text>
             <TextInput
               value={codeInput}
@@ -145,12 +162,8 @@ export default function GroupOrderScreen() {
               style={styles.codeInput}
               onSubmitEditing={joinByCode}
             />
-            <TouchableOpacity activeOpacity={0.9} onPress={joinByCode}>
-              <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.joinBtn}>
-                <Text style={styles.joinBtnTxt}>انضم للمجموعة</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
+            <GradientButton title="انضم للمجموعة" onPress={joinByCode} disabled={!codeInput.trim()} icon={<Ionicons name="enter-outline" size={19} color="#FFF" />} />
+          </FadeIn>
 
           <View style={styles.hintBox}>
             <Ionicons name="information-circle-outline" size={18} color={COLORS.primary} />
@@ -194,21 +207,25 @@ export default function GroupOrderScreen() {
 
   return (
     <View style={styles.container}>
-      <GradientHeader title={group.restaurant_name || 'طلب جماعي'} subtitle="طلب جماعي" />
+      <GradientHeader title={group.restaurant_name || 'طلب جماعي'} subtitle="طلب جماعي" colors={COLORS.gradients.violet} />
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 120 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchGroup(code, { silent: true }); }} tintColor={COLORS.primary} />}>
-        <View style={styles.codeCard}>
-          <Text style={styles.codeCardLbl}>🔑 كود المجموعة</Text>
-          <Text style={styles.codeBig} selectable>{group.code}</Text>
+        <PopIn from={0.94} style={styles.codeCard}>
+          <View style={styles.codeLblRow}><Ionicons name="key" size={14} color={COLORS.primary} /><Text style={styles.codeCardLbl}>كود المجموعة</Text></View>
+          <View style={styles.codeBox}><Text style={styles.codeBig} selectable>{group.code}</Text></View>
           {!isOrdered && (
-            <TouchableOpacity style={styles.shareBtn} onPress={shareCode}>
+            <Press style={styles.shareBtn} onPress={shareCode} accessibilityRole="button" accessibilityLabel="شارك الكود">
+              <LinearGradient colors={COLORS.gradients.violet} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
               <Ionicons name="share-social" size={18} color="#FFF" />
               <Text style={styles.shareBtnTxt}>شارك الكود مع الشباب</Text>
-            </TouchableOpacity>
+            </Press>
           )}
-          <Text style={styles.partCount}>👥 {group.participant_count || people.length} مشارك · {(group.items || []).length} صنف</Text>
-        </View>
+          <View style={styles.partRow}>
+            <View style={styles.partChip}><Ionicons name="people" size={13} color={COLORS.primary} /><Text style={styles.partCount}>{group.participant_count || people.length} مشارك</Text></View>
+            <View style={styles.partChip}><Ionicons name="fast-food" size={13} color={COLORS.primary} /><Text style={styles.partCount}>{(group.items || []).length} صنف</Text></View>
+          </View>
+        </PopIn>
 
         {(isOrdered || isClosed) && (
           <View style={[styles.orderedBanner, { backgroundColor: COLORS.successBg, borderColor: COLORS.successBorder }]}>
@@ -219,13 +236,18 @@ export default function GroupOrderScreen() {
 
         {people.length === 0 ? (
           <View style={styles.emptyBox}>
-            <Text style={{ fontSize: 40 }}>🛒</Text>
+            <View style={styles.emptyIcon}><Ionicons name="bag-handle-outline" size={30} color={COLORS.primary} /></View>
             <Text style={styles.sub}>لسه ما حدا أضاف أصناف — ابدأ أنت!</Text>
           </View>
-        ) : people.map(([userName, info]) => (
-          <View key={userName} style={[styles.userGroup, info.mine && { borderColor: COLORS.primary, borderWidth: 1.5 }]}>
+        ) : people.map(([userName, info], pi) => (
+          <FadeIn key={userName} delay={stagger(pi)} from={14} style={[styles.userGroup, info.mine && { borderColor: COLORS.primary, borderWidth: 1.5 }]}>
             <View style={styles.userHead}>
-              <Text style={styles.userName}>🧑 {userName}{info.mine ? ' (أنت)' : ''}</Text>
+              <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 8, flex: 1 }}>
+                <LinearGradient colors={info.mine ? COLORS.gradients.sunset : COLORS.gradients.violet} style={styles.userAvatar}>
+                  <Text style={styles.userInitial}>{String(userName).trim().charAt(0) || '؟'}</Text>
+                </LinearGradient>
+                <Text style={styles.userName} numberOfLines={1}>{userName}{info.mine ? ' (أنت)' : ''}</Text>
+              </View>
               <View style={styles.userTotalPill}>
                 <Text style={styles.userTotalTxt}>{info.total.toFixed(2)}₪</Text>
               </View>
@@ -244,13 +266,13 @@ export default function GroupOrderScreen() {
                 )}
               </View>
             ))}
-          </View>
+          </FadeIn>
         ))}
 
         <View style={styles.totalCard}>
           <View style={styles.totalRow}>
             <Text style={styles.totalLbl}>مجموع الأصناف</Text>
-            <Text style={styles.totalVal}>{groupTotal.toFixed(2)}₪</Text>
+            <AnimatedNumber value={groupTotal} suffix="₪" style={styles.totalVal} />
           </View>
           {people.length > 1 && (
             <Text style={styles.splitHint}>كل شخص يدفع مجموع أصنافه الظاهر بجانب اسمه. رسوم التوصيل والخصومات تُحسب بالسلة عند الدفع ويمكن تقسيمها بالتساوي (≈ حصة كل شخص من التوصيل = الرسوم ÷ {people.length}).</Text>
@@ -260,16 +282,12 @@ export default function GroupOrderScreen() {
 
       {!isOrdered && !isClosed && (
         <View style={[styles.footer, { paddingBottom: insets.bottom + 14 }]}>
-          <TouchableOpacity style={styles.addBtn} onPress={addMyItems}>
+          <TouchableOpacity style={styles.addBtn} onPress={addMyItems} accessibilityRole="button">
             <Ionicons name="add-circle" size={20} color={COLORS.primary} />
             <Text style={styles.addBtnTxt}>أضف أصنافك</Text>
           </TouchableOpacity>
           {group.is_host && (
-            <TouchableOpacity activeOpacity={0.9} style={{ flex: 1.2 }} onPress={checkoutAll}>
-              <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.payBtn}>
-                <Text style={styles.payBtnTxt}>اطلب الكل وادفع 💳</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+            <GradientButton title="اطلب الكل وادفع" onPress={checkoutAll} style={{ flex: 1.2 }} icon={<Ionicons name="card" size={18} color="#FFF" />} />
           )}
         </View>
       )}
@@ -280,24 +298,36 @@ export default function GroupOrderScreen() {
 const makeStyles = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   bigTitle: { fontSize: 22, fontWeight: '900', color: C.text, marginTop: 14, textAlign: 'center' },
+  heroIcon: { width: 96, height: 96, borderRadius: 34, alignItems: 'center', justifyContent: 'center', marginTop: 16, elevation: 10, shadowColor: '#7C5CFA', shadowOpacity: 0.35, shadowRadius: 18, shadowOffset: { width: 0, height: 10 } },
+  steps: { flexDirection: 'row-reverse', gap: 8, marginTop: 20, alignSelf: 'stretch' },
+  step: { flex: 1, alignItems: 'center', gap: 6, backgroundColor: C.card, borderRadius: 18, paddingVertical: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border },
+  stepIcon: { width: 38, height: 38, borderRadius: 13, backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center' },
+  stepTxt: { fontSize: 11.5, fontWeight: '800', color: C.text },
+  codeLblRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 5 },
+  codeBox: { backgroundColor: C.tint, borderRadius: 18, paddingHorizontal: 22, marginVertical: 10, borderWidth: 1.5, borderColor: C.tintBorder, borderStyle: 'dashed' },
+  partRow: { flexDirection: 'row-reverse', gap: 8, marginTop: 12 },
+  partChip: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, backgroundColor: C.inputBg, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  emptyIcon: { width: 64, height: 64, borderRadius: 22, backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center' },
+  userAvatar: { width: 32, height: 32, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  userInitial: { color: '#FFF', fontWeight: '900', fontSize: 14 },
   sub: { fontSize: 13, color: C.gray, textAlign: 'center', marginTop: 8, lineHeight: 20 },
-  joinCard: { backgroundColor: C.card, borderRadius: 20, padding: 18, width: '100%', marginTop: 26, gap: 12, ...C.shadow.soft },
+  joinCard: { backgroundColor: C.card, borderRadius: 24, padding: 18, width: '100%', marginTop: 20, gap: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, ...C.shadow.card },
   joinLbl: { fontSize: 14, fontWeight: '800', color: C.text, textAlign: 'center' },
   codeInput: { backgroundColor: C.inputBg, borderRadius: 14, paddingVertical: 14, fontSize: 22, fontWeight: '900', textAlign: 'center', letterSpacing: 4, color: C.text, borderWidth: 1, borderColor: C.border },
   joinBtn: { borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
   joinBtnTxt: { color: '#FFF', fontWeight: '900', fontSize: 16 },
   hintBox: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, backgroundColor: C.tint, borderRadius: 12, padding: 12, marginTop: 20 },
   hintTxt: { flex: 1, fontSize: 12.5, color: C.primary, fontWeight: '700', textAlign: 'right' },
-  codeCard: { backgroundColor: C.card, borderRadius: 22, padding: 18, alignItems: 'center', borderWidth: 2, borderColor: C.tintBorder, ...C.shadow.soft },
+  codeCard: { backgroundColor: C.card, borderRadius: 26, padding: 18, alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, ...C.shadow.card },
   codeCardLbl: { fontSize: 13, color: C.gray, fontWeight: '700' },
   codeBig: { fontSize: 38, fontWeight: '900', color: C.primary, letterSpacing: 8, marginVertical: 6 },
-  shareBtn: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, backgroundColor: C.primary, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 20, marginTop: 6 },
+  shareBtn: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, borderRadius: 16, paddingVertical: 12, paddingHorizontal: 20, marginTop: 2, overflow: 'hidden' },
   shareBtnTxt: { color: '#FFF', fontWeight: '800', fontSize: 15 },
-  partCount: { fontSize: 12.5, color: C.gray, marginTop: 12, fontWeight: '600' },
+  partCount: { fontSize: 12.5, color: C.sub, fontWeight: '700' },
   orderedBanner: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, borderRadius: 14, padding: 12, marginTop: 14, borderWidth: 1 },
   orderedTxt: { fontSize: 13.5, fontWeight: '800' },
   emptyBox: { alignItems: 'center', paddingVertical: 40, gap: 8 },
-  userGroup: { backgroundColor: C.card, borderRadius: 18, padding: 14, marginTop: 12, borderWidth: 1, borderColor: C.border, ...C.shadow.soft },
+  userGroup: { backgroundColor: C.card, borderRadius: 22, padding: 14, marginTop: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, ...C.shadow.soft },
   userHead: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   userName: { fontSize: 14.5, fontWeight: '900', color: C.text },
   userTotalPill: { backgroundColor: C.tint, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
@@ -307,13 +337,13 @@ const makeStyles = (C) => StyleSheet.create({
   itemOpts: { fontSize: 11.5, color: C.gray, marginTop: 2, textAlign: 'right' },
   itemPrice: { fontSize: 13.5, fontWeight: '800', color: C.primary },
   delBtn: { padding: 2 },
-  totalCard: { backgroundColor: C.card, borderRadius: 18, padding: 16, marginTop: 14, ...C.shadow.soft },
+  totalCard: { backgroundColor: C.card, borderRadius: 22, padding: 16, marginTop: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, ...C.shadow.soft },
   totalRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' },
   totalLbl: { fontSize: 15, fontWeight: '800', color: C.text },
   totalVal: { fontSize: 20, fontWeight: '900', color: C.primary },
   splitHint: { fontSize: 12, color: C.sub, marginTop: 10, lineHeight: 19, textAlign: 'right' },
-  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row-reverse', gap: 10, padding: 14, backgroundColor: C.card, borderTopWidth: 1, borderTopColor: C.line },
-  addBtn: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, borderWidth: 2, borderColor: C.primary, flex: 1 },
+  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row-reverse', alignItems: 'center', gap: 10, padding: 14, backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, ...C.shadow.card },
+  addBtn: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 18, height: 54, paddingHorizontal: 16, borderWidth: 1.5, borderColor: C.tintBorder, backgroundColor: C.tint, flex: 1 },
   addBtnTxt: { color: C.primary, fontWeight: '800', fontSize: 15 },
   payBtn: { borderRadius: 14, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
   payBtnTxt: { color: '#FFF', fontWeight: '900', fontSize: 15 },

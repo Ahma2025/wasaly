@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiSend } from 'react-icons/fi';
+import { FiSend, FiBell, FiCheck } from 'react-icons/fi';
 import api from '../utils/api';
-import { PageHeader, Field, useConfirm } from '../components/ui';
+import { fmtDate } from '../utils/format';
+import { PageHeader, Field, Button, Segmented, SectionHeader, useConfirm } from '../components/ui';
 
 const LOGO = `${import.meta.env.BASE_URL}logo.png`;
 const ROLES = { customer: 'الزبائن', driver: 'السائقين', restaurant: 'المتاجر (أصحاب المطاعم)' };
+const ROLE_ICON = { customer: '🛍️', driver: '🛵', restaurant: '🏪' };
 const templates = [
   { title: 'خصم خاص 🔥', body: 'لا تفوّت عروضنا الحصرية اليوم! استخدم كود WASALY للحصول على خصم 10%' },
   { title: 'تحديث جديد ✨', body: 'وصلّي تتطور! جرّب الميزات الجديدة في آخر تحديث' },
@@ -39,65 +41,85 @@ export default function Notifications() {
   };
 
   return (
-    <div className="space-y-4 p-4 animate-fade-up">
-      <PageHeader icon="🔔" title="الإشعارات" subtitle="إرسال إشعار فوري للمستخدمين" />
+    <div className="page">
+      <PageHeader icon={<FiBell />} title="الإشعارات" subtitle="إرسال إشعار فوري للمستخدمين" />
 
-      <div className="card p-4 space-y-3">
-        <Field label="الجمهور المستهدف">
-          <div className="grid grid-cols-2 gap-2">
-            {[['all', 'الجميع'], ['role', 'حسب الدور']].map(([k, l]) => (
-              <button key={k} type="button" onClick={() => setForm(f => ({ ...f, target: k }))}
-                className={`py-2.5 rounded-xl text-xs font-bold ${form.target === k ? 'chip-on' : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>{l}</button>
-            ))}
-          </div>
-        </Field>
-        {form.target === 'role' && (
-          <Field label="الدور">
-            <select className="inp" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
-              {Object.entries(ROLES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-            </select>
-          </Field>
-        )}
-        <Field label="العنوان"><input className="inp" maxLength={80} placeholder="عنوان الإشعار" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></Field>
-        <Field label="المحتوى" hint={`(${form.body.length}/240)`}>
-          <textarea className="inp resize-none" rows={4} maxLength={240} placeholder="نص الإشعار…" value={form.body} onChange={e => setForm({ ...form, body: e.target.value })} />
-        </Field>
-        <button onClick={send} disabled={sending} className="w-full btn-lux py-3 disabled:opacity-60 flex items-center justify-center gap-2">
-          <FiSend className="-scale-x-100" /> {sending ? 'جاري الإرسال…' : 'إرسال الإشعار'}
-        </button>
-        {sent && (
-          <div className="p-3 bg-green-50 rounded-2xl border border-green-200">
-            <p className="text-green-700 font-black text-sm">تم الإرسال بنجاح ✅</p>
-            <p className="text-green-600 text-xs font-semibold">وصل إلى {sent.recipients} جهاز ({sent.audience}) — فقط من فعّل الإشعارات.</p>
-          </div>
-        )}
-      </div>
+      <div className="grid gap-4 lg:gap-6 lg:grid-cols-[minmax(0,1fr)_380px] items-start">
+        <div className="space-y-4">
+          <section className="card p-4 sm:p-5 space-y-4">
+            <Field label="الجمهور المستهدف">
+              <Segmented full value={form.target} onChange={v => setForm(f => ({ ...f, target: v }))} options={[['all', 'الجميع'], ['role', 'حسب الدور']]} />
+            </Field>
+            {form.target === 'role' && (
+              <div className="grid grid-cols-3 gap-2 animate-fade-up">
+                {Object.entries(ROLES).map(([k, l]) => (
+                  <button key={k} type="button" onClick={() => setForm(f => ({ ...f, role: k }))} aria-pressed={form.role === k}
+                    className={`rounded-2xl p-3 text-center border-[1.5px] ${form.role === k ? 'border-brand-400 bg-orange-50 text-brand-700 shadow-soft' : 'border-surface-line text-ink-2 hover:border-[#DDE0EA]'}`}>
+                    <span className="text-xl block">{ROLE_ICON[k]}</span>
+                    <span className="text-[11.5px] font-extrabold leading-tight block mt-1">{l}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <Field label="العنوان" hint={`(${form.title.length}/80)`}><input className="inp" maxLength={80} placeholder="عنوان الإشعار" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></Field>
+            <Field label="المحتوى" hint={`(${form.body.length}/240)`}>
+              <textarea className="inp resize-none" rows={4} maxLength={240} placeholder="نص الإشعار…" value={form.body} onChange={e => setForm({ ...form, body: e.target.value })} />
+              <div className="h-1 rounded-full bg-surface-sunken mt-2 overflow-hidden"><div className={`h-full rounded-full transition-all duration-300 ${form.body.length > 200 ? 'bg-amber-400' : 'grad-sunset'}`} style={{ width: `${(form.body.length / 240) * 100}%` }} /></div>
+            </Field>
+            <Button size="lg" className="w-full" loading={sending} icon={<FiSend className="-scale-x-100" />} onClick={send}>
+              {sending ? 'جاري الإرسال…' : `إرسال إلى ${form.target === 'all' ? 'الجميع' : ROLES[form.role]}`}
+            </Button>
+            {sent && (
+              <div className="p-3.5 bg-green-50 rounded-2xl border border-green-200 flex gap-3 animate-pop">
+                <span className="w-9 h-9 rounded-xl bg-green-500 text-white flex items-center justify-center flex-shrink-0"><FiCheck /></span>
+                <div>
+                  <p className="text-green-800 font-black text-sm">تم الإرسال بنجاح</p>
+                  <p className="text-green-700 text-xs font-medium mt-0.5">وصل إلى <b className="num">{sent.recipients}</b> جهاز ({sent.audience}) — فقط من فعّل الإشعارات.</p>
+                </div>
+              </div>
+            )}
+          </section>
 
-      <div className="card p-4">
-        <h2 className="font-black text-gray-900 mb-3">قوالب جاهزة</h2>
-        <div className="space-y-2">
-          {templates.map((t, i) => (
-            <button key={i} onClick={() => setForm(f => ({ ...f, title: t.title, body: t.body }))}
-              className="w-full text-right p-3 rounded-2xl border border-gray-100 hover:border-orange-300 hover:bg-orange-50/50">
-              <p className="font-bold text-sm text-gray-900">{t.title}</p>
-              <p className="text-gray-500 text-xs mt-1 truncate">{t.body}</p>
-            </button>
-          ))}
+          <section className="card p-4 sm:p-5">
+            <SectionHeader title="قوالب جاهزة" hint="اضغط قالباً لتعبئة الحقول" />
+            <div className="grid gap-2 sm:grid-cols-3 mt-3">
+              {templates.map((t, i) => (
+                <button key={i} onClick={() => setForm(f => ({ ...f, title: t.title, body: t.body }))}
+                  className="text-right p-3.5 rounded-2xl border border-surface-line hover:border-orange-300 hover:bg-orange-50/50 hover:shadow-soft">
+                  <p className="font-extrabold text-sm text-ink">{t.title}</p>
+                  <p className="text-ink-3 text-xs mt-1 line-clamp-2 leading-relaxed">{t.body}</p>
+                </button>
+              ))}
+            </div>
+          </section>
         </div>
-      </div>
 
-      <div className="card p-4">
-        <h2 className="font-black text-gray-900 mb-3">معاينة</h2>
-        <div className="bg-gradient-to-br from-gray-800 to-gray-950 rounded-3xl p-4">
-          <div className="bg-white/10 backdrop-blur rounded-2xl p-3 flex items-start gap-3">
-            <img src={LOGO} alt="" className="w-9 h-9 rounded-xl object-cover shrink-0" />
-            <div className="min-w-0">
-              <p className="font-bold text-sm text-white">{form.title || 'عنوان الإشعار'}</p>
-              <p className="text-gray-300 text-xs mt-1 break-words">{form.body || 'محتوى الإشعار سيظهر هنا…'}</p>
-              <p className="text-gray-500 text-[10px] mt-2">وصلّي · الآن</p>
+        {/* Live phone preview */}
+        <aside className="lg:sticky lg:top-[92px]">
+          <p className="text-xs font-extrabold text-ink-3 mb-2 text-center">معاينة مباشرة</p>
+          <div className="mx-auto w-[280px] rounded-[44px] p-[10px] bg-[#111118] shadow-[0_30px_60px_rgba(20,20,43,.28)] ring-1 ring-black/40">
+            <div className="relative h-[500px] rounded-[36px] overflow-hidden mesh-sunset">
+              <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/0 to-black/40" />
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 w-24 h-6 rounded-full bg-black" />
+              <div className="relative text-white text-center pt-14">
+                <p className="text-[13px] font-bold opacity-90">{fmtDate(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+                <p className="text-[64px] font-black leading-none mt-1 num" dir="ltr">{(() => { const d = new Date(); return `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}`; })()}</p>
+              </div>
+              <div className="relative mx-3 mt-8 rounded-[20px] bg-white/80 backdrop-blur-xl p-3 flex items-start gap-2.5 shadow-lg animate-pop">
+                <img src={LOGO} alt="" className="w-9 h-9 rounded-[10px] object-cover shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-bold text-ink-2">وصلّي</p>
+                    <p className="text-[10px] text-ink-3">الآن</p>
+                  </div>
+                  <p className="font-extrabold text-[13px] text-ink truncate">{form.title || 'عنوان الإشعار'}</p>
+                  <p className="text-ink-2 text-[12px] mt-0.5 break-words line-clamp-4 leading-snug">{form.body || 'محتوى الإشعار سيظهر هنا…'}</p>
+                </div>
+              </div>
+              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-28 h-1 rounded-full bg-white/80" />
             </div>
           </div>
-        </div>
+        </aside>
       </div>
     </div>
   );

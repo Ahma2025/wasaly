@@ -7,6 +7,50 @@ import { pickImage } from '../utils/pickImage';
 import GradientHeader from '../components/GradientHeader';
 import api from '../utils/api';
 import { useTheme } from '../context/ThemeContext';
+import { Animated } from 'react-native';
+import { FadeIn, PopIn, Press, GradientButton } from '../components/Anim';
+import { Chip } from '../components/UI';
+import { haptic, SPRING_POP, isReducedMotion } from '../utils/motion';
+
+const FACES = ['', '😞', '😐', '🙂', '😋', '🤩'];
+
+/* نجمة واحدة: ترتد عند الاختيار مع تأخير متتابع */
+function Star({ i, value, onChange, label, C }) {
+  const v = React.useRef(new Animated.Value(i <= value ? 1 : 0)).current;
+  React.useEffect(() => {
+    if (isReducedMotion()) { v.setValue(i <= value ? 1 : 0); return; }
+    Animated.sequence([
+      Animated.delay(i <= value ? i * 45 : 0),
+      Animated.spring(v, { toValue: i <= value ? 1 : 0, ...SPRING_POP }),
+    ]).start();
+  }, [value]);
+  const scale = v.interpolate({ inputRange: [0, 0.6, 1], outputRange: [1, 1.35, 1.12] });
+  const rot = v.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '72deg'] });
+  return (
+    <TouchableOpacity onPress={() => { haptic.select(); onChange(i); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+      accessibilityRole="button" accessibilityLabel={label + ': ' + i + ' من 5'} accessibilityState={{ selected: i <= value }}>
+      <Animated.View style={{ transform: [{ scale }, { rotate: rot }] }}>
+        <Ionicons name={i <= value ? 'star' : 'star-outline'} size={38} color={i <= value ? C.star : C.border} />
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
+function AnimatedStars({ value, onChange, label, C, styles }) {
+  return (
+    <View>
+      <View style={styles.starsRow}>
+        {[1, 2, 3, 4, 5].map(i => <Star key={i} i={i} value={value} onChange={onChange} label={label} C={C} />)}
+      </View>
+      {value > 0 && (
+        <PopIn key={value} from={0.8} style={styles.starLabelWrap}>
+          <Text style={{ fontSize: 18 }}>{FACES[value]}</Text>
+          <Text style={styles.starLabel}>{LABELS[value]}</Text>
+        </PopIn>
+      )}
+    </View>
+  );
+}
 
 const LABELS = ['', 'سيء', 'مقبول', 'جيد', 'ممتاز', 'رائع 🤩'];
 
@@ -40,20 +84,6 @@ export default function RatingScreen({ route, navigation }) {
     ? ['سائق محترم', 'وصل بسرعة', 'تعامل ممتاز', 'رح أطلب مرة ثانية']
     : ['طعام لذيذ', 'خدمة سريعة', 'سائق محترم', 'سيعاد الطلب', 'التغليف ممتاز'];
 
-  const Stars = ({ value, onChange, label }) => (
-    <View>
-      <View style={styles.starsRow}>
-        {[1, 2, 3, 4, 5].map(i => (
-          <TouchableOpacity key={i} onPress={() => onChange(i)} hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-            accessibilityRole="button" accessibilityLabel={`${label}: ${i} من 5`}>
-            <Ionicons name={i <= value ? 'star' : 'star-outline'} size={34} color={i <= value ? COLORS.star : COLORS.border} />
-          </TouchableOpacity>
-        ))}
-      </View>
-      {value > 0 && <Text style={styles.starLabel}>{LABELS[value]}</Text>}
-    </View>
-  );
-
   // للطلب الشخصي: التقييم الأساسي = تقييم الخدمة/السائق
   const mainLabel = isPersonal ? 'تقييم الخدمة' : 'جودة الطعام';
 
@@ -78,19 +108,25 @@ export default function RatingScreen({ route, navigation }) {
       <GradientHeader title="قيّم تجربتك" />
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 30 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-        <Text style={styles.emoji}>⭐</Text>
-        <Text style={styles.title}>كيف كانت تجربتك؟</Text>
-        {!!restaurantName && <Text style={styles.subtitle}>{restaurantName}</Text>}
+        <PopIn>
+          <LinearGradient colors={COLORS.gradients.gold} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.heroBadge}>
+            <Ionicons name="star" size={40} color="#FFF" />
+          </LinearGradient>
+        </PopIn>
+        <FadeIn delay={80} style={{ alignItems: 'center' }}>
+          <Text style={styles.title}>كيف كانت تجربتك؟</Text>
+          {!!restaurantName && <Text style={styles.subtitle}>{restaurantName}</Text>}
+        </FadeIn>
 
-        <View style={styles.section}>
+        <FadeIn delay={120} style={styles.section}>
           <Text style={styles.label}>{mainLabel}</Text>
-          <Stars value={foodRating} onChange={setFoodRating} label={mainLabel} />
-        </View>
+          <AnimatedStars value={foodRating} onChange={setFoodRating} label={mainLabel} C={COLORS} styles={styles} />
+        </FadeIn>
 
         {!!driverName && !isPersonal && (
           <View style={styles.section}>
             <Text style={styles.label}>خدمة التوصيل — {driverName} <Text style={styles.optional}>(اختياري)</Text></Text>
-            <Stars value={driverRating} onChange={setDriverRating} label="تقييم السائق" />
+            <AnimatedStars value={driverRating} onChange={setDriverRating} label={"تقييم السائق"} C={COLORS} styles={styles} />
           </View>
         )}
 
@@ -98,9 +134,7 @@ export default function RatingScreen({ route, navigation }) {
           {QUICK_COMMENTS.map(q => {
             const on = comment.includes(q);
             return (
-              <TouchableOpacity key={q} style={[styles.quickTag, on && styles.quickTagActive]} onPress={() => setComment(c => (c.includes(q) ? c.replace(q, '').replace(/\s+/g, ' ').trim() : (c + ' ' + q).trim()))}>
-                <Text style={[styles.quickText, on && { color: '#FFF' }]}>{q}</Text>
-              </TouchableOpacity>
+              <Chip key={q} size="sm" label={q} selected={on} onPress={() => setComment(c => (c.includes(q) ? c.replace(q, '').replace(/\s+/g, ' ').trim() : (c + ' ' + q).trim()))} />
             );
           })}
         </View>
@@ -125,11 +159,7 @@ export default function RatingScreen({ route, navigation }) {
           ))}
         </ScrollView>
 
-        <TouchableOpacity activeOpacity={0.9} onPress={submit} disabled={saving} style={{ alignSelf: 'stretch' }}>
-          <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.submitBtn, saving && { opacity: 0.7 }]}>
-            {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.submitText}>إرسال التقييم</Text>}
-          </LinearGradient>
-        </TouchableOpacity>
+        <GradientButton title="إرسال التقييم" onPress={submit} loading={saving} style={{ alignSelf: 'stretch' }} icon={<Ionicons name="send" size={17} color="#FFF" />} />
 
         <TouchableOpacity onPress={() => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Main', { screen: 'الرئيسية' }))} style={styles.skipBtn}>
           <Text style={styles.skipText}>لاحقاً</Text>
@@ -142,24 +172,25 @@ export default function RatingScreen({ route, navigation }) {
 const makeStyles = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   content: { padding: 20, alignItems: 'center' },
-  emoji: { fontSize: 52, marginTop: 6, marginBottom: 8 },
+  heroBadge: { width: 84, height: 84, borderRadius: 30, alignItems: 'center', justifyContent: 'center', marginTop: 4, marginBottom: 12, elevation: 10, shadowColor: '#FFB020', shadowOpacity: 0.4, shadowRadius: 18, shadowOffset: { width: 0, height: 10 } },
+  starLabelWrap: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10 },
   title: { fontSize: 22, fontWeight: '900', color: C.text },
   subtitle: { fontSize: 15, color: C.gray, marginTop: 4, marginBottom: 18 },
-  section: { width: '100%', backgroundColor: C.card, borderRadius: 18, padding: 16, marginBottom: 12, ...C.shadow.soft },
+  section: { width: '100%', backgroundColor: C.card, borderRadius: 24, padding: 18, marginBottom: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, ...C.shadow.soft },
   label: { fontSize: 14.5, fontWeight: '800', color: C.text, marginBottom: 10, textAlign: 'right' },
   optional: { fontSize: 12, color: C.faint, fontWeight: '600' },
-  starsRow: { flexDirection: 'row-reverse', gap: 8, justifyContent: 'center' },
-  starLabel: { textAlign: 'center', marginTop: 6, color: C.primary, fontWeight: '800', fontSize: 13 },
+  starsRow: { flexDirection: 'row-reverse', gap: 10, justifyContent: 'center', paddingVertical: 4 },
+  starLabel: { textAlign: 'center', color: C.primary, fontWeight: '900', fontSize: 15 },
   quickWrap: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 14, marginTop: 4 },
   quickTag: { backgroundColor: C.card, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: C.border },
   quickTagActive: { backgroundColor: C.primary, borderColor: C.primary },
   quickText: { fontSize: 13, fontWeight: '700', color: C.text },
-  commentInput: { width: '100%', minHeight: 90, textAlignVertical: 'top', borderWidth: 1.5, borderColor: C.border, borderRadius: 14, padding: 12, fontSize: 14, color: C.text, backgroundColor: C.inputBg, marginBottom: 12 },
+  commentInput: { width: '100%', minHeight: 100, textAlignVertical: 'top', borderWidth: 1, borderColor: C.border, borderRadius: 18, padding: 12, fontSize: 14, color: C.text, backgroundColor: C.inputBg, marginBottom: 12 },
   photoRow: { gap: 10, paddingVertical: 6, marginBottom: 14, flexDirection: 'row-reverse' },
   photoWrap: { position: 'relative' },
-  photo: { width: 64, height: 64, borderRadius: 12 },
+  photo: { width: 72, height: 72, borderRadius: 18 },
   photoDel: { position: 'absolute', top: -6, right: -6, backgroundColor: '#FF3B30', width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: C.card },
-  photoAdd: { width: 64, height: 64, borderRadius: 12, borderWidth: 1.5, borderColor: C.tintBorder, borderStyle: 'dashed', backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center' },
+  photoAdd: { width: 72, height: 72, borderRadius: 18, borderWidth: 1.5, borderColor: C.tintBorder, borderStyle: 'dashed', backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center' },
   photoAddTxt: { fontSize: 11, color: C.primary, fontWeight: '700', marginTop: 2 },
   submitBtn: { borderRadius: 18, padding: 16, alignItems: 'center', ...C.shadow.float },
   submitText: { color: '#FFF', fontWeight: '900', fontSize: 16 },

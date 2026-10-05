@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, ActivityIndicator, Text, TextInput, StyleSheet, StatusBar, I18nManager } from 'react-native';
+import { View, Text, TextInput, StyleSheet, StatusBar, I18nManager } from 'react-native';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -13,7 +13,9 @@ import { DriverProvider } from './src/context/DriverContext';
 import { navRef, markNavReady } from './src/navigation/navRef';
 import SplashScreen from './src/components/SplashScreen';
 import FloatingTabBar from './src/components/FloatingTabBar';
-import { COLORS } from './src/theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { COLORS, GRADIENTS } from './src/theme';
+import { LoadingDots } from './src/components/Anim';
 
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
@@ -73,7 +75,13 @@ function MainTabs() {
 function AppNavigator() {
   const { user, loading } = useAuth();
   if (loading) {
-    return <View style={styles.loading}><ActivityIndicator size="large" color={COLORS.primary} /></View>;
+    // امتداد بصري للسبلاش (نفس التدرّج) أثناء قراءة الجلسة — بلا spinner
+    return (
+      <View style={styles.loading}>
+        <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+        <LoadingDots color="#FFF" size={9} />
+      </View>
+    );
   }
   if (!user) {
     return (
@@ -126,5 +134,5 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.bg },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.primary },
 });

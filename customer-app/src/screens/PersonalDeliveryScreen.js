@@ -12,6 +12,10 @@ import { useTheme } from '../context/ThemeContext';
 import GradientHeader from '../components/GradientHeader';
 import MapPicker from '../components/MapPicker';
 import { Skeleton } from '../components/Skeleton';
+import EmptyState from '../components/EmptyState';
+import { FadeIn, PopIn, Press, GradientButton } from '../components/Anim';
+import { Chip, AnimatedNumber } from '../components/UI';
+import { haptic } from '../utils/motion';
 
 const normalizePhone = (p) => (p || '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
 
@@ -149,10 +153,10 @@ export default function PersonalDeliveryScreen({ navigation }) {
     return (
       <View style={styles.container}>
         <GradientHeader title="طلب شخصي" />
-        <View style={styles.centered}>
-          <Ionicons name={cfg.error ? 'cloud-offline-outline' : 'time-outline'} size={60} color={C.faint} />
-          <Text style={styles.emptyTxt}>{cfg.error ? 'تعذّر الاتصال — حاول مرة ثانية' : 'خدمة التوصيل الشخصي غير متاحة حالياً'}</Text>
-        </View>
+        <EmptyState emoji={cfg.error ? '📡' : '🛵'} icon={cfg.error ? 'cloud-offline-outline' : 'time-outline'} tone={cfg.error ? 'error' : undefined}
+          title={cfg.error ? 'تعذّر الاتصال' : 'الخدمة غير متاحة حالياً'}
+          subtitle={cfg.error ? 'تأكد من الإنترنت وحاول مرة ثانية' : 'خدمة التوصيل الشخصي متوقفة مؤقتاً، رجّع بعد شوي'}
+          ctaLabel="رجوع" onCta={() => navigation.goBack()} />
       </View>
     );
   }
@@ -163,7 +167,10 @@ export default function PersonalDeliveryScreen({ navigation }) {
       <TouchableOpacity style={styles.pointHead} onPress={() => switchMode(which)} accessibilityRole="button" accessibilityLabel={`تحديد ${label}`}>
         <View style={[styles.pointDot, { backgroundColor: color }]} />
         <Text style={styles.pointLabel}>{label}</Text>
-        <Text style={[styles.pointState, { color: point ? C.green : C.faint }]}>{point ? '✓ محددة' : 'غير محددة'}</Text>
+        <View style={[styles.statePill, { backgroundColor: point ? C.successBg : C.inputBg }]}>
+          <Ionicons name={point ? 'checkmark-circle' : 'ellipse-outline'} size={12} color={point ? C.green : C.faint} />
+          <Text style={[styles.pointState, { color: point ? C.successText : C.faint }]}>{point ? 'محددة' : 'غير محددة'}</Text>
+        </View>
         <Ionicons name="create-outline" size={16} color={C.primary} />
       </TouchableOpacity>
       <TextInput style={styles.input} placeholder={`وصف ${label} (اختياري)`} placeholderTextColor={C.faint}
@@ -177,21 +184,28 @@ export default function PersonalDeliveryScreen({ navigation }) {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40, gap: 16 }} keyboardShouldPersistTaps="handled" scrollEnabled={scrollEnabled}>
 
         {/* نوع الخدمة */}
-        <View style={styles.segment}>
-          {[['parcel', '📦 توصيل طرد'], ['ride', '🧍 توصيل راكب']].map(([k, l]) => (
-            <TouchableOpacity key={k} style={[styles.segBtn, serviceType === k && styles.segActive]} onPress={() => setServiceType(k)}
-              accessibilityRole="radio" accessibilityState={{ selected: serviceType === k }}>
-              <Text style={[styles.segTxt, serviceType === k && styles.segTxtActive]}>{l}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <FadeIn style={styles.segment}>
+          {[['parcel', 'توصيل طرد', 'cube', 'ظرف، أغراض، أدوية'], ['ride', 'توصيل راكب', 'person', 'سائق يوصّلك لوجهتك']].map(([k, l, ic, sub]) => {
+            const on = serviceType === k;
+            return (
+              <Press key={k} style={[styles.segBtn, on && styles.segActive]} scaleTo={0.96} onPress={() => { haptic.select(); setServiceType(k); }}
+                accessibilityRole="radio" accessibilityLabel={l}>
+                {on && <LinearGradient colors={C.gradients.info} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />}
+                <View style={[styles.segIcon, on && { backgroundColor: 'rgba(255,255,255,0.25)' }]}><Ionicons name={ic} size={20} color={on ? '#FFF' : C.info} /></View>
+                <Text style={[styles.segTxt, on && styles.segTxtActive]}>{l}</Text>
+                <Text style={[styles.segSub, on && { color: 'rgba(255,255,255,0.88)' }]} numberOfLines={1}>{sub}</Text>
+              </Press>
+            );
+          })}
+        </FadeIn>
 
         {/* خريطة واحدة + تبديل الاستلام/التسليم */}
         <View style={styles.card}>
           <View style={styles.modeToggle}>
-            {[['pickup', '🟢 الاستلام'], ['dropoff', '🏁 التسليم']].map(([k, l]) => (
-              <TouchableOpacity key={k} style={[styles.modeBtn, mode === k && styles.modeBtnOn]} onPress={() => switchMode(k)}
+            {[['pickup', 'الاستلام', 'radio-button-on', C.green], ['dropoff', 'التسليم', 'flag', C.red]].map(([k, l, ic, col]) => (
+              <TouchableOpacity key={k} style={[styles.modeBtn, mode === k && styles.modeBtnOn]} onPress={() => { haptic.select(); switchMode(k); }}
                 accessibilityRole="tab" accessibilityState={{ selected: mode === k }}>
+                <Ionicons name={ic} size={14} color={mode === k ? '#FFF' : col} />
                 <Text style={[styles.modeTxt, mode === k && { color: '#FFF' }]}>{l}</Text>
               </TouchableOpacity>
             ))}
@@ -227,9 +241,7 @@ export default function PersonalDeliveryScreen({ navigation }) {
               value={parcelDesc} onChangeText={setParcelDesc} textAlign="right" maxLength={150} />
             <View style={styles.sizeRow}>
               {[['small', 'صغير'], ['medium', 'وسط'], ['large', 'كبير']].map(([k, l]) => (
-                <TouchableOpacity key={k} style={[styles.sizeBtn, parcelSize === k && styles.sizeActive]} onPress={() => setParcelSize(k)}>
-                  <Text style={[styles.sizeTxt, parcelSize === k && { color: '#fff' }]}>{l}</Text>
-                </TouchableOpacity>
+                <Chip key={k} label={l} icon="cube-outline" selected={parcelSize === k} onPress={() => setParcelSize(k)} style={{ flex: 1 }} />
               ))}
             </View>
             <TextInput style={styles.input} placeholder="اسم المستلِم" placeholderTextColor={C.faint}
@@ -242,9 +254,7 @@ export default function PersonalDeliveryScreen({ navigation }) {
             <Text style={styles.label}>عدد الركّاب</Text>
             <View style={styles.sizeRow}>
               {[1, 2, 3, 4].map(n => (
-                <TouchableOpacity key={n} style={[styles.sizeBtn, passengers === n && styles.sizeActive]} onPress={() => setPassengers(n)}>
-                  <Text style={[styles.sizeTxt, passengers === n && { color: '#fff' }]}>{n}</Text>
-                </TouchableOpacity>
+                <Chip key={n} label={String(n)} icon="person-outline" selected={passengers === n} onPress={() => setPassengers(n)} style={{ flex: 1 }} />
               ))}
             </View>
             <TextInput style={styles.input} placeholder="ملاحظات للسائق (اختياري)" placeholderTextColor={C.faint}
@@ -253,28 +263,31 @@ export default function PersonalDeliveryScreen({ navigation }) {
         )}
 
         {/* السعر */}
-        <View style={[styles.card, { alignItems: 'center' }]}>
-          {quoting ? (
-            <ActivityIndicator color={C.primary} />
-          ) : quote ? (
-            <>
+        {quote && !quoting ? (
+          <PopIn from={0.94}>
+            <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.fareCard}>
+              <LinearGradient colors={C.gradients.sheen} style={styles.fareSheen} pointerEvents="none" />
               <Text style={styles.fareLabel}>السعر التقديري</Text>
-              <Text style={styles.fare}>{quote.fare} ₪</Text>
-              <Text style={styles.fareSub}>المسافة ≈ {quote.distance_km} كم · دفع كاش</Text>
-            </>
-          ) : (
-            <Text style={[styles.fareSub, quoteErr && { color: C.red }]}>{quoteErr || 'حدّد نقطتي الاستلام والتسليم لعرض السعر'}</Text>
-          )}
-        </View>
-
-        <TouchableOpacity activeOpacity={0.9} onPress={submit} disabled={submitting || !quote} accessibilityRole="button">
-          <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={[styles.submit, (submitting || !quote) && { opacity: 0.6 }]}>
-            {submitting ? <ActivityIndicator color="#fff" /> : (
-              <Text style={styles.submitTxt}>اطلب الآن {quote ? `· ${quote.fare} ₪` : ''}</Text>
+              <AnimatedNumber value={parseFloat(quote.fare) || 0} decimals={(parseFloat(quote.fare) || 0) % 1 ? 2 : 0} suffix=" ₪" style={styles.fare} />
+              <View style={styles.fareChips}>
+                <View style={styles.fareChip}><Ionicons name="navigate" size={12} color="#FFF" /><Text style={styles.fareChipTxt}>≈ {quote.distance_km} كم</Text></View>
+                <View style={styles.fareChip}><Ionicons name="cash" size={12} color="#FFF" /><Text style={styles.fareChipTxt}>دفع كاش</Text></View>
+              </View>
+            </LinearGradient>
+          </PopIn>
+        ) : (
+          <View style={[styles.card, { alignItems: 'center' }]}>
+            {quoting ? <Skeleton w={140} h={34} r={12} /> : (
+              <View style={{ alignItems: 'center', gap: 6 }}>
+                <Ionicons name={quoteErr ? 'alert-circle-outline' : 'map-outline'} size={26} color={quoteErr ? C.red : C.faint} />
+                <Text style={[styles.fareSub, quoteErr && { color: C.red }]}>{quoteErr || 'حدّد نقطتي الاستلام والتسليم لعرض السعر'}</Text>
+              </View>
             )}
-          </LinearGradient>
-        </TouchableOpacity>
+          </View>
+        )}
+
+        <GradientButton title={`اطلب الآن${quote ? ` · ${quote.fare} ₪` : ''}`} onPress={submit} loading={submitting} disabled={!quote}
+          icon={<Ionicons name="flash" size={18} color="#FFF" />} height={58} textStyle={{ fontSize: 17 }} />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -284,19 +297,27 @@ const makeStyles = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
   emptyTxt: { color: C.sub, fontSize: 15, fontWeight: '600', textAlign: 'center' },
-  segment: { flexDirection: 'row-reverse', backgroundColor: C.card, borderRadius: 16, padding: 5, gap: 5, borderWidth: 1, borderColor: C.border },
-  segBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
-  segActive: { backgroundColor: C.primary },
-  segTxt: { fontWeight: '800', color: C.sub, fontSize: 14 },
+  segment: { flexDirection: 'row-reverse', gap: 10 },
+  segBtn: { flex: 1, paddingVertical: 14, paddingHorizontal: 10, borderRadius: 22, alignItems: 'center', gap: 6, backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border, overflow: 'hidden' },
+  segActive: { borderColor: 'transparent', ...C.shadow.card },
+  segIcon: { width: 42, height: 42, borderRadius: 15, backgroundColor: C.infoBg, alignItems: 'center', justifyContent: 'center' },
+  segSub: { fontSize: 11, color: C.faint, fontWeight: '500' },
+  segTxt: { fontWeight: '900', color: C.text, fontSize: 14.5 },
   segTxtActive: { color: '#fff' },
-  card: { backgroundColor: C.card, borderRadius: 18, padding: 14, gap: 12, borderWidth: 1, borderColor: C.border, ...C.shadow.soft },
+  card: { backgroundColor: C.card, borderRadius: 24, padding: 14, gap: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, ...C.shadow.soft },
+  statePill: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  fareCard: { borderRadius: 26, padding: 20, alignItems: 'center', overflow: 'hidden', ...C.shadow.float },
+  fareSheen: { position: 'absolute', top: 0, left: 0, right: 0, height: 50 },
+  fareChips: { flexDirection: 'row-reverse', gap: 8, marginTop: 8 },
+  fareChip: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.14)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  fareChipTxt: { color: '#FFF', fontSize: 12, fontWeight: '800' },
   modeToggle: { flexDirection: 'row-reverse', backgroundColor: C.inputBg, borderRadius: 14, padding: 4, gap: 4 },
-  modeBtn: { flex: 1, paddingVertical: 10, borderRadius: 11, alignItems: 'center' },
+  modeBtn: { flex: 1, flexDirection: 'row-reverse', paddingVertical: 10, borderRadius: 11, alignItems: 'center', justifyContent: 'center', gap: 5 },
   modeBtnOn: { backgroundColor: C.primary },
   modeTxt: { fontWeight: '800', color: C.text, fontSize: 13.5 },
   hint: { fontSize: 12, color: C.sub, textAlign: 'right', lineHeight: 18 },
   mapActions: { flexDirection: 'row-reverse', gap: 8 },
-  confirmBtn: { flex: 1, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.primary, borderRadius: 12, paddingVertical: 12 },
+  confirmBtn: { flex: 1, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.primary, borderRadius: 14, paddingVertical: 13, ...C.shadow.glow },
   confirmTxt: { color: '#FFF', fontWeight: '900', fontSize: 14 },
   miniBtn: { flexDirection: 'row-reverse', alignItems: 'center', gap: 5, backgroundColor: C.sec, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, borderColor: C.tintBorder },
   miniBtnTxt: { color: C.primary, fontWeight: '800', fontSize: 13 },
@@ -306,13 +327,13 @@ const makeStyles = (C) => StyleSheet.create({
   pointLabel: { flex: 1, fontSize: 14, fontWeight: '800', color: C.text, textAlign: 'right' },
   pointState: { fontSize: 12, fontWeight: '800' },
   label: { fontSize: 15, fontWeight: '800', color: C.text, textAlign: 'right' },
-  input: { borderWidth: 1.5, borderColor: C.border, borderRadius: 12, padding: 12, fontSize: 14, backgroundColor: C.inputBg, color: C.text },
+  input: { borderWidth: 1, borderColor: C.border, borderRadius: 14, padding: 13, fontSize: 14, backgroundColor: C.inputBg, color: C.text },
   sizeRow: { flexDirection: 'row-reverse', gap: 8 },
   sizeBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, borderWidth: 1.5, borderColor: C.border, alignItems: 'center', backgroundColor: C.inputBg },
   sizeActive: { backgroundColor: C.primary, borderColor: C.primary },
   sizeTxt: { fontWeight: '800', color: C.text, fontSize: 14 },
-  fareLabel: { color: C.sub, fontSize: 13, fontWeight: '600' },
-  fare: { color: C.primary, fontSize: 34, fontWeight: '900', marginVertical: 2 },
+  fareLabel: { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '500' },
+  fare: { color: '#FFF', fontSize: 38, fontWeight: '900', marginVertical: 2 },
   fareSub: { color: C.faint, fontSize: 12.5, fontWeight: '600', textAlign: 'center' },
   submit: { borderRadius: 18, paddingVertical: 17, alignItems: 'center', ...C.shadow.float },
   submitTxt: { color: '#fff', fontWeight: '900', fontSize: 17 },

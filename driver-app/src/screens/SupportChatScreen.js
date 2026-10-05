@@ -1,13 +1,27 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, Keyboard, AppState } from 'react-native';
+import { View, Text, TextInput, FlatList, StyleSheet, KeyboardAvoidingView, Platform, Alert, Keyboard, AppState } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../utils/api';
 import GradientHeader from '../components/GradientHeader';
-import { COLORS, SHADOW, RTL, KAV_BEHAVIOR } from '../theme';
+import { FadeIn, Skeleton, Press, LoadingDots, EmptyState } from '../components/Anim';
+import { COLORS, GRADIENTS, SHADOW, RTL, KAV_BEHAVIOR, RADIUS } from '../theme';
 import { fmtTime, fmtDate } from '../utils/format';
 
 const POLL_MS = 4000;
+
+// هيكل تحميل على شكل فقاعات محادثة
+function ChatSkeleton() {
+  const rows = [{ mine: false, w: '62%' }, { mine: true, w: '48%' }, { mine: false, w: '70%' }, { mine: true, w: '40%' }];
+  return (
+    <View style={{ padding: 16, gap: 12 }}>
+      {rows.map((r, i) => (
+        <Skeleton key={i} width={r.w} height={i % 2 ? 44 : 58} radius={18} style={{ alignSelf: r.mine ? 'flex-end' : 'flex-start' }} />
+      ))}
+    </View>
+  );
+}
 
 export default function SupportChatScreen() {
   const insets = useSafeAreaInsets();
@@ -15,10 +29,12 @@ export default function SupportChatScreen() {
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [focused, setFocused] = useState(false);
   const listRef = useRef(null);
   const atBottom = useRef(true);
   const forceScroll = useRef(true);
   const sigRef = useRef('');
+  const seenIds = useRef(null); // رسائل التحميل الأول تظهر بلا حركة؛ الجديدة فقط تنزلق للداخل
 
   const load = useCallback(async () => {
     try {
@@ -26,6 +42,7 @@ export default function SupportChatScreen() {
       const list = Array.isArray(r?.data) ? r.data : [];
       const last = list[list.length - 1];
       const sig = `${list.length}:${last?.id}:${last?.message}`;
+      if (!seenIds.current) seenIds.current = new Set(list.map((m, i) => String(m.id ?? i)));
       if (sig !== sigRef.current) { sigRef.current = sig; setMessages(list); } // لا إعادة رسم بلا داعٍ
     } catch {} finally { setLoading(false); }
   }, []);
@@ -38,6 +55,7 @@ export default function SupportChatScreen() {
     });
     return () => { clearInterval(t); kb.remove(); };
   }, [load]);
+
 
   const send = async () => {
     const msg = text.trim();
@@ -63,24 +81,38 @@ export default function SupportChatScreen() {
     const prev = messages[index - 1];
     const day = item.created_at ? fmtDate(item.created_at, false) : '';
     const showDay = day && (!prev || fmtDate(prev.created_at, false) !== day);
+    const grouped = prev && prev.sender === item.sender && !showDay;
+    const body = (
+      <View style={[styles.bubble, mine ? styles.mine : styles.theirs, grouped && { marginTop: -4 }]}>
+        {mine && <LinearGradient colors={GRADIENTS.sunset} start={{ x: 1, y: 0 }} end={{ x: 0, y: 1 }} style={[StyleSheet.absoluteFill, { borderRadius: 18, borderBottomRightRadius: 6 }]} />}
+        {!mine && !grouped && (
+          <View style={[RTL.row, { gap: 5, marginBottom: 3 }]}>
+            <View style={styles.teamDot} />
+            <Text style={styles.sender}>فريق وصلّي</Text>
+          </View>
+        )}
+        <Text style={[styles.msgTxt, RTL.text, mine && { color: '#FFF' }]}>{item.message}</Text>
+        {!!item.created_at && <Text style={[styles.time, mine && { color: 'rgba(255,255,255,0.85)' }]}>{fmtTime(item.created_at)}</Text>}
+      </View>
+    );
     return (
       <View>
-        {showDay && <Text style={styles.day}>{day}</Text>}
-        <View style={[styles.bubble, mine ? styles.mine : styles.theirs]}>
-          {!mine && <Text style={styles.sender}>فريق وصلّي</Text>}
-          <Text style={[styles.msgTxt, RTL.text, mine && { color: '#FFF' }]}>{item.message}</Text>
-          {!!item.created_at && <Text style={[styles.time, mine && { color: 'rgba(255,255,255,0.8)' }]}>{fmtTime(item.created_at)}</Text>}
-        </View>
+        {showDay && (
+          <View style={styles.dayWrap}><Text style={styles.day}>{day}</Text></View>
+        )}
+        {(!seenIds.current || seenIds.current.has(String(item.id ?? index))) ? body : <FadeIn from={10} duration={260}>{body}</FadeIn>}
       </View>
     );
   };
 
+  const canSend = !!text.trim() && !sending;
+
   return (
     <KeyboardAvoidingView style={styles.container} behavior={KAV_BEHAVIOR}>
-      <GradientHeader title="وصلّي - الإدارة" subtitle="الدعم الفني" />
+      <GradientHeader title="وصلّي - الإدارة" subtitle="الدعم الفني · نرد عادةً خلال دقائق" />
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color={COLORS.primary} size="large" /></View>
+        <View style={{ flex: 1 }}><ChatSkeleton /></View>
       ) : (
         <FlatList
           ref={listRef}
@@ -99,20 +131,24 @@ export default function SupportChatScreen() {
           }}
           renderItem={renderItem}
           ListEmptyComponent={
-            <View style={styles.center}>
-              <Text style={{ fontSize: 44 }}>💬</Text>
-              <Text style={styles.empty}>ابدأ محادثة مع فريق وصلّي 👋</Text>
+            <View style={{ flex: 1, justifyContent: 'center' }}>
+              <EmptyState icon="chatbubbles-outline" title="ابدأ محادثة مع فريق وصلّي" text="اكتب سؤالك أو مشكلتك وسنرد عليك بأسرع وقت — طلبات السحب أيضاً من هنا" />
             </View>
           }
         />
       )}
 
       <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 8) + 4 }]}>
-        <TextInput style={styles.input} placeholder="اكتب رسالتك..." placeholderTextColor={COLORS.faint}
-          value={text} onChangeText={setText} multiline textAlign="right" maxLength={1000} />
-        <TouchableOpacity style={[styles.sendBtn, (!text.trim() || sending) && { opacity: 0.5 }]} onPress={send} disabled={sending || !text.trim()} activeOpacity={0.8}>
-          {sending ? <ActivityIndicator color="#FFF" size="small" /> : <Ionicons name="send" size={19} color="#FFF" style={{ transform: [{ scaleX: -1 }] }} />}
-        </TouchableOpacity>
+        <View style={[styles.inputWrap, focused && styles.inputWrapFocus]}>
+          <TextInput style={styles.input} placeholder="اكتب رسالتك..." placeholderTextColor={COLORS.faint}
+            value={text} onChangeText={setText} multiline textAlign="right" maxLength={1000}
+            onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} accessibilityLabel="نص الرسالة" />
+        </View>
+        <Press style={[styles.sendBtn, !canSend && { opacity: 0.45 }]} onPress={send} disabled={!canSend} hapticStyle="light" accessibilityLabel="إرسال">
+          <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.sendGrad}>
+            {sending ? <LoadingDots size={5} /> : <Ionicons name="send" size={19} color="#FFF" style={{ transform: [{ scaleX: -1 }] }} />}
+          </LinearGradient>
+        </Press>
       </View>
     </KeyboardAvoidingView>
   );
@@ -120,17 +156,20 @@ export default function SupportChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  day: { alignSelf: 'center', fontSize: 11.5, color: COLORS.gray, backgroundColor: COLORS.card, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 3, marginVertical: 6, overflow: 'hidden' },
-  bubble: { maxWidth: '80%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 9 },
+  dayWrap: { alignItems: 'center', marginVertical: 8 },
+  day: { fontSize: 11.5, color: COLORS.sub, backgroundColor: COLORS.card, borderRadius: RADIUS.pill, paddingHorizontal: 12, paddingVertical: 4, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.line, fontWeight: '500' },
+  bubble: { maxWidth: '82%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   // RTL: رسائلي على اليمين (بداية السطر)، رسائل الإدارة على اليسار
-  mine: { backgroundColor: COLORS.primary, alignSelf: 'flex-end', borderBottomRightRadius: 5, ...SHADOW.soft },
-  theirs: { backgroundColor: COLORS.card, alignSelf: 'flex-start', borderBottomLeftRadius: 5, borderWidth: 1, borderColor: COLORS.line },
-  sender: { fontSize: 11, color: COLORS.primary, fontWeight: '800', marginBottom: 2, textAlign: 'right' },
-  msgTxt: { fontSize: 14.5, color: COLORS.text, lineHeight: 21 },
-  time: { fontSize: 10, color: COLORS.faint, marginTop: 3, textAlign: 'left' },
-  empty: { textAlign: 'center', color: COLORS.gray, fontSize: 15, fontWeight: '600' },
-  inputBar: { flexDirection: 'row-reverse', alignItems: 'flex-end', gap: 8, paddingHorizontal: 10, paddingTop: 10, backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.line },
-  input: { flex: 1, backgroundColor: COLORS.inputBg, borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14.5, color: COLORS.text, maxHeight: 110, borderWidth: 1, borderColor: COLORS.line },
-  sendBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', ...SHADOW.glow },
+  mine: { backgroundColor: COLORS.primary, alignSelf: 'flex-end', borderBottomRightRadius: 6, ...SHADOW.soft },
+  theirs: { backgroundColor: COLORS.card, alignSelf: 'flex-start', borderBottomLeftRadius: 6, borderWidth: 1, borderColor: COLORS.line },
+  teamDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: COLORS.green },
+  sender: { fontSize: 11.5, color: COLORS.primary, fontWeight: '800', textAlign: 'right' },
+  msgTxt: { fontSize: 15, color: COLORS.text, lineHeight: 22 },
+  time: { fontSize: 10.5, color: COLORS.faint, marginTop: 4, textAlign: 'left' },
+  inputBar: { flexDirection: 'row-reverse', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 10, backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.line },
+  inputWrap: { flex: 1, backgroundColor: COLORS.inputBg, borderRadius: 24, borderWidth: 1.5, borderColor: COLORS.line, minHeight: 48, justifyContent: 'center' },
+  inputWrapFocus: { borderColor: COLORS.primary, backgroundColor: COLORS.card },
+  input: { paddingHorizontal: 16, paddingVertical: 11, fontSize: 15, color: COLORS.text, maxHeight: 120 },
+  sendBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: COLORS.primary, ...SHADOW.glow },
+  sendGrad: { flex: 1, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
 });

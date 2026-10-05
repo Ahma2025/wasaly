@@ -5,7 +5,9 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { Skeleton } from '../components/Skeleton';
-import { FadeIn } from '../components/Anim';
+import { FadeIn, Press, Pulse } from '../components/Anim';
+import { Chip } from '../components/UI';
+import { LinearGradient } from 'expo-linear-gradient';
 import GradientHeader from '../components/GradientHeader';
 import EmptyState from '../components/EmptyState';
 import { useTabBarInset } from '../components/FloatingTabBar';
@@ -85,16 +87,23 @@ export default function OrdersHistoryScreen() {
   const active = orders.filter(o => ACTIVE_STATUSES.includes(o.status));
   const history = orders.filter(o => !ACTIVE_STATUSES.includes(o.status));
 
+  const [filter, setFilter] = useState('all');
+  const shownHistory = filter === 'all' ? history
+    : filter === 'delivered' ? history.filter(o => o.status === 'delivered')
+      : history.filter(o => o.status === 'cancelled');
+
   return (
     <View style={styles.container}>
-      <GradientHeader title="طلباتي 📦" hideBack subtitle={active.length ? `${active.length} طلب جاري` : undefined} />
+      <GradientHeader title="طلباتي" hideBack subtitle={active.length ? `${active.length} طلب جاري الآن` : (orders.length ? `${orders.length} طلب` : undefined)} />
 
       {loading ? (
-        <View style={{ padding: 16, gap: 10 }}>{[0, 1, 2, 3].map(i => (
+        <View style={{ padding: 16, gap: 12 }}>{[0, 1, 2, 3].map(i => (
           <View key={i} style={styles.skelCard}>
-            <Skeleton w={'55%'} h={14} style={{ alignSelf: 'flex-end' }} />
-            <Skeleton w={'35%'} h={11} style={{ marginTop: 8, alignSelf: 'flex-end' }} />
-            <Skeleton w={'25%'} h={16} style={{ marginTop: 10 }} />
+            <View style={{ flexDirection: 'row-reverse', gap: 10, alignItems: 'center' }}>
+              <Skeleton w={48} h={48} r={14} />
+              <View style={{ flex: 1, gap: 8, alignItems: 'flex-end' }}><Skeleton w={'55%'} h={14} /><Skeleton w={'35%'} h={11} /></View>
+            </View>
+            <Skeleton w={'30%'} h={16} style={{ marginTop: 12 }} />
           </View>
         ))}</View>
       ) : orders.length === 0 ? (
@@ -102,28 +111,42 @@ export default function OrdersHistoryScreen() {
       ) : (
         <ScrollView
           contentContainerStyle={{ paddingBottom: tabInset + 24 }}
+          showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchOrders(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} />}
         >
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>الطلبات الحالية</Text>
+            <View style={styles.secHead}>
+              <View style={styles.liveDotWrap}>{active.length > 0 && <Pulse to={1.6}><View style={styles.liveDot} /></Pulse>}</View>
+              <Text style={styles.sectionTitle}>الطلبات الحالية</Text>
+            </View>
             {active.length === 0 ? (
-              <View style={styles.emptyBox}>
-                <Text style={styles.emptyEmoji}>🍽️</Text>
+              <FadeIn style={styles.emptyBox}>
+                <View style={styles.emptyIcon}><Ionicons name="restaurant-outline" size={28} color={COLORS.primary} /></View>
                 <Text style={styles.emptyText}>لا توجد طلبات حالية</Text>
-                <TouchableOpacity style={styles.orderNowBtn} onPress={() => navigation.navigate('الرئيسية')}>
+                <TouchableOpacity style={styles.orderNowBtn} onPress={() => navigation.navigate('الرئيسية')} accessibilityRole="button">
                   <Text style={styles.orderNowText}>اطلب الآن</Text>
+                  <Ionicons name="arrow-back" size={14} color="#FFF" />
                 </TouchableOpacity>
-              </View>
+              </FadeIn>
             ) : (
-              active.map((o, i) => <FadeIn key={o.id} delay={i * 60}><OrderCard order={o} navigation={navigation} isActive styles={styles} C={COLORS} /></FadeIn>)
+              active.map((o, i) => <FadeIn key={o.id} index={i}><ActiveCard order={o} navigation={navigation} styles={styles} C={COLORS} /></FadeIn>)
             )}
           </View>
 
           {history.length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>الطلبات السابقة</Text>
-              {history.map((o, i) => (
-                <FadeIn key={o.id} delay={Math.min(i, 8) * 50}>
+              <View style={[styles.secHead, { justifyContent: 'space-between' }]}>
+                <Text style={styles.sectionTitle}>الطلبات السابقة</Text>
+              </View>
+              <View style={styles.filters}>
+                {[['all', 'الكل'], ['delivered', 'مكتملة'], ['cancelled', 'ملغاة']].map(([k, l]) => (
+                  <Chip key={k} size="sm" label={l} selected={filter === k} onPress={() => setFilter(k)} />
+                ))}
+              </View>
+              {shownHistory.length === 0 ? (
+                <Text style={styles.noneTxt}>ما في طلبات بهالتصنيف</Text>
+              ) : shownHistory.map((o, i) => (
+                <FadeIn key={`${filter}-${o.id}`} index={i}>
                   <OrderCard order={o} navigation={navigation} onReorder={handleReorder} reordering={reordering === o.id} styles={styles} C={COLORS} />
                 </FadeIn>
               ))}
@@ -135,22 +158,68 @@ export default function OrdersHistoryScreen() {
   );
 }
 
-function OrderCard({ order, navigation, isActive, onReorder, reordering, styles, C }) {
+const PROGRESS = ['pending', 'confirmed', 'preparing', 'ready', 'on_the_way', 'delivered'];
+
+/* بطاقة طلب جاري: متدرّجة مع شريط مراحل مصغّر */
+function ActiveCard({ order, navigation, styles, C }) {
+  const meta = statusMeta(order.status);
+  const personal = isPersonalOrder(order);
+  const idx = Math.max(0, PROGRESS.indexOf(order.status));
+  return (
+    <Press onPress={() => navigation.navigate('OrderTracking', { orderId: order.id })} scaleTo={0.97}
+      accessibilityRole="button" accessibilityLabel={`${orderTitle(order)}، ${statusLabel(order.status, order)}، اضغط للتتبع`}
+      style={styles.activeShadow}>
+      <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.activeCard}>
+        <LinearGradient colors={C.gradients.sheen} style={styles.activeSheen} pointerEvents="none" />
+        <View style={styles.cardTop}>
+          {!personal && order.restaurant_logo
+            ? <Image source={{ uri: order.restaurant_logo }} style={[styles.logo, { borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' }]} />
+            : <View style={[styles.logo, styles.logoGlass]}><Ionicons name={personal ? 'bicycle' : 'restaurant'} size={20} color="#FFF" /></View>}
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.restaurantName, { color: '#FFF' }]} numberOfLines={1}>{orderTitle(order)}</Text>
+            <Text style={[styles.orderDate, { color: 'rgba(255,255,255,0.85)' }]}>{order.order_number ? `#${order.order_number}` : ''}</Text>
+          </View>
+          <View style={styles.activeStatus}>
+            <Ionicons name={meta.icon} size={13} color={C.primary} />
+            <Text style={[styles.statusText, { color: C.primary }]}>{statusLabel(order.status, order)}</Text>
+          </View>
+        </View>
+        {!personal && (
+          <View style={styles.miniSteps}>
+            {PROGRESS.slice(0, 5).map((s, i) => (
+              <View key={s} style={[styles.miniStep, { backgroundColor: i <= idx ? '#FFF' : 'rgba(255,255,255,0.3)' }]} />
+            ))}
+          </View>
+        )}
+        <View style={styles.activeBottom}>
+          <Text style={styles.activeTotal}>{parseFloat(order.total || 0).toFixed(2)}₪</Text>
+          <View style={styles.trackPill}>
+            <Ionicons name="navigate" size={13} color={C.primary} />
+            <Text style={[styles.trackText, { color: C.primary }]}>تتبّع الطلب</Text>
+          </View>
+        </View>
+      </LinearGradient>
+    </Press>
+  );
+}
+
+function OrderCard({ order, navigation, onReorder, reordering, styles, C }) {
   const meta = statusMeta(order.status);
   const personal = isPersonalOrder(order);
   const date = order.created_at ? new Date(order.created_at) : null;
   return (
-    <TouchableOpacity
-      style={[styles.card, isActive && styles.activeCard]}
+    <Press
+      style={styles.card}
       onPress={() => navigation.navigate('OrderTracking', { orderId: order.id })}
-      activeOpacity={0.85}
+      scaleTo={0.98}
+      haptic={false}
       accessibilityRole="button"
       accessibilityLabel={`${orderTitle(order)}، ${statusLabel(order.status, order)}`}
     >
       <View style={styles.cardTop}>
         {!personal && order.restaurant_logo
           ? <Image source={{ uri: order.restaurant_logo }} style={styles.logo} />
-          : <View style={[styles.logo, styles.logoFallback]}><Text style={{ fontSize: 20 }}>{personal ? '🛵' : '🍽️'}</Text></View>}
+          : <View style={[styles.logo, styles.logoFallback]}><Ionicons name={personal ? 'bicycle' : 'restaurant'} size={20} color={C.primary} /></View>}
         <View style={{ flex: 1 }}>
           <Text style={styles.restaurantName} numberOfLines={1}>{orderTitle(order)}</Text>
           <Text style={styles.orderDate}>
@@ -169,16 +238,8 @@ function OrderCard({ order, navigation, isActive, onReorder, reordering, styles,
         <Text style={styles.totalAmount}>{parseFloat(order.total || 0).toFixed(2)}₪</Text>
       </View>
 
-      {isActive && (
-        <View style={styles.trackRow}>
-          <Ionicons name="navigate-circle-outline" size={15} color={C.primary} />
-          <Text style={styles.trackText}>اضغط لتتبع طلبك</Text>
-          <Ionicons name="chevron-back" size={14} color={C.primary} />
-        </View>
-      )}
-
-      {!isActive && onReorder && !personal && order.restaurant_id && (
-        <TouchableOpacity style={styles.reorderBtn} onPress={() => onReorder(order)} disabled={reordering} activeOpacity={0.8}>
+      {onReorder && !personal && order.restaurant_id && (
+        <TouchableOpacity style={styles.reorderBtn} onPress={() => onReorder(order)} disabled={reordering} activeOpacity={0.8} accessibilityRole="button">
           {reordering ? (
             <ActivityIndicator size="small" color={C.primary} />
           ) : (
@@ -189,34 +250,47 @@ function OrderCard({ order, navigation, isActive, onReorder, reordering, styles,
           )}
         </TouchableOpacity>
       )}
-    </TouchableOpacity>
+    </Press>
   );
 }
 
 const makeStyles = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  skelCard: { backgroundColor: C.card, borderRadius: 18, padding: 14 },
-  section: { padding: 16, paddingBottom: 4 },
-  sectionTitle: { fontSize: 16, fontWeight: '900', color: C.text, marginBottom: 10, textAlign: 'right' },
-  emptyBox: { backgroundColor: C.card, borderRadius: 20, padding: 26, alignItems: 'center', marginBottom: 12, ...C.shadow.soft },
-  emptyEmoji: { fontSize: 44, marginBottom: 8 },
+  skelCard: { backgroundColor: C.card, borderRadius: 22, padding: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border },
+  section: { paddingHorizontal: 16, paddingTop: 18 },
+  secHead: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginBottom: 12 },
+  liveDotWrap: { width: 10, alignItems: 'center' },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.green },
+  sectionTitle: { fontSize: 18, fontWeight: '900', color: C.text, textAlign: 'right' },
+  filters: { flexDirection: 'row-reverse', gap: 8, marginBottom: 12 },
+  noneTxt: { textAlign: 'center', color: C.gray, fontWeight: '600', paddingVertical: 20 },
+  emptyBox: { backgroundColor: C.card, borderRadius: 24, padding: 22, alignItems: 'center', marginBottom: 6, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, ...C.shadow.soft },
+  emptyIcon: { width: 60, height: 60, borderRadius: 20, backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   emptyText: { fontSize: 15, color: C.gray, fontWeight: '600', marginBottom: 14 },
-  orderNowBtn: { backgroundColor: C.primary, paddingHorizontal: 24, paddingVertical: 11, borderRadius: 14 },
+  orderNowBtn: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, backgroundColor: C.primary, paddingHorizontal: 22, paddingVertical: 11, borderRadius: 14 },
   orderNowText: { color: '#FFF', fontWeight: '800', fontSize: 14 },
-  card: { backgroundColor: C.card, borderRadius: 20, padding: 14, marginBottom: 10, ...C.shadow.soft },
-  activeCard: { borderRightWidth: 4, borderRightColor: C.primary },
+  activeShadow: { marginBottom: 12, borderRadius: 24, ...C.shadow.float },
+  activeCard: { borderRadius: 24, padding: 16, overflow: 'hidden' },
+  activeSheen: { position: 'absolute', top: 0, left: 0, right: 0, height: 50 },
+  logoGlass: { backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
+  activeStatus: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, backgroundColor: '#FFF', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  miniSteps: { flexDirection: 'row-reverse', gap: 5, marginTop: 2, marginBottom: 12 },
+  miniStep: { flex: 1, height: 5, borderRadius: 3 },
+  activeBottom: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between' },
+  activeTotal: { color: '#FFF', fontSize: 19, fontWeight: '900' },
+  trackPill: { flexDirection: 'row-reverse', alignItems: 'center', gap: 5, backgroundColor: '#FFF', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  card: { backgroundColor: C.card, borderRadius: 22, padding: 14, marginBottom: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, ...C.shadow.soft },
   cardTop: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10, marginBottom: 10 },
-  logo: { width: 44, height: 44, borderRadius: 12, backgroundColor: C.inputBg },
+  logo: { width: 48, height: 48, borderRadius: 15, backgroundColor: C.inputBg },
   logoFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: C.tint },
-  restaurantName: { fontSize: 15, fontWeight: '800', color: C.text, textAlign: 'right' },
-  orderDate: { fontSize: 11.5, color: C.gray, marginTop: 3, textAlign: 'right' },
-  statusBadge: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10 },
+  restaurantName: { fontSize: 15.5, fontWeight: '800', color: C.text, textAlign: 'right' },
+  orderDate: { fontSize: 11.5, color: C.gray, marginTop: 3, textAlign: 'right', fontWeight: '500' },
+  statusBadge: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999 },
   statusText: { fontSize: 11.5, fontWeight: '800' },
-  cardBottom: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' },
-  itemsCount: { fontSize: 12.5, color: C.gray },
+  cardBottom: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', backgroundColor: C.inputBg, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9 },
+  itemsCount: { fontSize: 12.5, color: C.gray, fontWeight: '500' },
   totalAmount: { fontSize: 16, fontWeight: '900', color: C.primary },
-  trackRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.line },
-  trackText: { flex: 1, fontSize: 12.5, color: C.primary, fontWeight: '800', textAlign: 'right' },
-  reorderBtn: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: C.primary, backgroundColor: C.tint },
+  trackText: { fontSize: 12.5, fontWeight: '800', textAlign: 'right' },
+  reorderBtn: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10, paddingVertical: 11, borderRadius: 14, borderWidth: 1.5, borderColor: C.tintBorder, backgroundColor: C.tint },
   reorderText: { fontSize: 14, color: C.primary, fontWeight: '800' },
 });

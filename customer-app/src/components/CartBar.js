@@ -1,46 +1,65 @@
 import React, { useEffect, useRef } from 'react';
-import { TouchableOpacity, Text, View, StyleSheet, Animated } from 'react-native';
+import { Pressable, Text, View, StyleSheet, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
+import { useBump } from './Anim';
+import { AnimatedNumber } from './UI';
+import { SPRING, SPRING_POP, haptic, isReducedMotion } from '../utils/motion';
 
+// شريط السلة العائم: يدخل بانزلاق، يرتد عند تغيّر العدد، والمجموع يعدّ بحركة
 export default function CartBar({ count, total, onPress }) {
   const { colors: COLORS } = useTheme();
   const insets = useSafeAreaInsets();
-  const scale = useRef(new Animated.Value(1)).current;
-  const prevCount = useRef(count);
+  const enter = useRef(new Animated.Value(isReducedMotion() ? 1 : 0)).current;
+  const press = useRef(new Animated.Value(1)).current;
+  const bump = useBump(count, 1.06);
+  const badgeBump = useBump(count, 1.4);
 
-  // اهتزاز خفيف عند تغيّر عدد الأصناف
-  useEffect(() => {
-    if (count !== prevCount.current) {
-      prevCount.current = count;
-      Animated.sequence([
-        Animated.spring(scale, { toValue: 1.08, useNativeDriver: true, speed: 50 }),
-        Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 20 }),
-      ]).start();
-    }
-  }, [count]);
+  useEffect(() => { Animated.spring(enter, { toValue: 1, ...SPRING }).start(); }, []);
+  const translateY = enter.interpolate({ inputRange: [0, 1], outputRange: [120, 0] });
 
   return (
-    <Animated.View style={[styles.wrap, { bottom: insets.bottom + 16, transform: [{ scale }] }]}>
-      <TouchableOpacity onPress={onPress} activeOpacity={0.9} style={styles.shadow}
-        accessibilityRole="button" accessibilityLabel={`عرض السلة، ${count} صنف، ${total.toFixed(2)} شيكل`}>
-        <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.bar}>
-          <View style={styles.badge}><Text style={styles.badgeText}>{count}</Text></View>
-          <Text style={styles.text}>عرض السلة</Text>
-          <Text style={styles.total}>{total.toFixed(2)}₪</Text>
-        </LinearGradient>
-      </TouchableOpacity>
+    <Animated.View style={[styles.wrap, { bottom: insets.bottom + 16, opacity: enter, transform: [{ translateY }] }]}>
+      <Animated.View style={bump}>
+        <Pressable onPress={() => { haptic.medium(); onPress && onPress(); }}
+          onPressIn={() => Animated.spring(press, { toValue: 0.97, ...SPRING, stiffness: 320 }).start()}
+          onPressOut={() => Animated.spring(press, { toValue: 1, ...SPRING_POP }).start()}
+          accessibilityRole="button" accessibilityLabel={`عرض السلة، ${count} صنف، ${Number(total || 0).toFixed(2)} شيكل`}>
+          <Animated.View style={[styles.shadow, COLORS.shadow.float, { transform: [{ scale: press }] }]}>
+            <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.bar}>
+              <LinearGradient colors={COLORS.gradients.sheen} style={styles.sheen} pointerEvents="none" />
+              <View style={styles.bagWrap}>
+                <Ionicons name="bag-handle" size={20} color="#FFF" />
+                <Animated.View style={[styles.badge, badgeBump]}><Text style={[styles.badgeText, { color: COLORS.primary }]}>{count}</Text></Animated.View>
+              </View>
+              <View style={{ flex: 1, alignItems: 'flex-end', marginRight: 12 }}>
+                <Text style={styles.text}>عرض السلة</Text>
+                <Text style={styles.hint}>اضغط لإتمام الطلب</Text>
+              </View>
+              <View style={styles.totalPill}>
+                <AnimatedNumber value={total} suffix="₪" style={styles.total} />
+                <Ionicons name="chevron-back" size={16} color="#FFF" />
+              </View>
+            </LinearGradient>
+          </Animated.View>
+        </Pressable>
+      </Animated.View>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { position: 'absolute', left: 16, right: 16 },
-  shadow: { borderRadius: 20, elevation: 12, shadowColor: '#FF6B00', shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 10 } },
-  bar: { borderRadius: 20, flexDirection: 'row-reverse', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 18 },
-  badge: { backgroundColor: 'rgba(255,255,255,0.28)', borderRadius: 13, minWidth: 26, height: 26, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' },
-  badgeText: { color: '#FFF', fontWeight: '900', fontSize: 14 },
-  text: { flex: 1, color: '#FFF', fontWeight: '800', fontSize: 15, textAlign: 'center', letterSpacing: 0.3 },
+  shadow: { borderRadius: 22 },
+  bar: { borderRadius: 22, flexDirection: 'row-reverse', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, overflow: 'hidden' },
+  sheen: { position: 'absolute', top: 0, left: 0, right: 0, height: 30 },
+  bagWrap: { width: 42, height: 42, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center' },
+  badge: { position: 'absolute', top: -5, left: -5, backgroundColor: '#FFF', borderRadius: 10, minWidth: 20, height: 20, paddingHorizontal: 5, justifyContent: 'center', alignItems: 'center' },
+  badgeText: { fontWeight: '900', fontSize: 11 },
+  text: { color: '#FFF', fontWeight: '900', fontSize: 15.5 },
+  hint: { color: 'rgba(255,255,255,0.85)', fontWeight: '500', fontSize: 11.5, marginTop: 1 },
+  totalPill: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.14)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
   total: { color: '#FFF', fontWeight: '900', fontSize: 16 },
 });

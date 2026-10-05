@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import toast from 'react-hot-toast';
-import { FiArrowRight, FiSend, FiPhone } from 'react-icons/fi';
+import { FiArrowRight, FiSend, FiPhone, FiMessageCircle, FiMessageSquare } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { fmtTime } from '../utils/format';
-import { PageHeader, EmptyState, ListSkeleton, SearchInput } from '../components/ui';
+import { PageHeader, EmptyState, ListSkeleton, SearchInput, Avatar, Spinner, useMediaQuery } from '../components/ui';
+import { Sk } from '../components/Skeleton';
 
 /** setInterval يتوقف تلقائياً عندما يكون التطبيق/التبويب مخفياً */
 function useVisiblePolling(fn, ms, enabled = true) {
@@ -21,11 +22,14 @@ function useVisiblePolling(fn, ms, enabled = true) {
   }, [fn, ms, enabled]);
 }
 
+const ROLE_TINT = (r) => (/سائق/.test(r || '') ? '#8B5CF6' : /مطعم|متجر/.test(r || '') ? '#16A34A' : '#FF6B00');
+
 export default function Chats() {
   const [convos, setConvos] = useState(readCache('adm_convos') || []);
   const [loading, setLoading] = useState(!readCache('adm_convos'));
   const [active, setActive] = useState(null);
   const [search, setSearch] = useState('');
+  const desktop = useMediaQuery('(min-width: 1024px)');
 
   const loadConvos = useCallback(() => api.get('/support/chat/conversations')
     .then(r => { setConvos(r.data || []); writeCache('adm_convos', r.data || []); })
@@ -33,41 +37,77 @@ export default function Chats() {
     .finally(() => setLoading(false)), []);
 
   useEffect(() => { loadConvos(); }, [loadConvos]);
-  useVisiblePolling(loadConvos, 6000, !active);
+  // في وضع اللوحتين تبقى القائمة ظاهرة فنستمر في تحديثها
+  useVisiblePolling(loadConvos, 6000, !active || desktop);
 
   const q = search.trim().toLowerCase();
   const shown = convos.filter(c => !q || [c.name, c.phone, c.last_message].join(' ').toLowerCase().includes(q));
+  const totalUnread = convos.reduce((a, c) => a + (parseInt(c.unread) || 0), 0);
+
+  const list = loading && convos.length === 0 ? <div className="p-3"><ListSkeleton rows={6} /></div>
+    : shown.length === 0 ? <div className="p-3"><EmptyState icon={<FiMessageCircle />} title="لا توجد محادثات" hint={q ? 'لا نتائج مطابقة' : 'ستظهر رسائل الدعم هنا'} compact /></div>
+    : (
+      <ul className={desktop ? 'divide-y divide-[#F3F4F8]' : 'space-y-2'}>
+        {shown.map(c => {
+          const on = active?.user_id === c.user_id;
+          const unread = parseInt(c.unread) > 0;
+          return (
+            <li key={c.user_id}>
+              <button onClick={() => setActive(c)}
+                className={`w-full text-right flex items-center gap-3 relative ${desktop ? `px-4 py-3.5 ${on ? 'bg-orange-50/80' : 'hover:bg-[#FAFBFD]'}` : 'card card-hover p-3.5'}`}>
+                {desktop && on && <span className="absolute right-0 top-2 bottom-2 w-[3px] rounded-l grad-sunset" />}
+                <Avatar name={c.name} size={46} rounded={15} tint={ROLE_TINT(c.role_ar)} />
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm leading-none truncate ${unread ? 'font-black text-ink' : 'font-bold text-ink'}`}>
+                    {c.name || 'مستخدم'} {c.role_ar && <span className="text-ink-3 text-[11px] font-bold">· {c.role_ar}</span>}
+                  </p>
+                  <p className={`text-xs mt-1.5 truncate ${unread ? 'text-ink-2 font-bold' : 'text-ink-3'}`}>{c.last_message}</p>
+                </div>
+                {unread && (
+                  <span className="grad-sunset text-white text-[10.5px] font-black rounded-full min-w-[22px] h-[22px] px-1.5 flex items-center justify-center flex-shrink-0 shadow-brand num animate-pop">{c.unread}</span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    );
+
+  if (desktop) {
+    return (
+      <div className="page">
+        <PageHeader icon={<FiMessageCircle />} title="المحادثات" subtitle={`دعم الزبائن والسائقين والمتاجر${totalUnread ? ` · ${totalUnread} غير مقروءة` : ''}`} />
+        <div className="card overflow-hidden grid grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[380px_minmax(0,1fr)] h-[calc(100vh-200px)] min-h-[520px]">
+          <div className="border-l border-surface-line flex flex-col min-h-0">
+            <div className="p-3 border-b border-surface-line bg-[#FAFBFD]"><SearchInput value={search} onChange={setSearch} placeholder="ابحث بالاسم أو الرسالة…" /></div>
+            <div className="flex-1 overflow-y-auto">{list}</div>
+          </div>
+          <div className="min-h-0 flex flex-col">
+            {active ? <Thread key={active.user_id} convo={active} inline onClose={() => { setActive(null); loadConvos(); }} />
+              : (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-8 dot-grid">
+                  <div className="w-20 h-20 rounded-[26px] grad-sunset text-white flex items-center justify-center text-3xl shadow-brand mb-4 animate-float"><FiMessageSquare /></div>
+                  <p className="font-black text-ink text-lg">اختر محادثة</p>
+                  <p className="text-sm text-ink-3 mt-1">اختر محادثة من القائمة لعرض الرسائل والرد.</p>
+                </div>
+              )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-4 space-y-3 animate-fade-up">
-      <PageHeader icon="💬" title="المحادثات" subtitle="دعم الزبائن والسائقين والمتاجر" />
+    <div className="page">
+      <PageHeader icon={<FiMessageCircle />} title="المحادثات" subtitle={`دعم الزبائن والسائقين والمتاجر${totalUnread ? ` · ${totalUnread} غير مقروءة` : ''}`} />
       <SearchInput value={search} onChange={setSearch} placeholder="ابحث بالاسم أو الرسالة…" />
-      {loading && convos.length === 0 ? <ListSkeleton rows={6} />
-        : shown.length === 0 ? <EmptyState icon="💬" title="لا توجد محادثات" />
-        : shown.map(c => (
-          <button key={c.user_id} onClick={() => setActive(c)}
-            className="w-full text-right card p-4 flex items-center gap-3 hover-lift">
-            <div className="w-11 h-11 rounded-2xl bg-orange-50 flex items-center justify-center text-lg font-black text-orange-600 flex-shrink-0">
-              {c.name?.[0] || '؟'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-bold text-gray-900 text-sm leading-none truncate">
-                {c.name || 'مستخدم'} {c.role_ar && <span className="text-orange-500 text-xs">({c.role_ar})</span>}
-              </p>
-              <p className="text-xs text-gray-400 mt-1.5 truncate">{c.last_message}</p>
-            </div>
-            {parseInt(c.unread) > 0 && (
-              <span className="grad-sunset text-white text-[10px] font-black rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center flex-shrink-0">{c.unread}</span>
-            )}
-          </button>
-        ))}
-
+      {list}
       {active && <Thread convo={active} onClose={() => { setActive(null); loadConvos(); }} />}
     </div>
   );
 }
 
-function Thread({ convo, onClose }) {
+function Thread({ convo, onClose, inline }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
@@ -81,7 +121,7 @@ function Thread({ convo, onClose }) {
 
   useEffect(() => { loadThread(); }, [loadThread]);
   useVisiblePolling(loadThread, 4000);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.length]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages.length]);
 
   const send = async () => {
     const msg = text.trim();
@@ -95,45 +135,56 @@ function Thread({ convo, onClose }) {
     finally { setSending(false); }
   };
 
-  // شاشة كاملة فوق شريط التنقل مع احترام المناطق الآمنة
-  return createPortal(
-    <div className="fixed inset-0 z-[80] flex flex-col bg-[#F5F6F8] animate-[fadeIn_.15s_ease]" dir="rtl">
-      <div className="bg-white border-b border-gray-100 px-3 pb-3 flex items-center gap-3 shadow-soft"
-        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 12px)' }}>
-        <button onClick={onClose} aria-label="رجوع" className="w-10 h-10 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center text-lg"><FiArrowRight /></button>
-        <div className="w-10 h-10 rounded-2xl bg-orange-50 flex items-center justify-center font-black text-orange-600">{convo.name?.[0] || '؟'}</div>
+  const body = (
+    <>
+      <div className={`bg-white/95 backdrop-blur border-b border-surface-line px-3 sm:px-4 pb-3 flex items-center gap-3 ${inline ? 'pt-3' : 'shadow-soft'}`}
+        style={inline ? undefined : { paddingTop: 'calc(env(safe-area-inset-top) + 12px)' }}>
+        {!inline && <button onClick={onClose} aria-label="رجوع" className="w-10 h-10 rounded-full bg-surface-sunken text-ink-2 flex items-center justify-center text-lg"><FiArrowRight /></button>}
+        <Avatar name={convo.name} size={42} rounded={14} tint={ROLE_TINT(convo.role_ar)} />
         <div className="flex-1 min-w-0">
-          <p className="font-black text-gray-900 leading-none truncate">{convo.name || 'مستخدم'} {convo.role_ar && <span className="text-orange-500 text-xs">({convo.role_ar})</span>}</p>
-          {convo.phone && <p className="text-[11px] text-gray-400 mt-1" dir="ltr" style={{ textAlign: 'right' }}>{convo.phone}</p>}
+          <p className="font-black text-ink leading-none truncate">{convo.name || 'مستخدم'} {convo.role_ar && <span className="text-ink-3 text-xs font-bold">· {convo.role_ar}</span>}</p>
+          {convo.phone && <p className="text-[11px] text-ink-3 mt-1 num" dir="ltr" style={{ textAlign: 'right' }}>{convo.phone}</p>}
         </div>
-        {convo.phone && <a href={`tel:${convo.phone}`} aria-label="اتصال" className="w-10 h-10 rounded-full bg-green-50 text-green-600 flex items-center justify-center"><FiPhone /></a>}
+        {convo.phone && <a href={`tel:${convo.phone}`} aria-label="اتصال" title="اتصال" className="w-10 h-10 rounded-full bg-green-50 text-green-600 hover:bg-green-100 flex items-center justify-center"><FiPhone /></a>}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-2 max-w-3xl w-full mx-auto">
-        {loading && messages.length === 0 ? <p className="text-center text-xs text-gray-400 py-8">جاري التحميل…</p>
-          : messages.length === 0 ? <p className="text-center text-xs text-gray-400 py-8">لا توجد رسائل بعد</p>
-          : messages.map(m => {
-            const mine = m.sender === 'admin';
-            return (
-              <div key={m.id} className={`max-w-[80%] w-fit px-3.5 py-2 rounded-2xl text-sm shadow-sm whitespace-pre-wrap break-words ${mine ? 'grad-brand text-white mr-auto rounded-bl-md' : 'bg-white text-gray-800 ml-auto rounded-br-md border border-gray-100'}`}>
-                {m.message}
-                {m.created_at && <span className={`block text-[9px] mt-0.5 ${mine ? 'text-white/70' : 'text-gray-400'}`}>{fmtTime(m.created_at)}</span>}
-              </div>
-            );
-          })}
-        <div ref={endRef} />
+      <div className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-2 w-full bg-[#F7F8FB] dot-grid">
+        <div className="max-w-3xl mx-auto space-y-2">
+          {loading && messages.length === 0 ? (
+            <div className="space-y-3 py-4">{[60, 40, 70].map((w, i) => <Sk key={i} w={`${w}%`} h={44} r={18} className={i % 2 ? 'mr-auto' : ''} />)}</div>
+          ) : messages.length === 0 ? <p className="text-center text-xs text-ink-3 py-10 font-bold">لا توجد رسائل بعد — ابدأ المحادثة</p>
+            : messages.map(m => {
+              const mine = m.sender === 'admin';
+              return (
+                <div key={m.id} className={`max-w-[80%] w-fit px-3.5 py-2.5 rounded-[18px] text-sm whitespace-pre-wrap break-words animate-fade-up leading-relaxed ${mine ? 'grad-sunset text-white mr-auto rounded-bl-md shadow-[0_6px_16px_rgba(245,59,87,.22)]' : 'bg-white text-ink ml-auto rounded-br-md border border-surface-line shadow-soft'}`}>
+                  {m.message}
+                  {m.created_at && <span className={`block text-[9.5px] mt-1 num ${mine ? 'text-white/75 text-left' : 'text-ink-3'}`}>{fmtTime(m.created_at)}</span>}
+                </div>
+              );
+            })}
+          <div ref={endRef} />
+        </div>
       </div>
 
-      <div className="bg-white border-t border-gray-100 px-3 pt-2" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)' }}>
+      <div className="bg-white border-t border-surface-line px-3 pt-2.5" style={{ paddingBottom: inline ? 10 : 'calc(env(safe-area-inset-bottom) + 10px)' }}>
         <div className="flex items-end gap-2 max-w-3xl mx-auto">
-          <textarea rows={1} className="inp flex-1 resize-none max-h-32" placeholder="اكتب ردّك…" value={text} onChange={e => setText(e.target.value)}
+          <textarea rows={1} className="inp flex-1 resize-none max-h-32 !rounded-[20px]" placeholder="اكتب ردّك… (Enter للإرسال)" aria-label="نص الرد" value={text} onChange={e => setText(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
           <button onClick={send} disabled={!text.trim() || sending} aria-label="إرسال"
-            className="w-11 h-11 rounded-2xl grad-sunset text-white flex-shrink-0 flex items-center justify-center shadow-brand disabled:opacity-50">
-            {sending ? <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" /> : <FiSend className="-scale-x-100" />}
+            className="w-[46px] h-[46px] rounded-full grad-sunset text-white flex-shrink-0 flex items-center justify-center shadow-brand disabled:opacity-40 disabled:shadow-none">
+            {sending ? <Spinner light /> : <FiSend className="-scale-x-100" />}
           </button>
         </div>
       </div>
+    </>
+  );
+
+  if (inline) return <div className="flex flex-col h-full min-h-0 animate-fade-in">{body}</div>;
+
+  // شاشة كاملة فوق شريط التنقل مع احترام المناطق الآمنة
+  return createPortal(
+    <div className="fixed inset-0 z-[80] flex flex-col bg-surface" style={{ animation: 'drawerIn .32s cubic-bezier(.2,.9,.25,1.02) both' }} dir="rtl">
+      {body}
     </div>,
     document.body
   );

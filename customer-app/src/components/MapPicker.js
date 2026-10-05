@@ -100,7 +100,7 @@ function MapPicker({ initial, onCenterChange, markers, showPin = true, height = 
 }
 
 const styles = StyleSheet.create({
-  wrap: { borderRadius: 18, overflow: 'hidden', borderWidth: 1 },
+  wrap: { borderRadius: 20, overflow: 'hidden', borderWidth: 1 },
 });
 
 export default forwardRef(MapPicker);

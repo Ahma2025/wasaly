@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Image, RefreshControl, Dimensions, Animated, Pressable, LayoutAnimation, Platform, UIManager, Alert, Linking
+  Image, RefreshControl, Dimensions, Animated, LayoutAnimation, Platform, UIManager, Alert, Linking, Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,14 +12,15 @@ import * as Location from 'expo-location';
 import BannerSlider from '../components/BannerSlider';
 import { Skeleton, GridSkeleton } from '../components/Skeleton';
 import SupportButton from '../components/SupportButton';
-import { FadeIn, PopIn } from '../components/Anim';
-import { Press } from '../components/Anim';
+import { FadeIn, Press } from '../components/Anim';
+import { Chip, IconButton } from '../components/UI';
 import EmptyState from '../components/EmptyState';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
-import { useHeaderTop } from '../components/GradientHeader';
+import { useHeaderTop, HeroDecor } from '../components/GradientHeader';
 import { useTabBarInset } from '../components/FloatingTabBar';
 import { addressLabel } from './AddressesScreen';
+import { useReducedMotion, isReducedMotion, haptic, EASE_OUT, stagger } from '../utils/motion';
 
 // تحية حسب الوقت
 const greetingText = () => {
@@ -29,13 +30,16 @@ const greetingText = () => {
   return 'مساء الخير';
 };
 
+// تلميحات البحث المتبدّلة داخل شريط البحث
+const SEARCH_HINTS = ['ابحث عن شاورما، بيتزا، برجر…', 'جرّب: حلويات 🍰', 'جرّب: قهوة ☕', 'جرّب: صيدلية 💊', 'جرّب: مشاوي 🔥'];
+
 // تفعيل LayoutAnimation على Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
 const { width } = Dimensions.get('window');
-const CARD_W = (width - 48) / 2;
+const CARD_W = (width - 46) / 2;
 
 // مسافة بالكيلومتر بين نقطتين (Haversine)
 const distKm = (aLat, aLng, bLat, bLng) => {
@@ -45,60 +49,78 @@ const distKm = (aLat, aLng, bLat, bLng) => {
   const x = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * toR) * Math.cos(bLat * toR) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 };
-// ألوان الثيم تأتي من useTheme
 
-/* ── كرت مع موشن ضغط ── */
-function AnimCard({ children, style, onPress }) {
-  const scale = useRef(new Animated.Value(1)).current;
-  const press = () => Animated.spring(scale, { toValue: 0.95, useNativeDriver: true, speed: 50 }).start();
-  const release = () => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 20 }).start();
+const layoutAnim = () => {
+  if (isReducedMotion()) return;
+  LayoutAnimation.configureNext({
+    duration: 260,
+    create: { type: 'easeInEaseOut', property: 'opacity' },
+    update: { type: 'spring', springDamping: 0.78 },
+    delete: { type: 'easeInEaseOut', property: 'opacity' },
+  });
+};
+
+/* ── شريط بحث متحرّك (تلميحات تتبدّل بانزلاق) ── */
+function AnimatedSearchBar({ onPress, C }) {
+  const reduce = useReducedMotion();
+  const [i, setI] = useState(0);
+  const v = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (reduce) return;
+    const t = setInterval(() => {
+      Animated.timing(v, { toValue: 0, duration: 180, useNativeDriver: true }).start(() => {
+        setI(x => (x + 1) % SEARCH_HINTS.length);
+        Animated.timing(v, { toValue: 1, duration: 260, easing: EASE_OUT, useNativeDriver: true }).start();
+      });
+    }, 2800);
+    return () => clearInterval(t);
+  }, [reduce]);
+  const ty = v.interpolate({ inputRange: [0, 1], outputRange: [8, 0] });
   return (
-    <Pressable onPress={onPress} onPressIn={press} onPressOut={release}>
-      <Animated.View style={[style, { transform: [{ scale }] }]}>{children}</Animated.View>
-    </Pressable>
+    <Press onPress={onPress} scaleTo={0.98} accessibilityRole="search" accessibilityLabel="ابحث عن مطعم أو صنف"
+      style={[hs.search, { backgroundColor: C.card }, C.shadow.card]}>
+      <View style={[hs.searchIcon, { backgroundColor: C.tint }]}><Ionicons name="search" size={18} color={C.primary} /></View>
+      <Animated.Text numberOfLines={1} style={[hs.searchTxt, { color: C.faint, opacity: v, transform: [{ translateY: ty }] }]}>{SEARCH_HINTS[i]}</Animated.Text>
+      <View style={[hs.searchFilter, { borderColor: C.border }]}><Ionicons name="options-outline" size={18} color={C.text} /></View>
+    </Press>
   );
 }
 
-/* ── قسم قابل للطي مع موشن ── */
-function CollapsibleSection({ title, icon, bg, children, defaultOpen = true }) {
+/* ── قسم قابل للطي ── */
+function CollapsibleSection({ title, subtitle, icon, children, defaultOpen = true, count }) {
   const { colors: C } = useTheme();
-  const cs = React.useMemo(() => makeCs(C), [C]);
   const [open, setOpen] = useState(defaultOpen);
   const rotation = useRef(new Animated.Value(defaultOpen ? 1 : 0)).current;
 
   const toggle = () => {
-    LayoutAnimation.configureNext({
-      duration: 280,
-      create: { type: 'easeInEaseOut', property: 'opacity' },
-      update: { type: 'spring', springDamping: 0.7 },
-      delete: { type: 'easeInEaseOut', property: 'opacity' },
-    });
-    Animated.spring(rotation, {
-      toValue: open ? 0 : 1,
-      useNativeDriver: true,
-      speed: 14,
-      bounciness: 6,
-    }).start();
+    haptic.select();
+    layoutAnim();
+    Animated.spring(rotation, { toValue: open ? 0 : 1, useNativeDriver: true, damping: 14, stiffness: 200 }).start();
     setOpen(o => !o);
   };
-
   const arrowRotate = rotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
 
   return (
-    <View style={[cs.wrap, { backgroundColor: bg }]}>
-      <TouchableOpacity style={cs.head} onPress={toggle} activeOpacity={0.75}
+    <View style={hs.section}>
+      <TouchableOpacity style={hs.secHead} onPress={toggle} activeOpacity={0.75}
         accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={title}>
-        {/* يسار: سهم */}
-        <Animated.View style={{ transform: [{ rotate: arrowRotate }] }}>
-          <Ionicons name="chevron-down" size={20} color={C.primary} />
-        </Animated.View>
-        {/* يمين: عنوان + أيقونة بشارة */}
-        <View style={cs.titleRow}>
-          <Text style={cs.title}>{title}</Text>
-          {icon ? <View style={cs.iconBadge}><Ionicons name={icon} size={16} color={C.primary} /></View> : null}
+        <View style={hs.secTitleRow}>
+          {icon ? (
+            <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={hs.secIcon}>
+              <Ionicons name={icon} size={14} color="#FFF" />
+            </LinearGradient>
+          ) : <View style={[hs.secBar, { backgroundColor: C.primary }]} />}
+          <View style={{ alignItems: 'flex-end', flexShrink: 1 }}>
+            <Text style={[hs.secTitle, { color: C.text }]} numberOfLines={1}>{title}</Text>
+            {!!subtitle && <Text style={[hs.secSub, { color: C.faint }]} numberOfLines={1}>{subtitle}</Text>}
+          </View>
+          {!!count && <View style={[hs.secCount, { backgroundColor: C.tint }]}><Text style={{ color: C.primary, fontSize: 11, fontWeight: '800' }}>{count}</Text></View>}
         </View>
+        <Animated.View style={[hs.secChevron, { backgroundColor: C.card, borderColor: C.border, transform: [{ rotate: arrowRotate }] }]}>
+          <Ionicons name="chevron-down" size={16} color={C.text} />
+        </Animated.View>
       </TouchableOpacity>
-      {open && <View style={cs.body}>{children}</View>}
+      {open && <View>{children}</View>}
     </View>
   );
 }
@@ -107,15 +129,24 @@ function CollapsibleSection({ title, icon, bg, children, defaultOpen = true }) {
 function RCard({ r, onPress }) {
   const { colors: C } = useTheme();
   const rc = React.useMemo(() => makeRc(C), [C]);
+  const disc = r.discount_percent || r.discount;
   return (
-    <AnimCard style={rc.wrap} onPress={onPress}>
+    <Press style={rc.wrap} onPress={onPress} scaleTo={0.96} haptic={false} accessibilityRole="button" accessibilityLabel={`${r.name_ar}${r.is_open ? '' : '، مغلق'}`}>
       <View style={rc.imgBox}>
-        <Image source={{ uri: r.cover_image || r.logo }} style={rc.img} resizeMode="cover" />
-        <LinearGradient colors={['transparent', 'rgba(10,10,20,0.55)']} style={rc.scrim} />
-        {(r.discount_percent > 0 || r.discount > 0) && (
-          <View style={rc.badge}><Text style={rc.badgeTxt}>خصم {r.discount_percent || r.discount}%</Text></View>
+        {(r.cover_image || r.logo)
+          ? <Image source={{ uri: r.cover_image || r.logo }} style={rc.img} resizeMode="cover" />
+          : <LinearGradient colors={C.gradients.sunset} style={[rc.img, { alignItems: 'center', justifyContent: 'center' }]}><Ionicons name="restaurant" size={34} color="rgba(255,255,255,0.85)" /></LinearGradient>}
+        <LinearGradient colors={C.gradients.scrim} style={rc.scrim} />
+        {disc > 0 && (
+          <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={rc.badge}>
+            <Text style={rc.badgeTxt}>خصم {disc}%</Text>
+          </LinearGradient>
         )}
-        {!r.is_open && <View style={rc.overlay}><Text style={rc.overlayTxt}>مغلق</Text></View>}
+        <View style={rc.ratePill}>
+          <Ionicons name="star" size={10} color="#FFB020" />
+          <Text style={rc.rateTxt}>{(Number(r.rating) || 0).toFixed(1)}</Text>
+        </View>
+        {!r.is_open && <View style={rc.overlay}><Ionicons name="moon" size={16} color="#FFF" /><Text style={rc.overlayTxt}>مغلق</Text></View>}
         {!!r.logo && (
           <View style={rc.logoCircle}>
             <Image source={{ uri: r.logo }} style={rc.logoImg} resizeMode="cover" />
@@ -126,14 +157,11 @@ function RCard({ r, onPress }) {
         <Text style={rc.name} numberOfLines={1}>{r.name_ar}</Text>
         <Text style={rc.addr} numberOfLines={1}>{r.address || r.city || ''}</Text>
         <View style={rc.meta}>
-          <Ionicons name="star" size={12} color="#FFB800" />
-          <Text style={rc.metaTxt}>{(Number(r.rating) || 0).toFixed(1)}</Text>
-          <Text style={rc.sep}>·</Text>
-          <Ionicons name="time-outline" size={12} color={C.gray} />
-          <Text style={rc.metaTxt}>{r.delivery_time_min}-{r.delivery_time_max} د</Text>
+          <Ionicons name="time" size={12} color={C.primary} />
+          <Text style={rc.metaTxt}>{r.delivery_time_min || 20}-{r.delivery_time_max || 40} د</Text>
         </View>
       </View>
-    </AnimCard>
+    </Press>
   );
 }
 
@@ -142,47 +170,71 @@ function HCard({ r, onPress }) {
   const { colors: C } = useTheme();
   const hc = React.useMemo(() => makeHc(C), [C]);
   return (
-    <AnimCard style={hc.wrap} onPress={onPress}>
+    <Press style={hc.wrap} onPress={onPress} scaleTo={0.95} haptic={false} accessibilityRole="button" accessibilityLabel={r.name_ar}>
       <View style={hc.imgBox}>
-        <Image source={{ uri: r.cover_image || r.logo }} style={hc.img} resizeMode="cover" />
-        <LinearGradient colors={['transparent', 'rgba(10,10,20,0.5)']} style={hc.scrim} />
+        {(r.cover_image || r.logo)
+          ? <Image source={{ uri: r.cover_image || r.logo }} style={hc.img} resizeMode="cover" />
+          : <LinearGradient colors={C.gradients.sunset} style={[hc.img, { alignItems: 'center', justifyContent: 'center' }]}><Ionicons name="restaurant" size={28} color="rgba(255,255,255,0.85)" /></LinearGradient>}
+        <LinearGradient colors={C.gradients.scrim} style={hc.scrim} />
         {!r.is_open && <View style={hc.closed}><Text style={hc.closedTxt}>مغلق</Text></View>}
         <View style={hc.ratePill}>
-          <Ionicons name="star" size={10} color="#FFB800" />
+          <Ionicons name="star" size={10} color="#FFB020" />
           <Text style={hc.rateTxt}>{(Number(r.rating) || 0).toFixed(1)}</Text>
         </View>
         {!!r.logo && <View style={hc.logoDot}><Image source={{ uri: r.logo }} style={hc.logoImg} /></View>}
       </View>
       <Text style={hc.name} numberOfLines={1}>{r.name_ar}</Text>
-      <Text style={hc.time} numberOfLines={1}>{r.delivery_time_min}-{r.delivery_time_max} دقيقة</Text>
-    </AnimCard>
+      <View style={hc.timeRow}>
+        <Ionicons name="time-outline" size={11} color={C.faint} />
+        <Text style={hc.time} numberOfLines={1}>{r.delivery_time_min || 20}-{r.delivery_time_max || 40} دقيقة</Text>
+      </View>
+    </Press>
   );
 }
 
 /* ── grid داخل قسم ── */
 function SectionGrid({ list, onPress, limit = 4 }) {
   const { colors: C } = useTheme();
-  const s = React.useMemo(() => makeS(C), [C]);
   const [expanded, setExpanded] = useState(false);
   const shown = list.slice(0, expanded ? list.length : limit);
   return (
     <>
-      <View style={s.grid}>
+      <View style={hs.grid}>
         {shown.map((r, i) => (
-          <PopIn key={r.id} delay={Math.min(i, 8) * 55}>
+          <FadeIn key={r.id} delay={stagger(i % limit)} from={18}>
             <RCard r={r} onPress={() => onPress(r.id)} />
-          </PopIn>
+          </FadeIn>
         ))}
       </View>
       {list.length > limit && (
-        <TouchableOpacity style={s.moreBtn} onPress={() => {
-          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-          setExpanded(e => !e);
-        }}>
-          <Text style={s.moreTxt}>{expanded ? 'عرض أقل ▲' : 'اعرض المزيد ▼'}</Text>
+        <TouchableOpacity style={[hs.moreBtn, { backgroundColor: C.card, borderColor: C.border }]} activeOpacity={0.8}
+          accessibilityRole="button" accessibilityState={{ expanded }}
+          onPress={() => { haptic.light(); layoutAnim(); setExpanded(e => !e); }}>
+          <Text style={[hs.moreTxt, { color: C.primary }]}>{expanded ? 'عرض أقل' : `اعرض المزيد (${list.length - limit})`}</Text>
+          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={C.primary} />
         </TouchableOpacity>
       )}
     </>
+  );
+}
+
+/* ── بطاقة خدمة فخمة (طلب شخصي / جماعي) ── */
+function ServiceCard({ colors, icon, title, sub, tag, onPress, delay }) {
+  return (
+    <FadeIn delay={delay} from={20} style={{ flex: 1 }}>
+      <Press onPress={onPress} scaleTo={0.96} accessibilityRole="button" accessibilityLabel={`${title} — ${sub}`} style={hs.svcShadow}>
+        <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={hs.svc}>
+          <LinearGradient colors={['rgba(255,255,255,0.26)', 'rgba(255,255,255,0)']} start={{ x: 0, y: 0 }} end={{ x: 0.8, y: 0.8 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <View style={hs.svcOrb} />
+          <View style={hs.svcBigIcon}><Ionicons name={icon} size={70} color="rgba(255,255,255,0.16)" /></View>
+          <View style={hs.svcIcon}><Ionicons name={icon} size={20} color="#FFF" /></View>
+          {!!tag && <View style={hs.svcTag}><Text style={hs.svcTagTxt}>{tag}</Text></View>}
+          <Text style={hs.svcTitle} numberOfLines={1}>{title}</Text>
+          <Text style={hs.svcSub} numberOfLines={2}>{sub}</Text>
+          <View style={hs.svcGo}><Ionicons name="arrow-back" size={14} color="#14142B" /></View>
+        </LinearGradient>
+      </Press>
+    </FadeIn>
   );
 }
 
@@ -203,7 +255,11 @@ export default function HomeScreen() {
   const [openOnly, setOpenOnly] = useState(false);
   const [userLoc, setUserLoc] = useState(null);
   const [recentRests, setRecentRests] = useState([]);
+  const [activeCat, setActiveCat] = useState(null);
   const suggestedRef = useRef(null);
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const [miniOn, setMiniOn] = useState(false);
+  const miniRef = useRef(false);
 
   useEffect(() => {
     // اعرض من الكاش فوراً (بدون تحميل) ثم حدّث بالخلفية
@@ -223,6 +279,7 @@ export default function HomeScreen() {
   // العنوان الافتراضي للشريط العلوي — يتحدّث عند كل رجوع للرئيسية
   useFocusEffect(useCallback(() => {
     let alive = true;
+    setActiveCat(null);
     (async () => {
       const pick = (list) => (list || []).find(a => a.is_default) || (list || [])[0] || null;
       const cached = await readCache('addresses');
@@ -261,6 +318,7 @@ export default function HomeScreen() {
         return;
       }
     }
+    layoutAnim();
     setSortBy(k);
   };
 
@@ -330,6 +388,7 @@ export default function HomeScreen() {
     const pool = restaurants.filter(r => r.is_open);
     const list = pool.length ? pool : restaurants;
     if (!list.length) return;
+    haptic.success();
     const pick = list[Math.floor(Math.random() * list.length)];
     go(pick.id);
   };
@@ -341,6 +400,7 @@ export default function HomeScreen() {
   const byCat = (cat) => sorted.filter(r => matchesCat(r, cat.name_ar));
   const topRated = [...restaurants].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 10);
   const suggested = sorted.slice(0, 8);
+  const openCount = restaurants.filter(r => r.is_open).length;
 
   useEffect(() => {
     if (suggested.length > 0) {
@@ -351,260 +411,305 @@ export default function HomeScreen() {
 
   const locText = defaultAddr ? `${addressLabel(defaultAddr)} · ${defaultAddr.address || ''}` : 'أضف عنوان التوصيل';
   const noMatches = restaurants.length > 0 && sorted.length === 0;
+  const firstName = user?.name ? String(user.name).split(' ')[0] : '';
+  const goAddress = () => navigation.navigate(defaultAddr ? 'Addresses' : 'AddAddress', defaultAddr ? undefined : { makeDefault: true });
+  const openCat = (cat) => {
+    setActiveCat(cat.id);
+    haptic.select();
+    setTimeout(() => navigation.navigate('Category', { categoryId: cat.id, categoryName: cat.name_ar }), isReducedMotion() ? 0 : 140);
+  };
 
-  const Header = (
-    <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[s.header, { paddingTop: headerTop }]}>
-      <LinearGradient colors={C.gradients.sheen} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={s.sheen} pointerEvents="none" />
+  // هيرو متدرّج: صف (إشعارات / عنوان / بحث) + تحية + شريط بحث متحرّك
+  const heroScale = scrollY.interpolate({ inputRange: [-120, 0], outputRange: [1.12, 1], extrapolate: 'clamp' });
+  const greetFade = scrollY.interpolate({ inputRange: [0, 90], outputRange: [1, 0], extrapolate: 'clamp' });
+  const greetShift = scrollY.interpolate({ inputRange: [0, 90], outputRange: [0, -14], extrapolate: 'clamp' });
+
+  const Hero = (
+    <View style={{ marginBottom: 28 }}>
+      <Animated.View style={[s.heroBg, { transform: [{ scale: heroScale }] }]}>
+        <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+        <HeroDecor />
+      </Animated.View>
+      <View style={{ paddingTop: headerTop, paddingHorizontal: 16 }}>
+        <View style={s.headerRow}>
+          <IconButton icon="notifications-outline" onPress={() => navigation.navigate('Notifications')} label="الإشعارات" onGradient />
+          <Press style={s.locBtn} scaleTo={0.97} onPress={goAddress} accessibilityRole="button" accessibilityLabel={`عنوان التوصيل: ${locText}`}>
+            <View style={s.locIcon}><Ionicons name="location" size={15} color={C.primary} /></View>
+            <View style={{ flexShrink: 1, alignItems: 'flex-end' }}>
+              <Text style={s.locCaption}>التوصيل إلى</Text>
+              <Text style={s.locTxt} numberOfLines={1}>{locText}</Text>
+            </View>
+            <Ionicons name="chevron-down" size={15} color="rgba(255,255,255,0.9)" />
+          </Press>
+          <IconButton icon="heart-outline" onPress={() => navigation.navigate('Favorites')} label="المفضلة" onGradient />
+        </View>
+        <Animated.View style={[s.greetWrap, { opacity: greetFade, transform: [{ translateY: greetShift }] }]}>
+          <Text style={s.greetHi}>{greetingText()}{firstName ? `، ${firstName}` : ''} 👋</Text>
+          <Text style={s.greetSub}>شو نفسك تاكل اليوم؟{openCount ? ` · ${openCount} مطعم مفتوح الآن` : ''}</Text>
+        </Animated.View>
+      </View>
+      <View style={s.searchDock}>
+        <AnimatedSearchBar C={C} onPress={() => navigation.navigate('بحث')} />
+      </View>
+    </View>
+  );
+
+  // الهيدر المصغّر اللاصق (يظهر بعد التمرير)
+  const miniOpacity = scrollY.interpolate({ inputRange: [110, 170], outputRange: [0, 1], extrapolate: 'clamp' });
+  const miniShift = scrollY.interpolate({ inputRange: [110, 170], outputRange: [-16, 0], extrapolate: 'clamp' });
+  const MiniHeader = (
+    <Animated.View pointerEvents={miniOn ? 'auto' : 'none'}
+      style={[s.mini, { paddingTop: headerTop - 4, opacity: miniOpacity, transform: [{ translateY: miniShift }] }]}>
+      <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={C.gradients.sheen} style={[StyleSheet.absoluteFill, { height: 40 }]} pointerEvents="none" />
       <View style={s.headerRow}>
-        <TouchableOpacity onPress={() => navigation.navigate('بحث')} style={s.iconBtn} accessibilityRole="button" accessibilityLabel="بحث">
-          <Ionicons name="search-outline" size={22} color="#FFF" />
+        <IconButton icon="search" size={38} onPress={() => navigation.navigate('بحث')} label="بحث" onGradient />
+        <TouchableOpacity style={s.miniLoc} onPress={goAddress} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={`عنوان التوصيل: ${locText}`}>
+          <Ionicons name="location" size={14} color="#FFF" />
+          <Text style={s.miniLocTxt} numberOfLines={1}>{locText}</Text>
+          <Ionicons name="chevron-down" size={13} color="#FFF" />
         </TouchableOpacity>
-        <TouchableOpacity style={s.locBtn} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel={`عنوان التوصيل: ${locText}`}
-          onPress={() => navigation.navigate(defaultAddr ? 'Addresses' : 'AddAddress', defaultAddr ? undefined : { makeDefault: true })}>
-          <Ionicons name="location" size={17} color="#FFF" />
-          <View style={{ flexShrink: 1, alignItems: 'flex-end' }}>
-            <Text style={s.locCaption}>التوصيل إلى</Text>
-            <Text style={s.locTxt} numberOfLines={1}>{locText}</Text>
-          </View>
-          <Ionicons name="chevron-down" size={15} color="rgba(255,255,255,0.85)" />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={s.iconBtn} accessibilityRole="button" accessibilityLabel="الإشعارات">
-          <Ionicons name="notifications-outline" size={22} color="#FFF" />
-        </TouchableOpacity>
+        <IconButton icon="notifications-outline" size={38} onPress={() => navigation.navigate('Notifications')} label="الإشعارات" onGradient />
       </View>
-      <View style={s.greetWrap}>
-        <Text style={s.greetHi}>{greetingText()}{user?.name ? ` ${String(user.name).split(' ')[0]}` : ''} 👋</Text>
-        <Text style={s.greetSub}>شو نفسك تاكل اليوم؟</Text>
-      </View>
-    </LinearGradient>
+    </Animated.View>
   );
 
   if (loading) return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {Header}
-      <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
-        <Skeleton w={'100%'} h={176} r={24} style={{ marginBottom: 16 }} />
-        <View style={{ flexDirection: 'row-reverse', gap: 14, marginBottom: 18 }}>
-          {[0, 1, 2, 3].map(i => <View key={i} style={{ alignItems: 'center', gap: 6 }}><Skeleton w={64} h={64} r={24} /><Skeleton w={44} h={9} /></View>)}
+      {Hero}
+      <View style={{ paddingHorizontal: 16, paddingTop: 4 }}>
+        <Skeleton w={'100%'} h={180} r={26} style={{ marginBottom: 20 }} />
+        <View style={{ flexDirection: 'row-reverse', gap: 14, marginBottom: 22 }}>
+          {[0, 1, 2, 3].map(i => <View key={i} style={{ alignItems: 'center', gap: 8 }}><Skeleton w={68} h={68} r={24} /><Skeleton w={46} h={9} /></View>)}
+        </View>
+        <View style={{ flexDirection: 'row-reverse', gap: 12, marginBottom: 20 }}>
+          <Skeleton w={CARD_W} h={130} r={24} /><Skeleton w={CARD_W} h={130} r={24} />
         </View>
       </View>
       <GridSkeleton count={4} />
     </View>
   );
 
-  const CtaCard = ({ colors, emoji, title, sub, onPress }) => (
-    <TouchableOpacity activeOpacity={0.9} onPress={onPress} style={{ marginHorizontal: 16, marginBottom: 12 }} accessibilityRole="button" accessibilityLabel={title}>
-      <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.cta}>
-        <Text style={{ fontSize: 26 }}>{emoji}</Text>
-        <View style={{ flex: 1 }}>
-          <Text style={s.ctaTitle}>{title}</Text>
-          <Text style={s.ctaSub}>{sub}</Text>
-        </View>
-        <Ionicons name="chevron-back" size={20} color="#FFF" />
-      </LinearGradient>
-    </TouchableOpacity>
-  );
+  const SORTS = [
+    { k: 'recommended', l: 'مقترح', icon: 'sparkles' },
+    { k: 'nearest', l: 'الأقرب إليك', icon: 'navigate' },
+    { k: 'rating', l: 'الأعلى تقييماً', icon: 'star' },
+    { k: 'fastest', l: 'الأسرع توصيلاً', icon: 'flash' },
+  ];
 
   return (
     <View style={s.container}>
-      {Header}
-
-      <ScrollView showsVerticalScrollIndicator={false}
+      <Animated.ScrollView showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+          useNativeDriver: true,
+          listener: (e) => {
+            const on = e.nativeEvent.contentOffset.y > 140;
+            if (on !== miniRef.current) { miniRef.current = on; setMiniOn(on); }
+          },
+        })}
         contentContainerStyle={{ paddingBottom: tabInset + 30 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFF" colors={[C.primary]} progressViewOffset={headerTop} />}>
+
+        {Hero}
 
         <BannerSlider banners={banners} onPressBanner={onBannerPress} />
 
         {categories.length > 0 && (
-          <View style={{ paddingTop: 14, paddingBottom: 18 }}>
+          <View style={{ paddingTop: 18 }}>
             <View style={s.catHeader}>
               <Text style={s.catTitle}>اطلب حسب التصنيف</Text>
-              <Text style={s.catEmoji}>🍴</Text>
+              <Text style={s.catHint}>{categories.length} تصنيف</Text>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 16 }}>
-              {categories.map((cat, i) => (
-                <FadeIn key={cat.id} delay={i * 45} from={10}>
-                  <Press style={s.quickCat} onPress={() => navigation.navigate('Category', { categoryId: cat.id, categoryName: cat.name_ar })}>
-                    <LinearGradient colors={[C.sec, C.tint]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.quickCircle}>
-                      <View style={s.quickInner}>
-                        <Text style={{ fontSize: 30 }}>{cat.icon || '🍽️'}</Text>
+              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingVertical: 4 }}>
+              {categories.map((cat, i) => {
+                const on = activeCat === cat.id;
+                return (
+                  <FadeIn key={cat.id} delay={stagger(i, 45)} from={10}>
+                    <Press style={s.quickCat} scaleTo={0.9} haptic={false} onPress={() => openCat(cat)} accessibilityRole="button" accessibilityLabel={cat.name_ar}>
+                      <View style={[s.quickCircle, on && C.shadow.glow]}>
+                        <LinearGradient colors={on ? C.gradients.sunset : [C.card, C.card]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[StyleSheet.absoluteFill, { borderRadius: 24 }]} />
+                        <View style={[s.quickInner, { backgroundColor: on ? 'rgba(255,255,255,0.22)' : C.tint }]}>
+                          <Text style={{ fontSize: 28 }}>{cat.icon || '🍽️'}</Text>
+                        </View>
                       </View>
-                    </LinearGradient>
-                    <Text style={s.quickLbl} numberOfLines={1}>{cat.name_ar}</Text>
-                  </Press>
-                </FadeIn>
-              ))}
+                      <Text style={[s.quickLbl, on && { color: C.primary }]} numberOfLines={1}>{cat.name_ar}</Text>
+                    </Press>
+                  </FadeIn>
+                );
+              })}
             </ScrollView>
           </View>
         )}
 
-        <CtaCard colors={C.gradients.brand} emoji="🧑‍🤝‍🧑" title="اطلبوا سوا — كل واحد يشوف حسابه" sub="عندك كود مجموعة؟ انضم واطلبوا مع بعض" onPress={() => navigation.navigate('GroupOrder')} />
-        <CtaCard colors={C.gradients.sunset} emoji="📦" title="طلب شخصي — راكب أو طرد" sub="وصّل طرد أو اطلب سائق يوصّلك · السعر حسب المسافة" onPress={() => navigation.navigate('PersonalDelivery')} />
-
-        <View style={s.divider} />
-
-        {/* فرز المطاعم + فاجئني + المفتوحة الآن */}
-        <View style={{ backgroundColor: C.card, paddingVertical: 10 }}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 8 }}>
-            <TouchableOpacity onPress={surpriseMe} style={[s.sortChip, { backgroundColor: C.tint, borderColor: C.primary }]}>
-              <Text style={[s.sortChipTxt, { color: C.primary }]}>فاجئني 🎲</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setOpenOnly(v => !v)} style={[s.sortChip, openOnly && s.sortChipOn]} accessibilityState={{ selected: openOnly }}>
-              <Text style={[s.sortChipTxt, openOnly && s.sortChipTxtOn]}>المفتوحة الآن 🟢</Text>
-            </TouchableOpacity>
-            {[
-              { k: 'recommended', l: 'مقترح ✨' },
-              { k: 'nearest', l: 'الأقرب إليك 📍' },
-              { k: 'rating', l: 'الأعلى تقييماً ⭐' },
-              { k: 'fastest', l: 'الأسرع توصيلاً 🛵' },
-            ].map(opt => (
-              <TouchableOpacity key={opt.k} onPress={() => chooseSort(opt.k)}
-                style={[s.sortChip, sortBy === opt.k && s.sortChipOn]} accessibilityState={{ selected: sortBy === opt.k }}>
-                <Text style={[s.sortChipTxt, sortBy === opt.k && s.sortChipTxtOn]}>{opt.l}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+        {/* خدمات مميزة */}
+        <View style={s.svcRow}>
+          <ServiceCard colors={C.gradients.info} icon="cube" title="طلب شخصي" sub="وصّل طرد أو اطلب سائق · السعر حسب المسافة" tag="كاش"
+            onPress={() => navigation.navigate('PersonalDelivery')} delay={80} />
+          <ServiceCard colors={C.gradients.violet} icon="people" title="طلب جماعي" sub="اطلبوا سوا وكل واحد يشوف حسابه"
+            onPress={() => navigation.navigate('GroupOrder')} delay={140} />
         </View>
 
+        {/* فرز المطاعم + فاجئني + المفتوحة الآن */}
+        <View style={s.sortHead}>
+          <Text style={s.catTitle}>كل المطاعم</Text>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 8, paddingVertical: 6 }}>
+          <Chip icon="dice" label="فاجئني" onPress={surpriseMe} tone={C.primary} />
+          <Chip icon={openOnly ? 'radio-button-on' : 'radio-button-off'} label="المفتوحة الآن" selected={openOnly}
+            onPress={() => { layoutAnim(); setOpenOnly(v => !v); }} />
+          {SORTS.map(opt => (
+            <Chip key={opt.k} icon={opt.icon} label={opt.l} selected={sortBy === opt.k} onPress={() => chooseSort(opt.k)} />
+          ))}
+        </ScrollView>
+
         {noMatches && (
-          <View style={{ paddingVertical: 30 }}>
+          <View style={{ paddingVertical: 20 }}>
             <EmptyState emoji="🔎" title="ما في مطاعم بهالفلتر" subtitle="جرّب تلغي فلتر «المفتوحة الآن» أو رجّع بعد شوي"
               ctaLabel="إلغاء الفلاتر" onCta={() => { setOpenOnly(false); setSortBy('recommended'); }} />
           </View>
         )}
 
         {recentRests.length > 0 && (
-          <>
-            <View style={s.divider} />
-            <CollapsibleSection title="اطلب مرة أخرى" icon="repeat" bg={C.card}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 4 }}>
-                {recentRests.map(r => <HCard key={r.id} r={r} onPress={() => go(r.id)} />)}
-              </ScrollView>
-            </CollapsibleSection>
-          </>
+          <CollapsibleSection title="اطلب مرة أخرى" subtitle="من مطاعمك الأخيرة" icon="repeat">
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 6 }}>
+              {recentRests.map((r, i) => <FadeIn key={r.id} delay={stagger(i)} from={12}><HCard r={r} onPress={() => go(r.id)} /></FadeIn>)}
+            </ScrollView>
+          </CollapsibleSection>
         )}
 
         {suggested.length > 0 && (
-          <CollapsibleSection title={sortBy === 'nearest' ? 'الأقرب إليك' : 'مطاعم مقترحة'} icon="sparkles" bg={C.sec}>
+          <CollapsibleSection title={sortBy === 'nearest' ? 'الأقرب إليك' : 'مطاعم مقترحة'} subtitle="مختارة إلك" icon="sparkles">
             <ScrollView
               ref={suggestedRef}
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 4 }}>
-              {suggested.map(r => <HCard key={r.id} r={r} onPress={() => go(r.id)} />)}
+              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 6 }}>
+              {suggested.map((r, i) => <FadeIn key={r.id} delay={stagger(i)} from={12}><HCard r={r} onPress={() => go(r.id)} /></FadeIn>)}
             </ScrollView>
           </CollapsibleSection>
         )}
 
         {topRated.length > 0 && !noMatches && (
-          <>
-            <View style={s.divider} />
-            <CollapsibleSection title="الأعلى تقييماً" icon="star" bg={C.card}>
-              <SectionGrid list={topRated} onPress={go} />
-            </CollapsibleSection>
-          </>
+          <CollapsibleSection title="الأعلى تقييماً" subtitle="الأكثر حبّاً من الزبائن" icon="star">
+            <SectionGrid list={topRated} onPress={go} />
+          </CollapsibleSection>
         )}
 
-        {categories.map((cat, ci) => {
+        {categories.map((cat) => {
           const list = byCat(cat);
           if (list.length === 0) return null;
           return (
-            <React.Fragment key={cat.id}>
-              <View style={s.divider} />
-              <CollapsibleSection title={cat.name_ar} icon={null} bg={ci % 2 === 0 ? C.sec : C.card}>
-                <SectionGrid list={list} onPress={go} />
-              </CollapsibleSection>
-            </React.Fragment>
+            <CollapsibleSection key={cat.id} title={`${cat.icon ? cat.icon + ' ' : ''}${cat.name_ar}`} icon={null} count={list.length}>
+              <SectionGrid list={list} onPress={go} />
+            </CollapsibleSection>
           );
         })}
 
         {restaurants.length === 0 && (
-          <View style={{ paddingVertical: 40 }}>
+          <View style={{ paddingVertical: 30 }}>
             <EmptyState emoji="🍽️" title="ما في مطاعم حاليًا" subtitle="جرّب تسحب للتحديث بعد شوي" ctaLabel="تحديث" onCta={onRefresh} />
           </View>
         )}
-      </ScrollView>
+      </Animated.ScrollView>
 
+      {MiniHeader}
       <SupportButton />
     </View>
   );
 }
 
 /* ── Styles ── */
-const makeCs = (C) => StyleSheet.create({
-  wrap: { width: '100%' },
-  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 16 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { fontSize: 18, fontWeight: '900', color: C.text },
-  iconBadge: { width: 30, height: 30, borderRadius: 10, backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center' },
-  body: { paddingBottom: 16 },
+const hs = StyleSheet.create({
+  search: { flexDirection: 'row-reverse', alignItems: 'center', borderRadius: 20, height: 56, paddingHorizontal: 8, gap: 10 },
+  searchIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  searchTxt: { flex: 1, fontSize: 14.5, fontWeight: '500', textAlign: 'right' },
+  searchFilter: { width: 40, height: 40, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  section: { marginTop: 22 },
+  secHead: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 12 },
+  secTitleRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 9, flex: 1 },
+  secIcon: { width: 28, height: 28, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  secBar: { width: 4, height: 20, borderRadius: 2 },
+  secTitle: { fontSize: 18, fontWeight: '900', textAlign: 'right' },
+  secSub: { fontSize: 12, fontWeight: '500', textAlign: 'right', marginTop: 1 },
+  secCount: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  secChevron: { width: 32, height: 32, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16 },
+  moreBtn: { marginTop: 14, marginHorizontal: 16, borderWidth: 1, borderRadius: 16, paddingVertical: 12, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  moreTxt: { fontWeight: '800', fontSize: 14 },
+  svcShadow: { borderRadius: 24, elevation: 8, shadowColor: '#14142B', shadowOpacity: 0.16, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
+  svc: { borderRadius: 24, padding: 14, minHeight: 142, overflow: 'hidden', alignItems: 'flex-end' },
+  svcOrb: { position: 'absolute', width: 120, height: 120, borderRadius: 60, top: -50, left: -40, backgroundColor: 'rgba(255,255,255,0.12)' },
+  svcBigIcon: { position: 'absolute', bottom: -10, left: -6 },
+  svcIcon: { width: 38, height: 38, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.24)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  svcTag: { position: 'absolute', top: 14, left: 14, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  svcTagTxt: { color: '#FFF', fontSize: 10.5, fontWeight: '800' },
+  svcTitle: { color: '#FFF', fontSize: 16.5, fontWeight: '900', textAlign: 'right' },
+  svcSub: { color: 'rgba(255,255,255,0.9)', fontSize: 11.5, fontWeight: '500', textAlign: 'right', marginTop: 3, lineHeight: 17 },
+  svcGo: { position: 'absolute', bottom: 12, left: 12, width: 26, height: 26, borderRadius: 13, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center' },
 });
 
 const makeRc = (C) => StyleSheet.create({
-  wrap: { width: CARD_W, backgroundColor: C.card, borderRadius: 20, overflow: 'hidden', elevation: 5, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 } },
-  imgBox: { width: '100%', height: 118, position: 'relative' },
+  wrap: { width: CARD_W, backgroundColor: C.card, borderRadius: 22, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, ...C.shadow.card },
+  imgBox: { width: '100%', height: 120, position: 'relative', backgroundColor: C.inputBg },
   img: { width: '100%', height: '100%' },
-  scrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 50 },
-  badge: { position: 'absolute', top: 8, right: 8, backgroundColor: C.primary, borderRadius: 9, paddingHorizontal: 8, paddingVertical: 3, elevation: 3, shadowColor: C.primary, shadowOpacity: 0.4, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
-  badgeTxt: { color: '#FFF', fontSize: 11, fontWeight: '800' },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(20,20,35,0.5)', justifyContent: 'center', alignItems: 'center' },
-  overlayTxt: { color: '#FFF', fontWeight: '800', fontSize: 14 },
-  logoCircle: { position: 'absolute', bottom: -14, left: 10, width: 34, height: 34, borderRadius: 17, borderWidth: 2.5, borderColor: C.card, overflow: 'hidden', backgroundColor: C.card, elevation: 5, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  scrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 60 },
+  badge: { position: 'absolute', top: 8, left: 8, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  badgeTxt: { color: '#FFF', fontSize: 10.5, fontWeight: '800' },
+  ratePill: { position: 'absolute', top: 8, right: 8, flexDirection: 'row-reverse', alignItems: 'center', gap: 2, backgroundColor: 'rgba(11,11,18,0.6)', borderRadius: 999, paddingHorizontal: 7, paddingVertical: 3 },
+  rateTxt: { fontSize: 11, fontWeight: '800', color: '#FFF' },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(11,11,18,0.55)', justifyContent: 'center', alignItems: 'center', gap: 2 },
+  overlayTxt: { color: '#FFF', fontWeight: '800', fontSize: 13 },
+  logoCircle: { position: 'absolute', bottom: -16, right: 10, width: 36, height: 36, borderRadius: 12, borderWidth: 2.5, borderColor: C.card, overflow: 'hidden', backgroundColor: C.card, ...C.shadow.soft },
   logoImg: { width: '100%', height: '100%' },
-  body: { paddingHorizontal: 10, paddingTop: 18, paddingBottom: 10 },
-  name: { fontSize: 14, fontWeight: '800', color: C.text, textAlign: 'right' },
-  addr: { fontSize: 12, color: C.gray, marginTop: 2, textAlign: 'right' },
-  meta: { flexDirection: 'row-reverse', alignItems: 'center', marginTop: 5, gap: 3 },
-  metaTxt: { fontSize: 12, color: C.text, fontWeight: '600' },
-  sep: { color: C.gray },
+  body: { paddingHorizontal: 11, paddingTop: 20, paddingBottom: 12 },
+  name: { fontSize: 14.5, fontWeight: '800', color: C.text, textAlign: 'right' },
+  addr: { fontSize: 11.5, color: C.gray, marginTop: 2, textAlign: 'right', fontWeight: '500' },
+  meta: { flexDirection: 'row-reverse', alignItems: 'center', marginTop: 7, gap: 4, alignSelf: 'flex-end', backgroundColor: C.tint, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  metaTxt: { fontSize: 11.5, color: C.primary, fontWeight: '800' },
 });
 
 const makeHc = (C) => StyleSheet.create({
-  wrap: { width: 128 },
-  imgBox: { width: 128, height: 96, borderRadius: 20, overflow: 'hidden', position: 'relative', backgroundColor: C.inputBg, ...C.shadow.soft },
+  wrap: { width: 138 },
+  imgBox: { width: 138, height: 104, borderRadius: 22, overflow: 'hidden', position: 'relative', backgroundColor: C.inputBg, ...C.shadow.soft },
   img: { width: '100%', height: '100%' },
-  scrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 44 },
+  scrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 50 },
   closed: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   closedTxt: { color: '#FFF', fontSize: 12, fontWeight: '800' },
-  ratePill: { position: 'absolute', top: 8, right: 8, flexDirection: 'row-reverse', alignItems: 'center', gap: 2, backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
-  rateTxt: { fontSize: 11, fontWeight: '800', color: C.text },
-  logoDot: { position: 'absolute', bottom: 6, left: 6, width: 26, height: 26, borderRadius: 9, borderWidth: 2, borderColor: C.card, overflow: 'hidden', backgroundColor: C.card },
+  ratePill: { position: 'absolute', top: 8, right: 8, flexDirection: 'row-reverse', alignItems: 'center', gap: 2, backgroundColor: 'rgba(255,255,255,0.94)', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
+  rateTxt: { fontSize: 11, fontWeight: '800', color: '#14142B' },
+  logoDot: { position: 'absolute', bottom: 7, left: 7, width: 28, height: 28, borderRadius: 10, borderWidth: 2, borderColor: '#FFF', overflow: 'hidden', backgroundColor: C.card },
   logoImg: { width: '100%', height: '100%' },
-  name: { fontSize: 13.5, fontWeight: '800', color: C.text, textAlign: 'right', marginTop: 7 },
-  time: { fontSize: 11.5, color: C.gray, textAlign: 'right', marginTop: 1, fontWeight: '600' },
+  name: { fontSize: 14, fontWeight: '800', color: C.text, textAlign: 'right', marginTop: 8 },
+  timeRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 3, marginTop: 2 },
+  time: { fontSize: 11.5, color: C.gray, textAlign: 'right', fontWeight: '500' },
 });
 
 const makeS = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  header: { paddingHorizontal: 16, paddingBottom: 20, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden', ...C.shadow.float },
-  sheen: { position: 'absolute', top: 0, left: 0, right: 0, height: 80 },
-  cta: { flexDirection: 'row-reverse', alignItems: 'center', gap: 12, borderRadius: 18, padding: 15, ...C.shadow.float },
-  ctaTitle: { color: '#FFF', fontWeight: '900', fontSize: 15, textAlign: 'right' },
-  ctaSub: { color: 'rgba(255,255,255,0.92)', fontSize: 11.5, marginTop: 2, textAlign: 'right' },
-  locCaption: { fontSize: 10.5, color: 'rgba(255,255,255,0.85)', fontWeight: '700' },
+  heroBg: { ...StyleSheet.absoluteFillObject, bottom: 28, borderBottomLeftRadius: 34, borderBottomRightRadius: 34, overflow: 'hidden' },
   headerRow: { flexDirection: 'row', alignItems: 'center' },
-  greetWrap: { marginTop: 14, paddingHorizontal: 2, alignItems: 'flex-end' },
-  greetHi: { color: '#FFF', fontSize: 22, fontWeight: '900' },
-  greetSub: { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '600', marginTop: 2 },
-  iconBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center' },
-  locBtn: { flex: 1, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: 8, backgroundColor: 'rgba(255,255,255,0.20)', borderRadius: 22, paddingVertical: 9, paddingHorizontal: 12 },
+  locBtn: { flex: 1, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 10, backgroundColor: 'rgba(255,255,255,0.18)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', borderRadius: 22, paddingVertical: 7, paddingHorizontal: 8 },
+  locIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center' },
+  locCaption: { fontSize: 10.5, color: 'rgba(255,255,255,0.85)', fontWeight: '500' },
   locTxt: { fontSize: 13.5, fontWeight: '800', color: '#FFF', textAlign: 'right' },
-  divider: { height: 8, backgroundColor: C.divider },
-  catHeader: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, paddingHorizontal: 16, marginBottom: 14 },
-  catTitle: { fontSize: 17, fontWeight: '900', color: C.text },
-  catEmoji: { fontSize: 16 },
-  quickCat: { alignItems: 'center', gap: 8, width: 74 },
-  quickCircle: { width: 70, height: 70, borderRadius: 26, alignItems: 'center', justifyContent: 'center', ...C.shadow.soft, shadowColor: '#FF6B00' },
-  quickInner: { width: 58, height: 58, borderRadius: 20, backgroundColor: C.card, alignItems: 'center', justifyContent: 'center' },
+  greetWrap: { marginTop: 18, paddingHorizontal: 2, alignItems: 'flex-end' },
+  greetHi: { color: '#FFF', fontSize: 25, fontWeight: '900', textAlign: 'right' },
+  greetSub: { color: 'rgba(255,255,255,0.92)', fontSize: 13.5, fontWeight: '500', marginTop: 3, textAlign: 'right' },
+  searchDock: { paddingHorizontal: 16, marginTop: 18, marginBottom: -28 },
+  mini: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: 14, paddingBottom: 10, borderBottomLeftRadius: 22, borderBottomRightRadius: 22, overflow: 'hidden', ...C.shadow.float },
+  miniLoc: { flex: 1, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 5, marginHorizontal: 10 },
+  miniLocTxt: { color: '#FFF', fontWeight: '800', fontSize: 13.5, flexShrink: 1 },
+  catHeader: { flexDirection: 'row-reverse', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 12 },
+  catTitle: { fontSize: 18, fontWeight: '900', color: C.text, textAlign: 'right' },
+  catHint: { fontSize: 12, fontWeight: '500', color: C.faint },
+  quickCat: { alignItems: 'center', gap: 8, width: 76 },
+  quickCircle: { width: 72, height: 72, borderRadius: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border, ...C.shadow.soft },
+  quickInner: { width: 56, height: 56, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   quickLbl: { fontSize: 12.5, fontWeight: '800', color: C.text, textAlign: 'center' },
-  grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16 },
-  moreBtn: { marginTop: 14, marginHorizontal: 16, borderWidth: 1.5, borderColor: C.primary, borderRadius: 14, paddingVertical: 11, alignItems: 'center', backgroundColor: C.sec },
-  moreTxt: { color: C.primary, fontWeight: '800', fontSize: 15 },
-  sortChip: { paddingHorizontal: 15, paddingVertical: 9, borderRadius: 22, backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border },
-  sortChipOn: { backgroundColor: C.primary, borderColor: C.primary, elevation: 3, shadowColor: C.primary, shadowOpacity: 0.35, shadowRadius: 7, shadowOffset: { width: 0, height: 3 } },
-  sortChipTxt: { fontSize: 13, fontWeight: '700', color: C.text },
-  sortChipTxtOn: { color: '#FFF' },
+  svcRow: { flexDirection: 'row-reverse', gap: 12, paddingHorizontal: 16, marginTop: 24 },
+  sortHead: { paddingHorizontal: 16, marginTop: 26, marginBottom: 6, alignItems: 'flex-end' },
 });

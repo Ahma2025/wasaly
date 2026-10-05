@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, ActivityIndicator, Text, TextInput, Keyboard, Platform, TouchableOpacity, StyleSheet, StatusBar, I18nManager } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Notifications from 'expo-notifications';
 import * as ExpoSplash from 'expo-splash-screen';
 import { useFonts, Tajawal_400Regular, Tajawal_500Medium, Tajawal_700Bold, Tajawal_800ExtraBold, Tajawal_900Black } from '@expo-google-fonts/tajawal';
@@ -125,7 +126,11 @@ function AppNavigator() {
     })();
   }, [!!user]);
 
-  if (loading) return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.bg }}><ActivityIndicator size="large" color={C.primary} /></View>;
+  if (loading) return (
+    <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <ActivityIndicator size="large" color="#FFF" />
+    </LinearGradient>
+  );
   return (
     <Stack.Navigator screenOptions={{ headerShown: false, animation: Platform.OS === 'android' ? 'slide_from_left' : 'slide_from_right', animationDuration: 260, gestureEnabled: true, contentStyle: { backgroundColor: C.bg } }}>
       {user ? (

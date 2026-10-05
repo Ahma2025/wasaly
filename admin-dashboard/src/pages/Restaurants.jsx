@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FiPlus, FiEdit2, FiEye, FiEyeOff, FiStar } from 'react-icons/fi';
+import { FiPlus, FiEdit2, FiEye, FiEyeOff, FiStar, FiShoppingBag, FiPhone, FiMapPin, FiUser, FiAlertOctagon } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { STORE_TYPES, storeType, normStoreType, normalizePhone, truthy, num } from '../utils/format';
-import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, useConfirm } from '../components/ui';
+import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, Button, Switch, useConfirm } from '../components/ui';
 
 const FETCH_LIMIT = 1000;
 const PAGE = 30;
@@ -107,60 +107,71 @@ export default function Restaurants() {
   const shown = filtered.slice(0, visible);
 
   return (
-    <div className="p-4 space-y-4 animate-fade-up">
-      <PageHeader icon="🏪" title="المطاعم والمتاجر" subtitle={`${restaurants.length} متجر · ${counts.active} نشط`}
-        action={<PrimaryBtn onClick={() => setShowNew(true)} className="flex items-center gap-1.5"><FiPlus /> متجر</PrimaryBtn>} />
+    <div className="page">
+      <PageHeader icon={<FiShoppingBag />} title="المطاعم والمتاجر" subtitle={`${restaurants.length} متجر · ${counts.active} نشط · ${counts.hidden} مخفي`}
+        action={<PrimaryBtn onClick={() => setShowNew(true)}><FiPlus /> <span>متجر<span className="hidden sm:inline"> جديد</span></span></PrimaryBtn>} />
 
-      <SearchInput value={search} onChange={setSearch} placeholder="ابحث بالاسم أو الهاتف أو المدينة…" loading={refreshing} />
-      <Chips value={filter} onChange={setFilter} options={[
-        ['', 'الكل', restaurants.length], ['active', 'نشط', counts.active], ['hidden', 'مخفي', counts.hidden],
-        ['restaurant', '🍽️ مطاعم'], ['supermarket', '🛒 سوبرماركت'], ['pharmacy', '💊 صيدليات'],
-      ]} />
+      <div className="lg:card lg:p-4 space-y-3">
+        <SearchInput value={search} onChange={setSearch} placeholder="ابحث بالاسم أو الهاتف أو المدينة…" loading={refreshing} />
+        <Chips value={filter} onChange={setFilter} options={[
+          ['', 'الكل', restaurants.length], ['active', 'نشط', counts.active], ['hidden', 'مخفي', counts.hidden],
+          ['restaurant', '🍽️ مطاعم'], ['supermarket', '🛒 سوبرماركت'], ['pharmacy', '💊 صيدليات'],
+        ]} />
+      </div>
 
-      {loading && restaurants.length === 0 ? <ListSkeleton rows={6} />
-        : filtered.length === 0 ? <EmptyState icon="🏪" title="لا توجد متاجر" hint={search ? 'لا نتائج مطابقة للبحث' : 'أضف أول متجر من زر «متجر»'} />
+      {loading && restaurants.length === 0 ? <ListSkeleton rows={6} grid />
+        : filtered.length === 0 ? <EmptyState icon={<FiShoppingBag />} title="لا توجد متاجر" hint={search ? 'لا نتائج مطابقة للبحث' : 'أضف أول متجر من زر «متجر»'}
+            action={!search && <PrimaryBtn onClick={() => setShowNew(true)}><FiPlus /> إضافة متجر</PrimaryBtn>} />
         : (
-          <div className="space-y-3">
+          <div className="grid gap-3 lg:gap-4 sm:grid-cols-2 2xl:grid-cols-3 stagger">
             {shown.map(r => {
               const active = truthy(r.is_active);
               const featured = truthy(r.is_featured);
+              const open = r.is_open != null ? truthy(r.is_open) : null;
               const st = storeType(r.store_type);
               return (
-                <div key={r.id} className={`card p-4 ${active ? '' : 'opacity-80'}`}>
-                  <div className="flex gap-3">
-                    {r.logo
-                      ? <img src={r.logo} className="w-14 h-14 rounded-2xl object-cover flex-shrink-0" alt="" />
-                      : <div className="w-14 h-14 rounded-2xl bg-orange-50 flex items-center justify-center text-2xl flex-shrink-0">{st.icon}</div>}
+                <article key={r.id} className={`card card-hover p-4 flex flex-col relative overflow-hidden ${active ? '' : 'bg-[#FCFCFD]'}`}>
+                  {featured && <span className="absolute top-0 left-4 grad-sunset text-white text-[10px] font-extrabold px-2 pt-1 pb-1.5 rounded-b-lg shadow-brand flex items-center gap-1"><FiStar className="fill-current" /> مميّز</span>}
+                  <div className="flex gap-3.5">
+                    <div className={`relative flex-shrink-0 ${active ? '' : 'grayscale opacity-70'}`}>
+                      {r.logo
+                        ? <img src={r.logo} className="w-16 h-16 rounded-[18px] object-cover ring-1 ring-surface-line" alt="" loading="lazy" />
+                        : <div className="w-16 h-16 rounded-[18px] bg-gradient-to-br from-orange-50 to-rose-50 flex items-center justify-center text-[28px] ring-1 ring-orange-100">{st.icon}</div>}
+                      {open != null && <span className={`absolute -bottom-1 -left-1 w-4 h-4 rounded-full ring-[3px] ring-white ${open ? 'bg-ok' : 'bg-gray-300'}`} title={open ? 'مفتوح' : 'مغلق'} />}
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-black text-gray-900 truncate">{r.name_ar}</p>
-                      <div className="flex gap-1 flex-wrap mt-1">
+                      <p className="font-black text-ink text-[16px] truncate pl-14">{r.name_ar}</p>
+                      <div className="flex gap-1 flex-wrap mt-1.5">
                         <Badge className={active ? 'bg-green-50 text-green-700 ring-green-200' : 'bg-gray-100 text-gray-500 ring-gray-200'}>{active ? 'نشط' : 'مخفي عن الزبائن'}</Badge>
-                        {r.is_open != null && <Badge className={truthy(r.is_open) ? 'bg-sky-50 text-sky-700 ring-sky-200' : 'bg-amber-50 text-amber-700 ring-amber-200'}>{truthy(r.is_open) ? 'مفتوح' : 'مغلق'}</Badge>}
-                        {featured && <Badge className="bg-yellow-50 text-yellow-700 ring-yellow-200">⭐ مميّز</Badge>}
+                        {open != null && <Badge className={open ? 'bg-sky-50 text-sky-700 ring-sky-200' : 'bg-amber-50 text-amber-700 ring-amber-200'}>{open ? 'مفتوح' : 'مغلق'}</Badge>}
                         <Badge className="bg-orange-50 text-orange-700 ring-orange-200">{st.icon} {st.label}</Badge>
                       </div>
-                      <p className="text-xs text-gray-400 mt-1 truncate">{r.city && r.city !== '-' ? `${r.city} · ` : ''}{r.phone || 'بدون هاتف'} · المالك: {r.owner_name || r.owner_phone || 'غير محدد'}</p>
+                      <p className="text-[11.5px] text-ink-3 mt-1.5 truncate flex items-center gap-1.5 font-medium">
+                        {r.city && r.city !== '-' && <><FiMapPin className="flex-shrink-0" />{r.city} · </>}
+                        <FiPhone className="flex-shrink-0" /><span className="num">{r.phone || 'بدون هاتف'}</span>
+                      </p>
+                      <p className="text-[11.5px] text-ink-3 mt-0.5 truncate flex items-center gap-1.5 font-medium"><FiUser className="flex-shrink-0" />المالك: {r.owner_name || r.owner_phone || 'غير محدد'}</p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-50 text-center">
-                    <div><p className="text-sm font-black text-orange-500 tabular-nums">{r.total_orders || 0}</p><p className="text-[10px] text-gray-400">طلب مُسلّم</p></div>
-                    <div><p className="text-sm font-black text-green-600 tabular-nums">{num(r.total_revenue).toFixed(0)}₪</p><p className="text-[10px] text-gray-400">مدفوعات الطلبات</p></div>
-                    <div><p className="text-sm font-black text-blue-600 tabular-nums">{num(r.rating).toFixed(1)} ⭐</p><p className="text-[10px] text-gray-400">تقييم</p></div>
+                  <div className="grid grid-cols-3 mt-4 rounded-2xl bg-surface divide-x divide-x-reverse divide-surface-line text-center py-2.5">
+                    <div><p className="text-[15px] font-black text-ink num">{r.total_orders || 0}</p><p className="text-[10.5px] text-ink-3 font-bold">طلب مُسلّم</p></div>
+                    <div><p className="text-[15px] font-black text-ink num">{num(r.total_revenue).toFixed(0)}<span className="text-[11px] text-ink-3">₪</span></p><p className="text-[10.5px] text-ink-3 font-bold">مدفوعات</p></div>
+                    <div><p className="text-[15px] font-black text-ink num">{num(r.rating).toFixed(1)}<span className="text-amber-400 text-[12px]"> ★</span></p><p className="text-[10.5px] text-ink-3 font-bold">تقييم</p></div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 mt-3">
+                  <div className="grid grid-cols-3 gap-2 mt-3 mt-auto pt-3">
                     <button onClick={() => toggleField(r, 'is_active')}
-                      className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 ${active ? 'bg-gray-100 text-gray-600' : 'bg-green-50 text-green-600'}`}>
+                      className={`btn btn-sm ${active ? 'btn-secondary' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}>
                       {active ? <><FiEyeOff /> إخفاء</> : <><FiEye /> تفعيل</>}
                     </button>
-                    <button onClick={() => toggleField(r, 'is_featured')}
-                      className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 ${featured ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-50 text-gray-500'}`}>
-                      <FiStar /> {featured ? 'إلغاء التمييز' : 'تمييز'}
+                    <button onClick={() => toggleField(r, 'is_featured')} aria-pressed={featured} title={featured ? 'إلغاء التمييز' : 'تمييز المتجر'}
+                      className={`btn btn-sm ${featured ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' : 'btn-secondary'}`}>
+                      <FiStar className={featured ? 'fill-current' : ''} /> {featured ? 'مُميّز' : 'تمييز'}
                     </button>
-                    <button onClick={() => setEditing(r)} className="py-2 rounded-xl text-xs font-bold bg-orange-50 text-orange-600 flex items-center justify-center gap-1">
+                    <button onClick={() => setEditing(r)} className="btn btn-sm btn-soft">
                       <FiEdit2 /> تعديل
                     </button>
                   </div>
-                </div>
+                </article>
               );
             })}
           </div>
@@ -172,7 +183,7 @@ export default function Restaurants() {
       )}
 
       {/* إضافة */}
-      <Modal open={showNew} onClose={() => setShowNew(false)} title="متجر جديد" subtitle="صاحب المتجر يكمّل الموقع والمنيو والأوقات من بوابته">
+      <Modal open={showNew} onClose={() => setShowNew(false)} title="متجر جديد" subtitle="صاحب المتجر يكمّل الموقع والمنيو والأوقات من بوابته" icon={<FiPlus />}>
         <div className="space-y-3">
           <Field label="اسم المتجر *"><input className="inp" placeholder="مثال: مطعم العميد" value={form.name_ar} onChange={e => setForm(f => ({ ...f, name_ar: e.target.value }))} /></Field>
           <Field label="نوع المتجر">
@@ -273,7 +284,7 @@ function EditRestaurant({ restaurant, onClose, onSaved, refetch }) {
   };
 
   return (
-    <Modal open onClose={onClose} title="تعديل المتجر" subtitle={restaurant.name_ar}
+    <Modal open onClose={onClose} title="تعديل المتجر" subtitle={restaurant.name_ar} icon={<FiEdit2 />}
       footer={<button onClick={save} disabled={saving} className="w-full btn-lux py-3 disabled:opacity-60">{saving ? 'جاري الحفظ…' : 'حفظ التعديلات'}</button>}>
       <div className="space-y-3">
         <Field label="الاسم *"><input className="inp" value={f.name_ar} onChange={set('name_ar')} /></Field>
@@ -294,18 +305,15 @@ function EditRestaurant({ restaurant, onClose, onSaved, refetch }) {
             ))}
           </div>
         </Field>
-        <div className="flex items-center justify-between rounded-2xl bg-gray-50 p-3">
-          <div><p className="font-bold text-sm text-gray-800">المتجر مفتوح الآن</p><p className="text-[11px] text-gray-400">يستقبل طلبات جديدة</p></div>
-          <button type="button" onClick={() => setF(p => ({ ...p, is_open: !p.is_open }))} aria-pressed={f.is_open}
-            className={`w-14 h-8 rounded-full relative flex-shrink-0 ${f.is_open ? 'bg-green-500' : 'bg-gray-300'}`}>
-            <span className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow transition-all ${f.is_open ? 'right-1' : 'right-7'}`} />
-          </button>
+        <div className="flex items-center justify-between rounded-2xl bg-surface p-3.5">
+          <div><p className="font-bold text-sm text-ink">المتجر مفتوح الآن</p><p className="text-[11.5px] text-ink-3">يستقبل طلبات جديدة</p></div>
+          <Switch checked={f.is_open} onChange={(v) => setF(p => ({ ...p, is_open: v }))} label="المتجر مفتوح الآن" />
         </div>
         {truthy(restaurant.is_active) && (
-          <div className="rounded-2xl border border-red-100 bg-red-50/50 p-3">
-            <p className="font-bold text-sm text-red-700">منطقة الخطر</p>
-            <p className="text-[11px] text-red-500 mb-2">الإخفاء النهائي لا يحذف البيانات — يوقف ظهور المتجر واستقبال الطلبات.</p>
-            <button onClick={hideForever} className="w-full py-2.5 rounded-xl bg-white text-red-600 font-bold text-sm border border-red-200">إخفاء نهائي</button>
+          <div className="rounded-2xl border border-red-100 bg-red-50/50 p-4">
+            <p className="font-black text-sm text-red-700 flex items-center gap-1.5"><FiAlertOctagon /> منطقة الخطر</p>
+            <p className="text-[11.5px] text-red-500 mt-1 mb-3">الإخفاء النهائي لا يحذف البيانات — يوقف ظهور المتجر واستقبال الطلبات.</p>
+            <Button variant="danger" className="w-full bg-white border border-red-200" onClick={hideForever}>إخفاء نهائي</Button>
           </div>
         )}
       </div>

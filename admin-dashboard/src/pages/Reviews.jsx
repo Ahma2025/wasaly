@@ -3,7 +3,8 @@ import toast from 'react-hot-toast';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { fmtDateTime } from '../utils/format';
-import { PageHeader, Chips, EmptyState, ListSkeleton, StatTile, LoadMore } from '../components/ui';
+import { FiStar } from 'react-icons/fi';
+import { PageHeader, Segmented, EmptyState, ListSkeleton, StatTile, LoadMore, Avatar } from '../components/ui';
 
 const PAGE = 30;
 const Stars = ({ n }) => n ? (
@@ -33,43 +34,42 @@ export default function Reviews() {
   };
 
   return (
-    <div className="p-4 space-y-4 animate-fade-up">
-      <PageHeader icon="⭐" title="التقييمات والملاحظات" subtitle={`آخر ${reviews.length} تقييم`} />
+    <div className="page">
+      <PageHeader icon={<FiStar />} title="التقييمات والملاحظات" subtitle={`آخر ${reviews.length} تقييم`} />
 
-      <div className="grid grid-cols-2 gap-3">
-        <StatTile label="متوسط تقييم المتاجر" value={`${avg('restaurant_rating')} ★`} tone="orange" />
-        <StatTile label="متوسط تقييم السائقين" value={`${avg('driver_rating')} ★`} tone="violet" />
+      <div className="grid grid-cols-2 gap-3 lg:gap-4 lg:max-w-2xl">
+        <StatTile label="متوسط تقييم المتاجر" value={`${avg('restaurant_rating')} ★`} tone="orange" hint={`من آخر ${reviews.length} تقييم`} />
+        <StatTile label="متوسط تقييم السائقين" value={`${avg('driver_rating')} ★`} tone="violet" hint={`من آخر ${reviews.length} تقييم`} />
       </div>
-      <p className="text-[10px] text-gray-400 -mt-2">المتوسط محسوب من آخر {reviews.length} تقييم محمّل.</p>
 
-      <Chips value={filter} onChange={(v) => { setFilter(v); setVisible(PAGE); }} options={[['all', 'الكل'], ['restaurant', '🏪 المتاجر'], ['driver', '🛵 السائقين']]} />
+      <Segmented value={filter} onChange={(v) => { setFilter(v); setVisible(PAGE); }} options={[['all', 'الكل'], ['restaurant', '🏪 المتاجر'], ['driver', '🛵 السائقين']]} />
 
-      {loading && reviews.length === 0 ? <ListSkeleton rows={5} />
-        : shown.length === 0 ? <EmptyState icon="⭐" title="لا توجد تقييمات" />
+      {loading && reviews.length === 0 ? <ListSkeleton rows={5} grid />
+        : shown.length === 0 ? <EmptyState icon={<FiStar />} title="لا توجد تقييمات" hint="ستظهر تقييمات الزبائن هنا بعد تسليم الطلبات" />
         : (
-          <div className="space-y-3">
+          <div className="grid gap-3 lg:gap-4 sm:grid-cols-2 xl:grid-cols-3 items-start stagger">
             {shown.slice(0, visible).map(r => (
-              <div key={r.id} className="card p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center text-sm font-black text-gray-600">{r.customer_name?.[0] || '؟'}</div>
-                  <div>
-                    <p className="font-bold text-gray-900 text-sm leading-none">{r.customer_name || 'زبون'}</p>
-                    <p className="text-[10px] text-gray-400 mt-1">{fmtDateTime(r.created_at)}</p>
+              <article key={r.id} className="card card-hover p-4">
+                <div className="flex items-center gap-2.5 mb-3">
+                  <Avatar name={r.customer_name} size={38} rounded={12} tint="#2E90FA" />
+                  <div className="min-w-0">
+                    <p className="font-bold text-ink text-sm leading-none truncate">{r.customer_name || 'زبون'}</p>
+                    <p className="text-[10.5px] text-ink-3 mt-1 num">{fmtDateTime(r.created_at)}</p>
                   </div>
                 </div>
-                <div className="space-y-1 text-sm">
-                  <div className="flex items-center justify-between"><span className="text-gray-500 truncate">🏪 {r.restaurant_name || 'متجر'}</span><Stars n={parseInt(r.restaurant_rating)} /></div>
-                  <div className="flex items-center justify-between"><span className="text-gray-500 truncate">🛵 {r.driver_name || 'بدون سائق'}</span><Stars n={parseInt(r.driver_rating)} /></div>
+                <div className="space-y-1.5 text-sm rounded-xl bg-surface p-2.5">
+                  <div className="flex items-center justify-between gap-2"><span className="text-ink-2 truncate font-medium">🏪 {r.restaurant_name || 'متجر'}</span><Stars n={parseInt(r.restaurant_rating)} /></div>
+                  <div className="flex items-center justify-between gap-2"><span className="text-ink-2 truncate font-medium">🛵 {r.driver_name || 'بدون سائق'}</span><Stars n={parseInt(r.driver_rating)} /></div>
                 </div>
-                {r.comment && <p className="text-sm text-gray-700 mt-2 bg-gray-50 rounded-xl p-2.5 whitespace-pre-wrap break-words">💬 {r.comment}</p>}
+                {r.comment && <p className="text-[13.5px] text-ink mt-3 leading-relaxed whitespace-pre-wrap break-words relative pr-4 border-r-2 border-orange-200">{r.comment}</p>}
                 {parseImgs(r.images).length > 0 && (
                   <div className="flex gap-2 mt-2 overflow-x-auto no-scrollbar">
                     {parseImgs(r.images).map((src, i) => (
-                      <img key={i} src={String(src)} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" alt="" loading="lazy" />
+                      <img key={i} src={String(src)} className="w-16 h-16 rounded-xl object-cover flex-shrink-0 ring-1 ring-surface-line" alt="" loading="lazy" />
                     ))}
                   </div>
                 )}
-              </div>
+              </article>
             ))}
           </div>
         )}
