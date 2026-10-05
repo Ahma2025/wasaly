@@ -247,7 +247,7 @@ export default function CartScreen() {
                   <Text style={styles.itemOptions}>{item.addons.map(a => a.name).join(' • ')}</Text>
                 )}
                 <Text style={styles.itemPrice}>{
-                  ((parseFloat(item.discount_price || item.price) + (item.addons || []).reduce((s,a) => s + parseFloat(a.price||0), 0)) * item.quantity).toFixed(2)
+                  ((parseFloat(item.discount_price || item.price || 0) + (item.addons || []).reduce((s,a) => s + parseFloat(a.price||0), 0)) * item.quantity).toFixed(2)
                 }₪</Text>
                 <TextInput
                   style={styles.itemNoteInput}

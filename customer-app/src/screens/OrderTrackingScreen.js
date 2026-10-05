@@ -431,7 +431,7 @@ export default function OrderTrackingScreen() {
             {order.items.map((item, i) => (
               <View key={i} style={styles.orderItem}>
                 <Text style={styles.orderItemName}>{item.name_ar || item.name} × {item.quantity}</Text>
-                <Text style={styles.orderItemPrice}>{(parseFloat(item.price) * item.quantity).toFixed(2)}₪</Text>
+                <Text style={styles.orderItemPrice}>{(parseFloat(item.price || 0) * (item.quantity || 1)).toFixed(2)}₪</Text>
               </View>
             ))}
           </View>
