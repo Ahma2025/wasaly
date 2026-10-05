@@ -95,7 +95,7 @@ function AppNavigator() {
       <DriverProvider>
         <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_left', animationDuration: 260, gestureEnabled: true, contentStyle: { backgroundColor: COLORS.bg } }}>
           <Stack.Screen name="Main" component={MainTabs} />
-          <Stack.Screen name="Delivery" component={DeliveryScreen} options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom', gestureEnabled: false }} />
+          <Stack.Screen name="Delivery" component={DeliveryScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
           <Stack.Screen name="Reviews" component={ReviewsScreen} />
           <Stack.Screen name="SupportChat" component={SupportChatScreen} />
         </Stack.Navigator>

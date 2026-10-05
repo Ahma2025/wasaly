@@ -261,8 +261,11 @@ export function DriverProvider({ children }) {
       const msg = isPersonal(o)
         ? (isRide(o) ? 'انطلق الآن إلى نقطة الاستلام لتوصيل الراكب' : 'انطلق الآن إلى نقطة الاستلام لاستلام الطرد')
         : 'انطلق الآن إلى المطعم لاستلام الطلب';
-      navigate('Delivery', { orderId: o.id });
-      Alert.alert('✅ تم قبول الطلب', msg);
+      // ننتظر حتى تُغلق نافذة العرض تماماً (iOS يرفض فتح شاشة أثناء إغلاق Modal)
+      setTimeout(() => {
+        navigate('Delivery', { orderId: o.id });
+        Alert.alert('✅ تم قبول الطلب', msg);
+      }, 650);
     } catch (e) {
       closeOffer('failed'); // لا نترك بطاقة لطلب لم يعد متاحاً
       Alert.alert('تعذّر قبول الطلب', e?.message || 'الطلب لم يعد متاحاً');

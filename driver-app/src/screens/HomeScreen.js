@@ -133,7 +133,7 @@ export default function HomeScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
       <ScrollView
-        contentContainerStyle={{ flexGrow: 1, paddingBottom: contentPadding }}
+        contentContainerStyle={{ flexGrow: 1, paddingBottom: contentPadding + 72 }}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} progressViewOffset={insets.top} />}>
         {/* الترويسة */}

@@ -1,5 +1,5 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, Platform } from 'react-native';
+import React, { useRef, useEffect } from 'react';
+import { View, Text, Pressable, StyleSheet, Animated, Platform, I18nManager } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -54,6 +54,11 @@ function TabButton({ focused, label, onPress, onLongPress, colors: C, badge }) {
       accessibilityRole="tab" accessibilityState={{ selected: focused }} accessibilityLabel={a11y}>
       <Animated.View style={{ transform: [{ scale }, { translateY }], alignItems: 'center' }}>
         <View style={styles.iconBox}>
+          <Animated.View pointerEvents="none" style={[styles.pill, C.shadow.glow, { opacity: v, transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }] }]}>
+            <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.pillGrad}>
+              <LinearGradient colors={C.gradients.sheen} style={styles.pillSheen} />
+            </LinearGradient>
+          </Animated.View>
           <Ionicons name={focused ? on : off} size={21} color={focused ? '#FFF' : C.faint} />
           {label === 'سلتي' && <CartBadge count={badge} C={C} />}
         </View>
@@ -69,30 +74,10 @@ export default function FloatingTabBar({ state, navigation }) {
   const { colors: C, isDark } = useTheme();
   const { count } = useCart();
   const insets = useSafeAreaInsets();
-  const [w, setW] = useState(0);
-  const n = state.routes.length;
-  const slot = w > 0 ? (w - 8) / n : 0;
-  const x = useRef(new Animated.Value(0)).current;
-  const ready = useRef(false);
-
-  useEffect(() => {
-    if (!slot) return;
-    const target = 4 + state.index * slot + (slot - PILL_W) / 2;
-    if (!ready.current || isReducedMotion()) { x.setValue(target); ready.current = true; return; }
-    Animated.spring(x, { toValue: target, damping: 18, stiffness: 220, mass: 0.9, useNativeDriver: true }).start();
-  }, [state.index, slot]);
 
   return (
-    <View accessibilityRole="tablist" onLayout={e => setW(e.nativeEvent.layout.width)}
-      style={[styles.wrap, { bottom: insets.bottom + BASE_GAP, backgroundColor: isDark ? C.elev : C.card, borderColor: C.border, ...C.shadow.card }]}>
-      {/* المؤشر المتحرّك (حبّة متدرّجة تنزلق خلف الأيقونة النشطة) */}
-      {slot > 0 && (
-        <Animated.View pointerEvents="none" style={[styles.pill, C.shadow.glow, { transform: [{ translateX: x }] }]}>
-          <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.pillGrad}>
-            <LinearGradient colors={C.gradients.sheen} style={styles.pillSheen} />
-          </LinearGradient>
-        </Animated.View>
-      )}
+    <View accessibilityRole="tablist"
+      style={[styles.wrap, { flexDirection: I18nManager.isRTL ? 'row-reverse' : 'row', bottom: insets.bottom + BASE_GAP, backgroundColor: isDark ? C.elev : C.card, borderColor: C.border, ...C.shadow.card }]}>
       {state.routes.map((route, i) => {
         const focused = state.index === i;
         const onPress = () => {
@@ -115,7 +100,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4,
     height: TAB_BAR_HEIGHT, borderRadius: 30, borderWidth: 1,
   },
-  pill: { position: 'absolute', left: 0, top: 4, width: PILL_W, height: PILL_H, borderRadius: 15 },
+  pill: { position: 'absolute', top: -1, width: PILL_W, height: PILL_H, borderRadius: 15 },
   pillGrad: { flex: 1, borderRadius: 15, overflow: 'hidden' },
   pillSheen: { position: 'absolute', top: 0, left: 0, right: 0, height: PILL_H / 2 },
   item: { flex: 1, alignItems: 'center', justifyContent: 'center', height: '100%' },
