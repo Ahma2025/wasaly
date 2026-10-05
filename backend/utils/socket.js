@@ -1,5 +1,21 @@
 const jwt = require('jsonwebtoken');
+const { jwtVerifyKey } = require('./jwtKey');
 const pool = require('../config/database');
+const cache = require('./cache');
+const { isTokenDenied } = require('./security');
+const driverLoc = require('./driverLocation');
+
+// كاش المصادقة (60 ث): موجات الاتصال (إعادة نشر/انقطاع شبكة) لا تضرب القاعدة بـ SELECT لكل handshake
+const AUTH_TTL = Number(process.env.SOCKET_AUTH_CACHE_MS) || 60000;
+const authKey = (id) => `sockauth:${id}`;
+async function lookupSocketUser(id) {
+  return cache.wrap(authKey(id), AUTH_TTL, async () => {
+    const { rows } = await pool.query('SELECT id, role FROM users WHERE id=$1 AND is_active=true AND COALESCE(is_blocked,false)=false', [id]);
+    return rows[0] ? { id: rows[0].id, role: rows[0].role } : { none: true };
+  });
+}
+// يُستدعى عند حظر/حذف/تغيير دور مستخدم
+const invalidateSocketAuth = (id) => cache.del(authKey(id)).catch(() => {});
 
 const ACTIVE = ['confirmed', 'preparing', 'ready', 'on_the_way'];
 const validCoord = (lat, lng) => {
@@ -13,11 +29,12 @@ module.exports = (io) => {
     const token = socket.handshake.auth && socket.handshake.auth.token;
     if (!token) return next(new Error('No token'));
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const { rows } = await pool.query('SELECT id, role FROM users WHERE id=$1 AND is_active=true AND COALESCE(is_blocked,false)=false', [decoded.id]);
-      if (!rows[0]) return next(new Error('User not found'));
-      socket.userId = rows[0].id;
-      socket.userRole = rows[0].role;
+      const decoded = jwt.verify(token, jwtVerifyKey());
+      if (await isTokenDenied(token)) return next(new Error('Invalid token'));
+      const u = await lookupSocketUser(decoded.id);
+      if (!u || u.none) return next(new Error('User not found'));
+      socket.userId = u.id;
+      socket.userRole = u.role;
       next();
     } catch {
       next(new Error('Invalid token'));
@@ -43,9 +60,6 @@ module.exports = (io) => {
     return info;
   }
 
-  const _lastPersist = new Map();
-  const PERSIST_EVERY = 15000;
-
   io.on('connection', (socket) => {
     socket.join(`user:${socket.userId}`);
 
@@ -68,12 +82,8 @@ module.exports = (io) => {
             if (hit && Date.now() - hit.at > 3000) _orderCache.delete(String(orderId));
           }
         }
-        const now = Date.now();
-        if (now - (_lastPersist.get(socket.userId) || 0) >= PERSIST_EVERY) {
-          _lastPersist.set(socket.userId, now);
-          if (_lastPersist.size > 20000) _lastPersist.clear();
-          pool.query('UPDATE drivers SET current_lat=$1, current_lng=$2 WHERE user_id=$3', [+lat, +lng, socket.userId]).catch(() => {});
-        }
+        // آخر موقع → Redis/ذاكرة فوراً، والقاعدة ≤ مرة كل 15 ثانية (مشترك مع PATCH /drivers/location)
+        driverLoc.setLocation(socket.userId, +lat, +lng).catch(() => {});
       } catch (e) {
         console.error('driver:location error:', e.message);
       }
@@ -91,3 +101,4 @@ module.exports = (io) => {
 
   return io;
 };
+module.exports.invalidateSocketAuth = invalidateSocketAuth;

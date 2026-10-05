@@ -1,6 +1,9 @@
 const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, adminOnly } = require('../middleware/auth');
+const cache = require('../utils/cache');
+
+router.use(cache.invalidateOnWrite()); // أسماء/أيقونات التصنيفات تظهر في قائمة المطاعم المخزّنة
 
 router.get('/', async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM categories WHERE is_active=true ORDER BY sort_order');

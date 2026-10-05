@@ -5,13 +5,15 @@ const { saveNotification, notifyUser, Notify, sendFCM, getUserTokens } = require
 const { sendWebPush } = require('./webpush');
 const S = require('../utils/orderService');
 const { round2, num, HttpError } = S;
+const cache = require('../utils/cache');
+const driverLoc = require('../utils/driverLocation');
+const { serverError, clampInt, strParam } = require('../utils/http');
 
 const LAHZA_ENABLED = () => !!process.env.LAHZA_SECRET_KEY;
 
 const sendError = (res, e, tag) => {
   if (e instanceof HttpError) return res.status(e.status).json({ success: false, message: e.message, ...e.extra });
-  console.error(`${tag} error:`, e.message);
-  return res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
+  return serverError(res, e, tag);
 };
 
 async function setOrderNumber(client, id) {
@@ -169,6 +171,7 @@ router.post('/', auth, async (req, res) => {
       return { order: ord, priced: p };
     });
 
+    await cache.invalidateRestaurantOrders(order.restaurant_id);
     // 🔔 المطعم يُبلَّغ الآن — إلا طلبات البطاقة غير المدفوعة (تُطلق بعد التحقق من Lahza)
     if (!S.isAwaitingCardPayment(order)) S.notifyRestaurantNewOrder(req.io, order).catch(() => {});
 
@@ -179,9 +182,9 @@ router.post('/', auth, async (req, res) => {
 // Get user orders
 router.get('/my', auth, async (req, res) => {
   try {
-    const { status, limit, offset } = req.query;
-    const safeLimit = Math.min(parseInt(limit) || 20, 100);
-    const safeOffset = Math.max(parseInt(offset) || 0, 0);
+    const status = strParam(req.query.status);
+    const safeLimit = clampInt(req.query.limit, 20, 1, 100);
+    const safeOffset = clampInt(req.query.offset, 0, 0, 1000000);
     let q = `SELECT o.*, r.name_ar as restaurant_name, r.logo as restaurant_logo,
              (SELECT COUNT(*) FROM order_items WHERE order_id=o.id) as items_count
              FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
@@ -218,6 +221,11 @@ router.get('/:id', auth, async (req, res) => {
       || (o.restaurant_owner_id && String(o.restaurant_owner_id) === uid);
     if (!authorized) return res.status(403).json({ success: false, message: 'غير مصرح بعرض هذا الطلب' });
     const { rows: items } = await pool.query('SELECT * FROM order_items WHERE order_id=$1 ORDER BY id', [req.params.id]);
+    // موقع السائق الأحدث (Redis) — القاعدة تُحدَّث كل 15 ثانية فقط
+    if (o.driver_id && o.driver_assigned_at) {
+      const f = await driverLoc.getLocation(o.driver_id);
+      if (f) { o.driver_lat = f.lat; o.driver_lng = f.lng; }
+    }
 
     const extra = {
       tip: round2(num(o.tip)),
@@ -402,8 +410,9 @@ router.post('/:id/reject', auth, async (req, res) => {
     if (!S.isIntId(req.params.id)) return res.status(400).json({ success: false, message: 'الطلب غير موجود' });
     const { rows } = await pool.query(
       `UPDATE orders SET driver_id=NULL, driver_offer_expires_at=NULL
-       WHERE id=$1 AND driver_id=$2 AND driver_assigned_at IS NULL RETURNING id`, [req.params.id, req.user.id]);
+       WHERE id=$1 AND driver_id=$2 AND driver_assigned_at IS NULL RETURNING id, restaurant_id`, [req.params.id, req.user.id]);
     if (!rows[0]) return res.status(400).json({ success: false, message: 'لا يمكن رفض هذا الطلب' });
+    await cache.invalidateRestaurantOrders(rows[0].restaurant_id);
     S.dispatchOrder(req.io, rows[0].id, req.user.id).catch(() => {});
     res.json({ success: true });
   } catch (e) { sendError(res, e, 'reject'); }
@@ -448,6 +457,7 @@ router.post('/:id/rate', auth, async (req, res) => {
 
     await pool.query('UPDATE orders SET rating_restaurant=$1, rating_driver=$2, review_text=$3 WHERE id=$4',
       [restaurantRating, driverRating, safeComment, order.id]);
+    cache.invalidateRestaurantOrders(order.restaurant_id);
     if (order.restaurant_id) {
       await pool.query(
         `UPDATE restaurants SET

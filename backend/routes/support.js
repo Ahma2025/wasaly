@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const pool = require('../config/database');
+const { serverError } = require('../utils/http');
 const { auth, adminOnly } = require('../middleware/auth');
 const { saveNotification, sendFCM, getUserTokens, notifyUser } = require('../utils/notifications');
 
@@ -29,7 +30,7 @@ router.post('/tickets', auth, async (req, res) => {
       [req.user.id, orderId, String(subject).slice(0, 200), message ? String(message).slice(0, 4000) : null]);
     if (message) await pool.query('INSERT INTO support_messages (ticket_id, sender_id, message) VALUES ($1,$2,$3)', [rows[0].id, req.user.id, String(message).slice(0, 4000)]);
     res.status(201).json({ success: true, data: rows[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 router.get('/tickets', auth, async (req, res) => {
@@ -66,7 +67,7 @@ router.get('/chat', auth, async (req, res) => {
     const { rows } = await pool.query('SELECT id, sender, message, created_at FROM support_chat WHERE user_id=$1 ORDER BY created_at ASC', [uid]);
     await pool.query("UPDATE support_chat SET is_read=true WHERE user_id=$1 AND sender='admin'", [uid]);
     res.json({ success: true, data: rows });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // إرسال رسالة (المستخدم) + إشعار الإدارة
@@ -87,7 +88,7 @@ router.post('/chat', auth, async (req, res) => {
       for (const a of admins) { saveNotification(a.id, note, 'support', { user_id: uid }); notifyUser(req.io, a.id, 'support_message', { user_id: uid }); }
     } catch (e) {}
     res.status(201).json({ success: true, data: rows[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // قائمة المحادثات (الإدارة)
@@ -103,7 +104,7 @@ router.get('/chat/conversations', auth, adminOnly, async (req, res) => {
        ORDER BY last_at DESC`
     );
     res.json({ success: true, data: rows.map(r => ({ ...r, role_ar: roleAr(r.role) })) });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // محادثة مستخدم معيّن (الإدارة) + تعليمها مقروءة
@@ -113,7 +114,7 @@ router.get('/chat/user/:userId', auth, adminOnly, async (req, res) => {
     const { rows } = await pool.query('SELECT id, sender, message, created_at FROM support_chat WHERE user_id=$1 ORDER BY created_at ASC', [uid]);
     await pool.query("UPDATE support_chat SET is_read=true WHERE user_id=$1 AND sender='user'", [uid]);
     res.json({ success: true, data: rows });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // ردّ الإدارة على مستخدم + إشعاره
@@ -135,7 +136,7 @@ router.post('/chat/user/:userId', auth, adminOnly, async (req, res) => {
       try { const t = await getUserTokens(uid); if (t.length) await sendFCM(t, '💬 وصلي إدارة', msg, { type: 'support' }, bundleFor(role)); } catch {}
     } catch (e) {}
     res.status(201).json({ success: true, data: rows[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 module.exports = router;

@@ -1,0 +1,131 @@
+{
+  "generated_at": "2026-10-05T15:37:43.119Z",
+  "environment": {
+    "machine": "Windows 10, 8 logical CPU laptop (shared with negev_express + supabase docker stacks)",
+    "backend": "Node 22, Express, single instance, PG_POOL_MAX=30, NODE_ENV=production, RL_MAX=1000000 (limiter effectively off for single-IP generator)",
+    "db": "postgres:18 docker (wasaly-lt-pg:5455) shared_buffers=512MB, pg_stat_statements on, SSL on",
+    "redis": "redis:7 docker (wasaly-lt-redis:6399), socket.io redis adapter enabled",
+    "k6": "v2.0.0",
+    "note": "Laptop + co-tenant containers => absolute numbers are a FLOOR; Railway dedicated resources will be higher."
+  },
+  "data_volumes": {
+    "users": 201300,
+    "customers": 200000,
+    "restaurants": 1000,
+    "drivers": 300,
+    "menu_items": 48000,
+    "item_options": 48000,
+    "item_option_values": 144000,
+    "orders_seeded": 500000,
+    "order_items": 1000000,
+    "reviews": 105090,
+    "addresses": 200000,
+    "notifications": 200000,
+    "db_size": "539 MB"
+  },
+  "scenarios": {
+    "smoke_5vu": {
+      "rps": 9.4,
+      "dur": {
+        "p50": 20,
+        "p90": 50,
+        "p95": 69,
+        "p99": 106,
+        "max": 140
+      },
+      "err_pct": 0
+    },
+    "load_300vu": {
+      "rps": 130,
+      "dur": {
+        "p50": 556,
+        "p90": 2524,
+        "p95": 3558,
+        "p99": 5228,
+        "max": 10544
+      },
+      "err_pct": 0
+    },
+    "soak_65vu_10min": {
+      "rps": 122,
+      "dur": {
+        "p50": 166,
+        "p90": 530,
+        "p95": 709,
+        "p99": 1383,
+        "max": 11491
+      },
+      "err_pct": 0,
+      "total_reqs": 79257,
+      "node_ram_flat_mb": 179,
+      "no_leak": true
+    },
+    "step_ramp_knee": {
+      "25": {
+        "rps": 64,
+        "p95": 114,
+        "p99": 256,
+        "err_pct": 0
+      },
+      "50": {
+        "rps": 109,
+        "p95": 282,
+        "p99": 539,
+        "err_pct": 0
+      },
+      "100": {
+        "rps": 115,
+        "p95": 1168,
+        "p99": 2306,
+        "err_pct": 0
+      },
+      "150": {
+        "rps": 116,
+        "p95": 2250,
+        "p99": 2831,
+        "err_pct": 0
+      }
+    }
+  },
+  "breaking_point": {
+    "definition": "p95>1s OR err>1%",
+    "concurrent_vus_knee": "~90-100",
+    "max_sustained_rps_mixed": "~115-122",
+    "observation": "throughput plateaus ~115 rps beyond 50 VUs; extra VUs only add queueing latency; 0 errors throughout (graceful)"
+  },
+  "bottleneck": {
+    "primary": "PostgreSQL CPU (saturated ~700% of 8 cores under load; avg 431% during soak)",
+    "secondary": "pg pool saturated at 30 active conns; Node is I/O-bound (RAM ~180MB, low CPU)"
+  },
+  "socket_capacity": {
+    "connected": 3000,
+    "failed": 0,
+    "backend_ram_mb": 144,
+    "ram_per_conn_kb": 23,
+    "drivers_emitting_location": 300,
+    "note": "fast handshake bursts (>300/s) caused transient websocket errors because each handshake does a DB auth SELECT; gentle ramp reached 3000/3000 clean"
+  },
+  "prod_probe": {
+    "target": "https://burger-app-production.up.railway.app",
+    "rate_rps": 35,
+    "restaurants_in_prod": 14,
+    "latency": {
+      "p50": 239,
+      "p95": 336,
+      "p99": 520
+    },
+    "network_rtt_floor_ms": 212,
+    "aborted": "yes - safety abort at ~36s when err>2%",
+    "failures_cause": "HTTP 429 from prod per-IP limiter (300 req/min); 35 rps = 2100/min from one IP. NOT server errors.",
+    "local_same_probe": {
+      "p50": 9,
+      "p95": 52
+    }
+  },
+  "scaling_factor": {
+    "method": "prod p95 minus ~212ms network RTT = prod server time; vs local",
+    "prod_list_server_ms_approx": 80,
+    "local_list_p95_ms": 52,
+    "note": "Prod server-side latency (~60-90ms) comparable-to-better than laptop local; Railway DB is faster than co-tenant laptop pg. Capacity below is derived from laptop floor and scaled conservatively."
+  }
+}

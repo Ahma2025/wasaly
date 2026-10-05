@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const pool = require('../config/database');
+const { serverError } = require('../utils/http');
 
 router.get('/', async (req, res) => {
   try {
@@ -37,7 +38,7 @@ router.get('/', async (req, res) => {
 
     res.json({ success: true, data: results });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    serverError(res, e);
   }
 });
 
@@ -49,7 +50,7 @@ router.get('/popular', async (req, res) => {
     );
     res.json({ success: true, data: rows });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    serverError(res, e);
   }
 });
 

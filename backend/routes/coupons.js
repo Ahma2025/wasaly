@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const pool = require('../config/database');
+const { serverError } = require('../utils/http');
 const { auth, adminOnly } = require('../middleware/auth');
 
 const TYPES = ['percentage', 'fixed', 'free_delivery'];
@@ -33,7 +34,7 @@ router.post('/validate', auth, async (req, res) => {
     if (maxD > 0) discount = Math.min(discount, maxD);
     discount = r2(Math.min(discount, subtotal));
     res.json({ success: true, data: { ...coupon, discount, free_delivery: coupon.type === 'free_delivery' } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Create coupon (admin)
@@ -58,7 +59,7 @@ router.post('/', auth, adminOnly, async (req, res) => {
     res.status(201).json({ success: true, data: rows[0] });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ success: false, message: 'هذا الكود موجود مسبقاً' });
-    res.status(500).json({ success: false, message: e.message });
+    serverError(res, e);
   }
 });
 
@@ -68,7 +69,7 @@ router.get('/', auth, adminOnly, async (req, res) => {
     const all = req.query.all === '1' || req.query.all === 'true';
     const { rows } = await pool.query(`SELECT * FROM coupons ${all ? '' : 'WHERE is_active=true'} ORDER BY id DESC`);
     res.json({ success: true, data: rows.map(c => ({ ...c, is_active: c.is_active === true || c.is_active === 1 })) });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Delete coupon (soft)
@@ -76,7 +77,7 @@ router.delete('/:id', auth, adminOnly, async (req, res) => {
   try {
     await pool.query('UPDATE coupons SET is_active=false WHERE id=$1', [req.params.id]);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 module.exports = router;

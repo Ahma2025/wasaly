@@ -6,6 +6,8 @@
 const pool = require('../config/database');
 const { saveNotification, notifyUser, Notify, sendFCM, getUserTokens } = require('./notifications');
 const { sendWebPush } = require('../routes/webpush');
+const cache = require('./cache');
+const driverLoc = require('./driverLocation');
 
 // ─── أدوات عامة ─────────────────────────────────────────────────
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
@@ -334,7 +336,15 @@ async function getOwnerId(restaurantId) {
 }
 
 // order_status → الزبون + صاحب المطعم + السائق المكلّف/المعروض عليه
+// إبطال كل الكاش المرتبط بطلب تغيّر (لوحة المطعم + خريطة الطلب النشط للسائق)
+function touchOrder(order) {
+  if (!order) return;
+  cache.invalidateRestaurantOrders(order.restaurant_id);
+  if (order.driver_id) driverLoc.invalidateActiveRelay(order.driver_id);
+}
+
 async function emitOrderStatus(io, order, status) {
+  touchOrder(order);
   if (!io || !order) return;
   const payload = { order_id: order.id, status, order_type: order.order_type || 'delivery' };
   const ownerId = await getOwnerId(order.restaurant_id);
@@ -352,6 +362,7 @@ async function pushTo(userId, title, body, data, bundle) {
 // إرسال الطلب الجديد للمطعم (بعد الإنشاء، أو بعد تأكيد الدفع بالبطاقة)
 async function notifyRestaurantNewOrder(io, order) {
   try {
+    await cache.invalidateRestaurantOrders(order.restaurant_id);
     const { rows } = await pool.query('SELECT id, owner_id FROM restaurants WHERE id=$1', [order.restaurant_id]);
     const restaurant = rows[0];
     if (!restaurant || !restaurant.owner_id) return;
@@ -398,6 +409,64 @@ function scheduleRetry(io, orderId, ms) {
 
 const isAwaitingCardPayment = (o) => o.payment_method === 'card' && o.payment_status !== 'paid' && num(o.total) > 0;
 
+// ─── أقرب سائق متاح ───
+// 1) استعلام واحد لمجموعة السائقين الذين لديهم عرض قائم (فهرس جزئي صغير idx_orders_open_offers) بدل NOT EXISTS لكل مرشّح
+// 2) مرشّحون داخل مربّع حول نقطة الاستلام يتّسع تدريجياً (5 → 15 → 50 كم ثم الكل)، بإحداثيات القاعدة (+ هامش لتقادمها ≤15ث)
+// 3) المسافة بالإحداثيات الأحدث (Redis أولاً) مع تصحيح cos(lat)، والفرز في JS. نقبل الأفضل فقط إن كان داخل نصف القطر
+//    (الدائرة داخل المربّع) حتى تبقى النتيجة "الأقرب فعلاً" مثل الاستعلام القديم. بلا إحداثيات → آخر القائمة.
+const DISPATCH_RADII_KM = [5, 15, 50];
+const BBOX_MARGIN_KM = 1;
+async function findNearestDriver(lat, lng, orderId, tried) {
+  const { rows: offered } = await pool.query(
+    `SELECT DISTINCT driver_id FROM orders
+     WHERE driver_assigned_at IS NULL AND driver_id IS NOT NULL
+       AND status IN ('confirmed','preparing','ready') AND id <> $1`, [orderId]);
+  const exclude = new Set([...tried].map(String));
+  for (const r of offered) exclude.add(String(r.driver_id));
+
+  const cosLat = Math.cos(lat * Math.PI / 180) || 1e-6;
+  // السائقون أولاً (جدول صغير) ثم تحقق المستخدم بمفتاحه الأساسي (LATERAL = بحث PK لكل سائق) — يمنع خطة Merge Join تمسح كل جدول users
+  const q = (where) => `WITH d AS MATERIALIZED (
+      SELECT user_id, current_lat, current_lng FROM drivers
+      WHERE is_online = true AND COALESCE(is_busy, false) = false ${where})
+    SELECT d.user_id, d.current_lat, d.current_lng FROM d
+    CROSS JOIN LATERAL (SELECT 1 FROM users u WHERE u.id = d.user_id AND u.is_active = true
+      AND COALESCE(u.is_blocked, false) = false AND u.role = 'driver' LIMIT 1) ok`;
+  const pick = async (rows, radiusKm) => {
+    const cands = rows.filter(r => !exclude.has(String(r.user_id)));
+    if (!cands.length) return null;
+    const fresh = await driverLoc.getLocations(cands.map(r => r.user_id));
+    let best = null, bestD = Infinity;
+    for (const r of cands) {
+      const f = fresh.get(String(r.user_id));
+      const la = f ? f.lat : (r.current_lat === null ? null : Number(r.current_lat));
+      const ln = f ? f.lng : (r.current_lng === null ? null : Number(r.current_lng));
+      let d2 = Infinity; // بلا إحداثيات → الأخير
+      if (la !== null && ln !== null && Number.isFinite(la) && Number.isFinite(ln)) {
+        const dy = la - lat, dx = (ln - lng) * cosLat;
+        d2 = dy * dy + dx * dx;
+      }
+      if (best === null || d2 < bestD) { best = r; bestD = d2; }
+    }
+    if (radiusKm !== null) {
+      const km = Math.sqrt(bestD) * 111.32;
+      if (!(km <= radiusKm)) return null; // قد يوجد أقرب خارج المربّع → نوسّع
+    }
+    return best;
+  };
+  for (const R of DISPATCH_RADII_KM) {
+    const dLat = (R + BBOX_MARGIN_KM) / 111.32;
+    const dLng = dLat / cosLat;
+    const { rows } = await pool.query(
+      q('AND current_lat BETWEEN $1 AND $2 AND current_lng BETWEEN $3 AND $4'),
+      [lat - dLat, lat + dLat, lng - dLng, lng + dLng]);
+    const b = await pick(rows, R);
+    if (b) return b;
+  }
+  const { rows: all } = await pool.query(q(''));
+  return pick(all, null);
+}
+
 async function dispatchOrder(io, orderId, excludeDriverId = null) {
   const key = String(orderId);
   try {
@@ -420,30 +489,20 @@ async function dispatchOrder(io, orderId, excludeDriverId = null) {
     let lng = parseFloat(personal ? o.pickup_lng : o.r_lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) { lat = 31.9; lng = 35.2; }
 
-    const params = [lat, lng, o.id];
-    let q = `SELECT d.user_id FROM drivers d JOIN users u ON u.id = d.user_id
-             WHERE d.is_online = true AND COALESCE(d.is_busy, false) = false
-               AND u.is_active = true AND COALESCE(u.is_blocked, false) = false AND u.role = 'driver'
-               AND NOT EXISTS (SELECT 1 FROM orders x WHERE x.driver_id = d.user_id AND x.driver_assigned_at IS NULL
-                               AND x.status IN ('confirmed','preparing','ready') AND x.id <> $3)`;
-    if (tried.size) { params.push([...tried]); q += ` AND NOT (d.user_id::text = ANY($4::text[]))`; }
-    q += ` ORDER BY (d.current_lat IS NULL) ASC,
-             ((d.current_lat - $1) * (d.current_lat - $1) + ((d.current_lng - $2) * COS(RADIANS($1))) * ((d.current_lng - $2) * COS(RADIANS($1)))) ASC
-           LIMIT 1`;
-    const { rows: drivers } = await pool.query(q, params);
-
-    if (!drivers[0]) {
+    const best = await findNearestDriver(lat, lng, o.id, tried);
+    if (!best) {
       if (tried.size) { tried.clear(); scheduleRetry(io, orderId, 12000); }
       else scheduleRetry(io, orderId, 20000);
       return null;
     }
-    const driverId = drivers[0].user_id;
+    const driverId = best.user_id;
 
     const { rows: off } = await pool.query(
       `UPDATE orders SET driver_id=$1, driver_offer_expires_at = NOW() + INTERVAL '${OFFER_SECONDS} seconds'
        WHERE id=$2 AND driver_id IS NULL AND driver_assigned_at IS NULL AND status IN ('confirmed','preparing','ready')
-       RETURNING id`, [driverId, orderId]);
+       RETURNING id, restaurant_id`, [driverId, orderId]);
     if (!off[0]) return null;
+    cache.invalidateRestaurantOrders(off[0].restaurant_id);
 
     const expiresAt = new Date(Date.now() + OFFER_SECONDS * 1000).toISOString();
     notifyUser(io, driverId, 'new_order_request', {
@@ -458,8 +517,8 @@ async function dispatchOrder(io, orderId, excludeDriverId = null) {
       try {
         const { rows: exp } = await pool.query(
           `UPDATE orders SET driver_id=NULL, driver_offer_expires_at=NULL
-           WHERE id=$1 AND driver_id=$2 AND driver_assigned_at IS NULL RETURNING id`, [orderId, driverId]);
-        if (exp[0]) dispatchOrder(io, orderId, driverId).catch(() => {});
+           WHERE id=$1 AND driver_id=$2 AND driver_assigned_at IS NULL RETURNING id, restaurant_id`, [orderId, driverId]);
+        if (exp[0]) { cache.invalidateRestaurantOrders(exp[0].restaurant_id); dispatchOrder(io, orderId, driverId).catch(() => {}); }
       } catch (e) { console.error('dispatch timeout error:', e.message); }
     }, OFFER_SECONDS * 1000);
     if (t.unref) t.unref();
@@ -659,6 +718,7 @@ async function releaseCardOrder(io, orderId, { paid, reference } = {}) {
        WHERE id=$1 AND payment_method='card' AND COALESCE(payment_status,'pending') <> 'paid' AND status='pending' RETURNING *`, [orderId]));
   }
   const order = rows && rows[0];
+  if (order) touchOrder(order);
   if (order && order.status === 'pending') await notifyRestaurantNewOrder(io, order);
   return order || null;
 }
@@ -667,7 +727,7 @@ module.exports = {
   round2, num, truthy, isIntId, HttpError, haversineKm, validCoord, getZoneFee, loyaltyTierFor,
   OFFER_SECONDS, DISPATCH_STATUSES, ACTIVE_STATUSES, STATUS_LABELS, FREE_DELIVERY_THRESHOLD,
   priceOrder, quoteView, withTransaction, optionalQuery,
-  emitOrderStatus, notifyRestaurantNewOrder, getOwnerId, pushTo,
+  emitOrderStatus, touchOrder, notifyRestaurantNewOrder, findNearestDriver, getOwnerId, pushTo,
   dispatchOrder, stopDispatch, recoverDispatch, isAwaitingCardPayment,
   markDelivered, refundOrderBenefits, cancelOrder, releaseCardOrder,
 };

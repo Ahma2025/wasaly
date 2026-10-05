@@ -1,6 +1,7 @@
 // 👥 الطلب الجماعي "كسر الحساب" — سلّة مشتركة برابط/كود، والمضيف يدفع
 const router = require('express').Router();
 const pool = require('../config/database');
+const { serverError } = require('../utils/http');
 const { auth } = require('../middleware/auth');
 const { notifyUser } = require('../utils/notifications');
 
@@ -40,7 +41,7 @@ router.post('/', auth, async (req, res) => {
       [code, String(req.user.id), String(restaurant_id), restaurant_name || '']
     );
     res.status(201).json({ success: true, data: rows[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // عرض مجموعة بالكود (المطعم + الأصناف + الإجمالي + عدد المشاركين)
@@ -79,7 +80,7 @@ router.get('/:code', auth, async (req, res) => {
         participant_count: new Set(parsed.map(p => String(p.user_id))).size,
       },
     });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // إضافة صنف للمجموعة
@@ -116,7 +117,7 @@ router.post('/:id/items', auth, async (req, res) => {
     );
     await notifyGroup(req.io, req.params.id);
     res.status(201).json({ success: true, data: rows[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // حذف صنف (صاحبه أو المضيف)
@@ -132,7 +133,7 @@ router.delete('/:id/items/:itemId', auth, async (req, res) => {
     await pool.query('DELETE FROM group_order_items WHERE id=$1', [req.params.itemId]);
     await notifyGroup(req.io, req.params.id);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // تعليم المجموعة "تم الطلب" أو "ملغاة" — المضيف فقط
@@ -152,7 +153,7 @@ router.post('/:id/close', auth, async (req, res) => {
     await pool.query("UPDATE group_orders SET status=$1, order_id=$2 WHERE id=$3 AND status='open'", [status, linkedOrder, req.params.id]);
     await notifyGroup(req.io, req.params.id, { status });
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 module.exports = router;

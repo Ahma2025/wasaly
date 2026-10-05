@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const pool = require('../config/database');
+const { serverError } = require('../utils/http');
 const { auth, adminOnly, driverOnly } = require('../middleware/auth');
 
 // تقييمات مطعم معيّن (تُستخدم في التطبيق وبوابة المطعم)
@@ -14,7 +15,7 @@ router.get('/restaurant/:id', async (req, res) => {
       [req.params.id]
     );
     res.json({ success: true, data: rows });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // تقييمات السائق الحالي (تطبيق السائق)
@@ -36,7 +37,7 @@ router.get('/driver/me', auth, driverOnly, async (req, res) => {
       [req.user.id]
     );
     res.json({ success: true, data: rows, avg_rating: parseFloat(agg[0]?.avg_rating || 0), count: parseInt(agg[0]?.count || 0) });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // كل التقييمات (لوحة الإدارة)
@@ -54,7 +55,7 @@ router.get('/all', auth, adminOnly, async (req, res) => {
        ORDER BY r.created_at DESC LIMIT 200`
     );
     res.json({ success: true, data: rows });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 module.exports = router;

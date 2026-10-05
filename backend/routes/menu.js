@@ -1,6 +1,11 @@
 const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, restaurantOnly } = require('../middleware/auth');
+const cache = require('../utils/cache');
+const { serverError } = require('../utils/http');
+
+// ⚡️ أي تعديل ناجح على المنيو/الأقسام/الإضافات يُبطل كاش قائمة المطاعم وتفاصيلها فوراً
+router.use(cache.invalidateOnWrite());
 
 const isId = (v) => v !== undefined && v !== null && /^\d{1,10}$/.test(String(v));
 
@@ -20,7 +25,7 @@ async function owns(req, kind, id) {
   return rows.length > 0;
 }
 const deny = (res) => res.status(403).json({ success: false, message: 'غير مصرح — هذا المطعم ليس لك' });
-const fail = (res, e) => { console.error(e.message); res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' }); };
+const fail = (res, e) => serverError(res, e);
 
 // التحقق من الأسعار: غير سالبة، وسعر العرض أقل من السعر الأصلي
 function validatePrices(price, discount) {

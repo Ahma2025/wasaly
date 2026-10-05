@@ -3,31 +3,51 @@ const bcrypt = require('bcryptjs');
 const pool = require('../config/database');
 const { auth, adminOnly } = require('../middleware/auth');
 const { round2, num } = require('../utils/orderService');
+const cache = require('../utils/cache');
+const { serverError, clampInt, strParam } = require('../utils/http');
+const { hebronRange } = require('../utils/time');
+const { invalidateSocketAuth } = require('../utils/socket');
+const driverLoc = require('../utils/driverLocation');
+
+const DASH_TTL = Number(process.env.CACHE_ADMIN_DASHBOARD_TTL_MS) || 30000;
+const ANALYTICS_TTL = Number(process.env.CACHE_ADMIN_ANALYTICS_TTL_MS) || 60000;
+
+// ⚡️ تعديل المطاعم/التصنيفات من الإدارة يُبطل كاش القائمة العامة وتفاصيل المطعم فوراً
+router.use(cache.invalidateOnWrite((req) => /^\/(restaurants|categories)(\/|$)/.test(req.path)));
 
 const stripUser = (u) => { if (!u) return u; const { password_hash, ...rest } = u; return rest; };
 const ROLES = ['customer', 'driver', 'restaurant_owner', 'restaurant', 'admin'];
-// "اليوم" بتوقيت فلسطين (Asia/Hebron) — الأعمدة TIMESTAMP مخزّنة بتوقيت UTC
-const LOCAL_DAY = (col) => `((${col}) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Hebron')::date = (NOW() AT TIME ZONE 'Asia/Hebron')::date`;
+// "اليوم" بتوقيت فلسطين (Asia/Hebron) — الأعمدة TIMESTAMP مخزّنة بتوقيت UTC.
+// نطاق نصف مفتوح [بداية اليوم، بداية الغد) محسوب مسبقاً → يستخدم idx_orders_created / idx_orders_status_created
+const DAY_RANGE = (col, a, b) => `${col} >= $${a}::timestamp AND ${col} < $${b}::timestamp`;
 const DRIVER_EARN = `COALESCE(o.driver_fee, o.delivery_fee, 0) + COALESCE(o.tip, 0)`;
 
 // Dashboard stats
 router.get('/dashboard', auth, adminOnly, async (req, res) => {
   try {
-    const [users, restaurants, activeDrivers, ordersToday, revenueToday, pendingOrders] = await Promise.all([
+    const data = await cache.wrap('admin:dashboard', DASH_TTL, () => buildDashboard());
+    res.json({ success: true, data });
+  } catch (e) { serverError(res, e); }
+});
+async function buildDashboard() {
+  {
+    const day = hebronRange('day');
+    // كل الاستعلامات بالتوازي (زمن اللوحة = أبطأ استعلام وليس مجموعها)
+    const [users, restaurants, activeDrivers, ordersToday, revenueToday, pendingOrders, weekly, byStatus] = await Promise.all([
       pool.query("SELECT COUNT(*) as count FROM users WHERE role='customer' AND is_active=true"),
       pool.query("SELECT COUNT(*) as count FROM restaurants WHERE is_active=true"),
       pool.query("SELECT COUNT(*) as count FROM drivers WHERE is_online=true"),
-      pool.query(`SELECT COUNT(*) as count FROM orders WHERE ${LOCAL_DAY('created_at')}`),
-      pool.query(`SELECT COALESCE(SUM(total),0) as total FROM orders WHERE status='delivered' AND ${LOCAL_DAY('created_at')}`),
+      pool.query(`SELECT COUNT(*) as count FROM orders WHERE ${DAY_RANGE('created_at', 1, 2)}`, [day.start, day.end]),
+      pool.query(`SELECT COALESCE(SUM(total),0) as total FROM orders WHERE status='delivered' AND ${DAY_RANGE('created_at', 1, 2)}`, [day.start, day.end]),
       pool.query("SELECT COUNT(*) as count FROM orders WHERE status='pending'"),
+      pool.query(
+        `SELECT TO_CHAR(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Hebron', 'YYYY-MM-DD') as date, COALESCE(SUM(total),0) as revenue, COUNT(*) as orders
+         FROM orders WHERE status='delivered' AND created_at > NOW() - INTERVAL '7 days'
+         GROUP BY 1 ORDER BY date`),
+      pool.query(`SELECT status, COUNT(*) as count FROM orders WHERE created_at > NOW() - INTERVAL '30 days' GROUP BY status`),
     ]);
-    const { rows: weeklyRevenue } = await pool.query(
-      `SELECT TO_CHAR(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Hebron', 'YYYY-MM-DD') as date, COALESCE(SUM(total),0) as revenue, COUNT(*) as orders
-       FROM orders WHERE status='delivered' AND created_at > NOW() - INTERVAL '7 days'
-       GROUP BY 1 ORDER BY date`);
-    const { rows: ordersByStatus } = await pool.query(
-      `SELECT status, COUNT(*) as count FROM orders WHERE created_at > NOW() - INTERVAL '30 days' GROUP BY status`);
-    res.json({ success: true, data: {
+    const weeklyRevenue = weekly.rows, ordersByStatus = byStatus.rows;
+    return {
       totalUsers: users.rows[0].count || 0,
       totalRestaurants: restaurants.rows[0].count || 0,
       activeDrivers: activeDrivers.rows[0].count || 0,
@@ -35,16 +55,16 @@ router.get('/dashboard', auth, adminOnly, async (req, res) => {
       revenueToday: round2(num(revenueToday.rows[0].total)),
       pendingOrders: pendingOrders.rows[0].count || 0,
       weeklyRevenue, ordersByStatus,
-    } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
-});
+    };
+  }
+}
 
 // Users list — role=restaurant يشمل restaurant_owner
 router.get('/users', auth, adminOnly, async (req, res) => {
   try {
     const { role, search } = req.query;
-    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 30));
-    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const limit = clampInt(req.query.limit, 30, 1, 500);
+    const offset = clampInt(req.query.offset, 0, 0, 10000000);
     let where = ' WHERE 1=1';
     const params = [];
     if (role) {
@@ -57,7 +77,7 @@ router.get('/users', auth, adminOnly, async (req, res) => {
        ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`, [...params, limit, offset]);
     const { rows: total } = await pool.query(`SELECT COUNT(*) as count FROM users${where}`, params);
     res.json({ success: true, data: rows, total: total[0].count });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Create user (admin) — كلمة مرور إلزامية، دور من قائمة معروفة، وصف drivers للسائق
@@ -79,7 +99,7 @@ router.post('/users', auth, adminOnly, async (req, res) => {
     res.status(201).json({ success: true, data: stripUser(rows[0]) });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ success: false, message: 'رقم الهاتف مسجل مسبقاً' });
-    res.status(500).json({ success: false, message: e.message });
+    serverError(res, e);
   }
 });
 
@@ -90,24 +110,26 @@ router.patch('/users/:id/block', auth, adminOnly, async (req, res) => {
     if (!rows[0]) return res.status(404).json({ success: false, message: 'User not found' });
     const newVal = !rows[0].is_blocked;
     await pool.query('UPDATE users SET is_blocked=$1 WHERE id=$2', [newVal, req.params.id]);
+    await invalidateSocketAuth(req.params.id);
     res.json({ success: true, is_blocked: newVal });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Delete user (soft)
 router.delete('/users/:id', auth, adminOnly, async (req, res) => {
   try {
     await pool.query("UPDATE users SET is_active=false WHERE id=$1", [req.params.id]);
+    await invalidateSocketAuth(req.params.id);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // All orders
 router.get('/orders', auth, adminOnly, async (req, res) => {
   try {
     const { status, search } = req.query;
-    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 30));
-    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const limit = clampInt(req.query.limit, 30, 1, 500);
+    const offset = clampInt(req.query.offset, 0, 0, 10000000);
     let q = `SELECT o.*, r.name_ar as restaurant_name, u.name as customer_name, d.name as driver_name FROM orders o
              LEFT JOIN restaurants r ON o.restaurant_id=r.id
              LEFT JOIN users u ON o.customer_id=u.id
@@ -119,15 +141,15 @@ router.get('/orders', auth, adminOnly, async (req, res) => {
     const { rows } = await pool.query(q, [...params, limit, offset]);
     const { rows: total } = await pool.query('SELECT COUNT(*) as count FROM orders');
     res.json({ success: true, data: rows, total: total[0].count });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // All restaurants — limit حتى 1000
 router.get('/restaurants', auth, adminOnly, async (req, res) => {
   try {
     const { search } = req.query;
-    const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit) || 30));
-    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const limit = clampInt(req.query.limit, 30, 1, 1000);
+    const offset = clampInt(req.query.offset, 0, 0, 10000000);
     let q = `SELECT r.*, u.name as owner_name, u.phone as owner_phone,
              (SELECT COUNT(*) FROM orders WHERE restaurant_id=r.id AND status='delivered') as total_orders,
              (SELECT COALESCE(SUM(total),0) FROM orders WHERE restaurant_id=r.id AND status='delivered') as total_revenue
@@ -137,7 +159,7 @@ router.get('/restaurants', auth, adminOnly, async (req, res) => {
     q += ` ORDER BY r.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     const { rows } = await pool.query(q, [...params, limit, offset]);
     res.json({ success: true, data: rows });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Create restaurant (admin) — رقم مالك مستخدم مسبقاً → 409 (لا ترقية صامتة لأي حساب)
@@ -175,7 +197,7 @@ router.post('/restaurants', auth, adminOnly, async (req, res) => {
        phone, email, min_order || 10, delivery_fee || 5, delivery_time_min || 20, delivery_time_max || 40, owner_id,
        store_type || 'restaurant']);
     res.status(201).json({ success: true, data: rows[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Update restaurant (admin) — تحديث جزئي (لا يمسح الحقول غير المرسلة)
@@ -189,7 +211,7 @@ router.put('/restaurants/:id', auth, adminOnly, async (req, res) => {
     vals.push(req.params.id);
     await pool.query(`UPDATE restaurants SET ${sets.join(', ')}, updated_at=NOW() WHERE id=$${vals.length}`, vals);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Delete restaurant (soft)
@@ -197,7 +219,7 @@ router.delete('/restaurants/:id', auth, adminOnly, async (req, res) => {
   try {
     await pool.query("UPDATE restaurants SET is_active=false WHERE id=$1", [req.params.id]);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Toggle restaurant flags
@@ -211,7 +233,7 @@ router.patch('/restaurants/:id/toggle', auth, adminOnly, async (req, res) => {
     const newVal = !rows[0][field];
     await pool.query(`UPDATE restaurants SET ${field}=$1 WHERE id=$2`, [newVal, req.params.id]);
     res.json({ success: true, value: newVal });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Driver stats (earnings = driver_fee + tip)
@@ -226,12 +248,13 @@ router.get('/driver-stats/:id', auth, adminOnly, async (req, res) => {
        FROM orders o WHERE o.driver_id=$1 AND o.status='delivered' AND o.delivered_at > NOW() - INTERVAL '7 days'
        GROUP BY 1 ORDER BY date DESC`, [req.params.id]);
     res.json({ success: true, data: { ...stats[0], weekly } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Analytics
 router.get('/analytics', auth, adminOnly, async (req, res) => {
   try {
+    const data = await cache.wrap('admin:analytics', ANALYTICS_TTL, async () => {
     const [topRestaurants, topDrivers, monthlyRevenue, ordersByStatus] = await Promise.all([
       pool.query(`SELECT r.name_ar, COUNT(o.id) as orders, COALESCE(SUM(o.total),0) as revenue
                   FROM restaurants r LEFT JOIN orders o ON r.id=o.restaurant_id AND o.status='delivered'
@@ -244,11 +267,13 @@ router.get('/analytics', auth, adminOnly, async (req, res) => {
                   GROUP BY TO_CHAR(created_at, 'YYYY-MM') ORDER BY month`),
       pool.query(`SELECT status, COUNT(*) as count FROM orders GROUP BY status`),
     ]);
-    res.json({ success: true, data: {
+    return {
       topRestaurants: topRestaurants.rows, topDrivers: topDrivers.rows,
       monthlyRevenue: monthlyRevenue.rows, ordersByStatus: ordersByStatus.rows,
-    } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+    };
+    });
+    res.json({ success: true, data });
+  } catch (e) { serverError(res, e); }
 });
 
 // Categories management
@@ -256,20 +281,20 @@ router.get('/categories', auth, adminOnly, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM categories ORDER BY sort_order');
     res.json({ success: true, data: rows });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 router.post('/categories', auth, adminOnly, async (req, res) => {
   try {
     const { name_ar, name_en, icon } = req.body;
     const { rows } = await pool.query('INSERT INTO categories (name_ar, name_en, icon) VALUES ($1,$2,$3) RETURNING *', [name_ar, name_en, icon]);
     res.status(201).json({ success: true, data: rows[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 router.delete('/categories/:id', auth, adminOnly, async (req, res) => {
   try {
     await pool.query('DELETE FROM categories WHERE id=$1', [req.params.id]);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Broadcast — role=restaurant يستهدف restaurant + restaurant_owner
@@ -319,7 +344,7 @@ router.post('/notifications/broadcast', auth, adminOnly, async (req, res) => {
       }
       console.log(`[broadcast] done: ${users.length} recipients`);
     })();
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // لوحة العمليات الحية
@@ -331,7 +356,7 @@ router.get('/live-ops', auth, adminOnly, async (req, res) => {
               r.name_ar AS restaurant_name, r.lat AS restaurant_lat, r.lng AS restaurant_lng,
               cu.name AS customer_name, cu.phone AS customer_phone,
               dr.name AS driver_name, dr.phone AS driver_phone,
-              d.current_lat AS driver_lat, d.current_lng AS driver_lng
+              d.current_lat AS driver_lat, d.current_lng AS driver_lng, o.driver_id
        FROM orders o
        LEFT JOIN restaurants r ON o.restaurant_id = r.id
        LEFT JOIN users cu ON o.customer_id = cu.id
@@ -340,11 +365,19 @@ router.get('/live-ops', auth, adminOnly, async (req, res) => {
        WHERE o.status IN ('pending','confirmed','preparing','ready','on_the_way')
        ORDER BY o.created_at DESC LIMIT 200`);
     const { rows: drivers } = await pool.query(
-      `SELECT u.name, u.phone, d.current_lat, d.current_lng, d.is_busy, d.rating
+      `SELECT d.user_id, u.name, u.phone, d.current_lat, d.current_lng, d.is_busy, d.rating
        FROM drivers d JOIN users u ON d.user_id = u.id
        WHERE d.is_online = true AND d.current_lat IS NOT NULL AND d.current_lng IS NOT NULL`);
+    // المواقع الأحدث من Redis (القاعدة تُحدَّث كل 15 ثانية فقط)
+    const fresh = await driverLoc.getLocations([...drivers.map(d => d.user_id), ...orders.map(o => o.driver_id).filter(Boolean)]);
+    for (const d of drivers) { const f = fresh.get(String(d.user_id)); if (f) { d.current_lat = f.lat; d.current_lng = f.lng; } delete d.user_id; }
+    for (const o of orders) {
+      const f = o.driver_id && o.driver_assigned_at ? fresh.get(String(o.driver_id)) : null;
+      if (f) { o.driver_lat = f.lat; o.driver_lng = f.lng; }
+      delete o.driver_id;
+    }
     res.json({ success: true, orders, drivers });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // المحاسبة والعمولات — كل المطاعم النشطة (LEFT JOIN)، السائقون مجمّعون بالمعرّف
@@ -400,7 +433,7 @@ router.get('/accounting', auth, adminOnly, async (req, res) => {
       delivery_subsidy: round2(num(tot[0]?.driver_fees) - num(tot[0]?.delivery_fees)),
     };
     res.json({ success: true, totals, restaurants, drivers: driversOut });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // تعديل نسبة عمولة مطعم
@@ -410,7 +443,7 @@ router.patch('/restaurants/:id/commission', auth, adminOnly, async (req, res) =>
     if (isNaN(rate) || rate < 0 || rate > 100) return res.status(400).json({ success: false, message: 'نسبة غير صحيحة (0-100)' });
     await pool.query('UPDATE restaurants SET commission_rate=$1 WHERE id=$2', [rate, req.params.id]);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // ⚙️ إعدادات التوصيل الشخصي
@@ -419,7 +452,7 @@ router.get('/settings/personal-delivery', auth, adminOnly, async (req, res) => {
     const { rows } = await pool.query("SELECT value FROM app_settings WHERE key='personal_delivery'");
     const val = rows[0] ? JSON.parse(rows[0].value) : { enabled: false };
     res.json({ success: true, data: val });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 router.put('/settings/personal-delivery', auth, adminOnly, async (req, res) => {
   try {
@@ -429,7 +462,7 @@ router.put('/settings/personal-delivery', auth, adminOnly, async (req, res) => {
       `INSERT INTO app_settings(key, value, updated_at) VALUES ('personal_delivery', $1, NOW())
        ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()`, [JSON.stringify(clean)]);
     res.json({ success: true, data: clean });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 module.exports = router;

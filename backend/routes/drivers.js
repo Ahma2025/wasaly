@@ -4,6 +4,10 @@ const pool = require('../config/database');
 const { auth, driverOnly, adminOnly } = require('../middleware/auth');
 const { notifyUser } = require('../utils/notifications');
 const { validCoord, num, round2 } = require('../utils/orderService');
+const driverLoc = require('../utils/driverLocation');
+const { hebronRange } = require('../utils/time');
+const { serverError, clampInt } = require('../utils/http');
+const { invalidateSocketAuth } = require('../utils/socket');
 
 const stripUser = (u) => { if (!u) return u; const { password_hash, ...rest } = u; return rest; };
 
@@ -19,6 +23,7 @@ router.patch('/status', auth, driverOnly, async (req, res) => {
       [!!is_online, hasLoc ? +lat : null, hasLoc ? +lng : null, req.user.id]
     );
     if (!rowCount) return res.status(404).json({ success: false, message: 'ملف السائق غير موجود — تواصل مع الإدارة' });
+    if (hasLoc) await driverLoc.setLocation(req.user.id, +lat, +lng, { dbWritten: true }).catch(() => {});
     res.json({ success: true });
   } catch (e) {
     console.error('driver status:', e.message);
@@ -31,19 +36,14 @@ router.patch('/location', auth, driverOnly, async (req, res) => {
   try {
     const { lat, lng } = req.body;
     if (!validCoord(lat, lng)) return res.status(400).json({ success: false, message: 'إحداثيات غير صحيحة' });
-    await pool.query('UPDATE drivers SET current_lat=$1, current_lng=$2, lat=$1, lng=$2 WHERE user_id=$3', [+lat, +lng, req.user.id]);
-    const { rows: orders } = await pool.query(
-      `SELECT o.customer_id, o.id as order_id, r.owner_id
-       FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
-       WHERE o.driver_id=$1 AND o.driver_assigned_at IS NOT NULL
-         AND o.status IN ('confirmed','preparing','ready','on_the_way')
-       ORDER BY o.driver_assigned_at DESC LIMIT 1`,
-      [req.user.id]
-    );
-    if (orders[0] && req.io) {
-      const payload = { lat: +lat, lng: +lng, order_id: orders[0].order_id, orderId: orders[0].order_id };
-      notifyUser(req.io, orders[0].customer_id, 'driver:location', payload);
-      if (orders[0].owner_id) notifyUser(req.io, orders[0].owner_id, 'driver:location', payload);
+    // ⚡️ آخر موقع → Redis فوراً، والقاعدة مرة كل 15 ثانية كحد أقصى لكل سائق
+    await driverLoc.setLocation(req.user.id, +lat, +lng);
+    // المستلمون من كاش الطلب النشط (يُبطَل عند أي تغيير حالة/قبول/إلغاء)
+    const active = await driverLoc.getActiveRelay(req.user.id);
+    if (active && !active.none && req.io) {
+      const payload = { lat: +lat, lng: +lng, order_id: active.order_id, orderId: active.order_id };
+      notifyUser(req.io, active.customer_id, 'driver:location', payload);
+      if (active.owner_id) notifyUser(req.io, active.owner_id, 'driver:location', payload);
     }
     res.json({ success: true });
   } catch (e) {
@@ -58,6 +58,8 @@ router.get('/me', auth, driverOnly, async (req, res) => {
     const { rows: drivers } = await pool.query(
       `SELECT d.*, u.name, u.phone, u.avatar FROM drivers d JOIN users u ON d.user_id=u.id WHERE d.user_id=$1`, [req.user.id]);
     if (!drivers[0]) return res.status(404).json({ success: false, message: 'Driver not found' });
+    const fresh = await driverLoc.getLocation(req.user.id);
+    if (fresh) { drivers[0].current_lat = fresh.lat; drivers[0].current_lng = fresh.lng; }
     const { rows: activeOrders } = await pool.query(
       `SELECT o.*, r.name_ar as restaurant_name, r.lat as restaurant_lat, r.lng as restaurant_lng,
               r.phone as restaurant_phone, u.name as customer_name, u.phone as customer_phone
@@ -91,18 +93,15 @@ router.get('/me', auth, driverOnly, async (req, res) => {
 // Driver earnings — period: today (Asia/Hebron calendar day) | week (last 7 days) | month (current calendar month)
 const EARN = `COALESCE(driver_fee, delivery_fee, 0) + COALESCE(tip, 0)`;
 const LOCAL = `(delivered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Hebron')`;
-const NOW_LOCAL = `(NOW() AT TIME ZONE 'Asia/Hebron')`;
 router.get('/earnings', auth, driverOnly, async (req, res) => {
   try {
     const period = ['today', 'week', 'month'].includes(req.query.period) ? req.query.period : 'today';
-    const where = {
-      today: `${LOCAL}::date = ${NOW_LOCAL}::date`,
-      week: `delivered_at > NOW() - INTERVAL '7 days'`,
-      month: `date_trunc('month', ${LOCAL}) = date_trunc('month', ${NOW_LOCAL})`,
-    }[period];
+    // نطاقات نصف مفتوحة بتوقيت فلسطين (تستخدم الفهرس بدل تحويل كل صف)
+    const range = period === 'week' ? null : hebronRange(period === 'month' ? 'month' : 'day');
+    const where = range ? `delivered_at >= $2::timestamp AND delivered_at < $3::timestamp` : `delivered_at > NOW() - INTERVAL '7 days'`;
     const { rows: stats } = await pool.query(
       `SELECT COUNT(*) as deliveries, COALESCE(SUM(${EARN}),0) as earnings, COALESCE(SUM(COALESCE(tip,0)),0) as tips
-       FROM orders WHERE driver_id=$1 AND status='delivered' AND ${where}`, [req.user.id]);
+       FROM orders WHERE driver_id=$1 AND status='delivered' AND ${where}`, range ? [req.user.id, range.start, range.end] : [req.user.id]);
     const { rows: daily } = await pool.query(
       `SELECT TO_CHAR(${LOCAL}, 'YYYY-MM-DD') as date, COUNT(*) as count, COALESCE(SUM(${EARN}),0) as earnings
        FROM orders WHERE driver_id=$1 AND status='delivered' AND delivered_at > NOW() - INTERVAL '31 days'
@@ -125,8 +124,8 @@ router.get('/earnings', auth, driverOnly, async (req, res) => {
 // Driver orders history (includes status / order_type / service_type)
 router.get('/orders', auth, driverOnly, async (req, res) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const page = clampInt(req.query.page, 1, 1, 100000);
+    const limit = clampInt(req.query.limit, 20, 1, 100);
     const offset = (page - 1) * limit;
     const { rows } = await pool.query(
       `SELECT o.*, o.status, o.order_type, o.service_type, r.name_ar as restaurant_name, u.name as customer_name,
@@ -155,7 +154,7 @@ router.get('/', auth, adminOnly, async (req, res) => {
        ORDER BY d.is_online DESC, total_orders DESC`
     );
     res.json({ success: true, data: rows });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Add driver (admin) — كلمة المرور مطلوبة (6+)، لا كلمات افتراضية
@@ -176,7 +175,7 @@ router.post('/', auth, adminOnly, async (req, res) => {
     res.status(201).json({ success: true, data: stripUser(user) });
   } catch (e) {
     if (e.code === '23505') return res.status(400).json({ success: false, message: 'رقم الهاتف مسجل مسبقاً' });
-    res.status(500).json({ success: false, message: e.message });
+    serverError(res, e);
   }
 });
 
@@ -185,8 +184,9 @@ router.delete('/:id', auth, adminOnly, async (req, res) => {
   try {
     await pool.query('DELETE FROM drivers WHERE user_id=$1', [req.params.id]);
     await pool.query("UPDATE users SET is_active=false, role='customer' WHERE id=$1 AND role='driver'", [req.params.id]);
+    invalidateSocketAuth(req.params.id);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Register a user as driver — إدارة فقط (كان أي مستخدم يحوّل نفسه لسائق بلا موافقة)
@@ -198,12 +198,13 @@ router.post('/register', auth, adminOnly, async (req, res) => {
     if (!u[0]) return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
     if (u[0].role === 'admin') return res.status(400).json({ success: false, message: 'لا يمكن تحويل حساب إدارة إلى سائق' });
     await pool.query("UPDATE users SET role='driver' WHERE id=$1", [user_id]);
+    invalidateSocketAuth(user_id);
     await pool.query(
       `INSERT INTO drivers (user_id, vehicle_type, vehicle_plate, national_id, license_number)
        VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id) DO NOTHING`,
       [user_id, vehicle_type || null, vehicle_plate || null, national_id || null, license_number || null]);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 module.exports = router;

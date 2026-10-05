@@ -8,25 +8,9 @@ const { auth } = require('../middleware/auth');
 const generateToken = (user) =>
   jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE || '30d' });
 
-// ─── حماية ضد التخمين (brute-force) — عدّاد محاولات فاشلة في الذاكرة ───
-const _failMap = new Map(); // key → { count, first }
-function _tooMany(key, max, windowMs) {
-  const rec = _failMap.get(key);
-  if (!rec || Date.now() - rec.first > windowMs) return false;
-  return rec.count >= max;
-}
-function _recordFail(key, windowMs) {
-  const rec = _failMap.get(key);
-  if (!rec || Date.now() - rec.first > windowMs) _failMap.set(key, { count: 1, first: Date.now() });
-  else rec.count++;
-}
-function _clearFail(key) { _failMap.delete(key); }
-// تنظيف دوري لمنع تضخّم الذاكرة
-const _cleanupTimer = setInterval(() => {
-  const now = Date.now();
-  for (const [k, v] of _failMap) if (now - v.first > 30 * 60 * 1000) _failMap.delete(k);
-}, 15 * 60 * 1000);
-if (_cleanupTimer.unref) _cleanupTimer.unref();
+// ─── حماية ضد التخمين (brute-force) — عدّادات في Redis (مشتركة بين كل النسخ) وإلا بالذاكرة ───
+const { tooMany: _tooMany, recordFail: _recordFail, clearFail: _clearFail, acquireOnce, denyToken } = require('../utils/security');
+const WIN10 = 10 * 60 * 1000;
 
 // Send OTP
 router.post('/send-otp', async (req, res) => {
@@ -34,7 +18,13 @@ router.post('/send-otp', async (req, res) => {
     const { phone } = req.body;
     if (!phone) return res.status(400).json({ success: false, message: 'Phone required' });
 
-    // Rate limiting: منع إرسال OTP أكثر من مرة في 60 ثانية
+    // Rate limiting: رمز واحد لكل رقم كل 60 ثانية (قفل ذرّي مشترك) + حد لكل IP
+    const ipKey = 'otpsend-ip:' + (req.ip || 'unknown');
+    if (await _tooMany(ipKey, 20, WIN10)) return res.status(429).json({ success: false, message: 'طلبات كثيرة، انتظر قليلاً' });
+    if (!(await acquireOnce('otpsend:' + String(phone), 60 * 1000))) {
+      return res.status(429).json({ success: false, message: 'انتظر دقيقة قبل طلب رمز جديد' });
+    }
+    await _recordFail(ipKey, WIN10);
     const { rows: recent } = await pool.query(
       "SELECT id FROM otp_codes WHERE phone=$1 AND created_at > NOW() - INTERVAL '60 seconds'",
       [phone]
@@ -66,7 +56,7 @@ router.post('/verify-otp', async (req, res) => {
     const { phone, code, name } = req.body;
 
     const otpKey = 'otp:' + phone;
-    if (_tooMany(otpKey, 6, 10 * 60 * 1000)) {
+    if (await _tooMany(otpKey, 6, WIN10)) {
       return res.status(429).json({ success: false, message: 'محاولات كثيرة، انتظر 10 دقائق ثم حاول مجدداً' });
     }
 
@@ -75,10 +65,10 @@ router.post('/verify-otp', async (req, res) => {
       [phone, code]
     );
     if (!otpRows[0]) {
-      _recordFail(otpKey, 10 * 60 * 1000);
+      await _recordFail(otpKey, WIN10);
       return res.status(400).json({ success: false, message: 'رمز غير صحيح أو منتهي الصلاحية' });
     }
-    _clearFail(otpKey);
+    await _clearFail(otpKey);
 
     await pool.query('UPDATE otp_codes SET used=true WHERE id=$1', [otpRows[0].id]);
 
@@ -158,17 +148,17 @@ router.post('/login-password', async (req, res) => {
     if (!phone || !password) return res.status(400).json({ success: false, message: 'أدخل رقم الهاتف وكلمة المرور' });
     const pwKey = 'pw:' + phone;
     const ipKey = 'ip:' + (req.ip || 'unknown');
-    if (_tooMany(pwKey, 8, 10 * 60 * 1000) || _tooMany(ipKey, 30, 10 * 60 * 1000)) {
+    if (await _tooMany(pwKey, 8, WIN10) || await _tooMany(ipKey, 30, WIN10)) {
       return res.status(429).json({ success: false, message: 'محاولات كثيرة، انتظر 10 دقائق ثم حاول مجدداً' });
     }
     // Match by phone only — role check removed so any account can login to any app
     const { rows } = await pool.query('SELECT * FROM users WHERE phone=$1 AND is_active=true', [phone]);
     const user = rows[0];
-    if (!user || !user.password_hash) { _recordFail(pwKey, 10 * 60 * 1000); _recordFail(ipKey, 10 * 60 * 1000); return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' }); }
+    if (!user || !user.password_hash) { await _recordFail(pwKey, WIN10); await _recordFail(ipKey, WIN10); return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' }); }
     const valid = await bcrypt.compare(String(password), user.password_hash);
-    if (!valid) { _recordFail(pwKey, 10 * 60 * 1000); _recordFail(ipKey, 10 * 60 * 1000); return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' }); }
+    if (!valid) { await _recordFail(pwKey, WIN10); await _recordFail(ipKey, WIN10); return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' }); }
     if (user.is_blocked) return res.status(403).json({ success: false, message: 'الحساب محظور' });
-    _clearFail(pwKey);
+    await _clearFail(pwKey);
     res.json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
   } catch (e) {
     console.error(e.message);
@@ -186,17 +176,17 @@ router.post('/login', async (req, res) => {
     // نفس حماية /login-password ضد التخمين (كان /login بلا أي حد)
     const pwKey = 'pw:' + identifier.toLowerCase();
     const ipKey = 'ip:' + (req.ip || 'unknown');
-    if (_tooMany(pwKey, 8, 10 * 60 * 1000) || _tooMany(ipKey, 30, 10 * 60 * 1000)) {
+    if (await _tooMany(pwKey, 8, WIN10) || await _tooMany(ipKey, 30, WIN10)) {
       return res.status(429).json({ success: false, message: 'محاولات كثيرة، انتظر 10 دقائق ثم حاول مجدداً' });
     }
     const { rows } = await pool.query('SELECT * FROM users WHERE (email=$1 OR phone=$1) AND is_active=true', [identifier]);
     const user = rows[0];
-    if (!user || !user.password_hash) { _recordFail(pwKey, 10 * 60 * 1000); _recordFail(ipKey, 10 * 60 * 1000); return res.status(401).json({ success: false, message: 'Invalid credentials' }); }
+    if (!user || !user.password_hash) { await _recordFail(pwKey, WIN10); await _recordFail(ipKey, WIN10); return res.status(401).json({ success: false, message: 'Invalid credentials' }); }
 
     const valid = await bcrypt.compare(String(password), user.password_hash);
-    if (!valid) { _recordFail(pwKey, 10 * 60 * 1000); _recordFail(ipKey, 10 * 60 * 1000); return res.status(401).json({ success: false, message: 'Invalid credentials' }); }
+    if (!valid) { await _recordFail(pwKey, WIN10); await _recordFail(ipKey, WIN10); return res.status(401).json({ success: false, message: 'Invalid credentials' }); }
     if (user.is_blocked) return res.status(403).json({ success: false, message: 'Account blocked' });
-    _clearFail(pwKey);
+    await _clearFail(pwKey);
 
     res.json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
   } catch (e) {
@@ -254,6 +244,8 @@ router.put('/fcm', auth, async (req, res) => {
 // Logout
 router.post('/logout', auth, async (req, res) => {
   await pool.query('UPDATE users SET fcm_token=NULL WHERE id=$1', [req.user.id]);
+  // 🔒 التوكن الحالي يُحظر حتى انتهاء صلاحيته (Redis مشترك؛ بدون Redis: هذه النسخة فقط)
+  await denyToken(req.token, req.tokenDecoded);
   res.json({ success: true, message: 'Logged out' });
 });
 

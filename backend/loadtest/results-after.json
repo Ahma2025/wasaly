@@ -1,0 +1,950 @@
+{
+  "generated_at": "2026-10-05T18:00:36.030Z",
+  "environment": {
+    "note": "Same laptop, same co-tenant containers, same seed volumes (seed.sql), same k6 v2.0.0 scripts (mixed.js). Backend Node 22, PG_POOL_MAX=30, NODE_ENV=production, RL_MAX=1e6, Redis enabled.",
+    "db": "postgres:18 docker (wasaly-lt-pg:5455) shared_buffers=512MB, pg_stat_statements, SSL on",
+    "redis": "redis:7 docker (wasaly-lt-redis:6399)",
+    "control_run": "OLD code re-run at 50 VUs right before the AFTER runs to confirm the machine performs like the original baseline"
+  },
+  "control_old_code_50vu": {
+    "rps": 118.8,
+    "total_reqs": 13112,
+    "dur": {
+      "p50": 40,
+      "p90": 163,
+      "p95": 239,
+      "p99": 515,
+      "max": 5159
+    },
+    "err_pct": 0,
+    "groups": {
+      "t_order_tracking": {
+        "p50": 40,
+        "p95": 125,
+        "p99": 178
+      },
+      "t_driver_location": {
+        "p50": 47,
+        "p95": 166,
+        "p99": 277
+      },
+      "t_order_quote": {
+        "p50": 73,
+        "p95": 303,
+        "p99": 882
+      },
+      "t_order_create": {
+        "p50": 117,
+        "p95": 482,
+        "p99": 996
+      },
+      "t_admin": {
+        "p50": 389,
+        "p95": 2571,
+        "p99": 3938
+      },
+      "t_restaurant_detail": {
+        "p50": 95,
+        "p95": 369,
+        "p99": 577
+      },
+      "t_search": {
+        "p50": 35,
+        "p95": 153,
+        "p99": 271
+      },
+      "t_browse": {
+        "p50": 49,
+        "p95": 177,
+        "p99": 360
+      },
+      "t_restaurant_orders": {
+        "p50": 50,
+        "p95": 137,
+        "p99": 242
+      },
+      "t_driver_me": {
+        "p50": 48,
+        "p95": 171,
+        "p99": 346
+      }
+    }
+  },
+  "scenarios": {
+    "smoke_5vu": {
+      "rps": 9.6,
+      "total_reqs": 295,
+      "dur": {
+        "p50": 12,
+        "p90": 32,
+        "p95": 37,
+        "p99": 59,
+        "max": 96
+      },
+      "err_pct": 0,
+      "groups": {
+        "t_order_quote": {
+          "p50": 18,
+          "p95": 25,
+          "p99": 26
+        },
+        "t_order_create": {
+          "p50": 27,
+          "p95": 40,
+          "p99": 42
+        },
+        "t_driver_me": {
+          "p50": 12,
+          "p95": 19,
+          "p99": 20
+        },
+        "t_admin": {
+          "p50": 96,
+          "p95": 96,
+          "p99": 96
+        },
+        "t_order_tracking": {
+          "p50": 9,
+          "p95": 13,
+          "p99": 14
+        },
+        "t_restaurant_orders": {
+          "p50": 21,
+          "p95": 21,
+          "p99": 21
+        },
+        "t_search": {
+          "p50": 8,
+          "p95": 14,
+          "p99": 25
+        },
+        "t_browse": {
+          "p50": 19,
+          "p95": 38,
+          "p99": 49
+        },
+        "t_restaurant_detail": {
+          "p50": 28,
+          "p95": 42,
+          "p99": 63
+        },
+        "t_driver_location": {
+          "p50": 19,
+          "p95": 35,
+          "p99": 39
+        }
+      }
+    },
+    "step_ramp_knee": {
+      "25": {
+        "rps": 72,
+        "total_reqs": 7966,
+        "dur": {
+          "p50": 11,
+          "p90": 30,
+          "p95": 39,
+          "p99": 64,
+          "max": 198
+        },
+        "err_pct": 0,
+        "groups": {
+          "t_admin": {
+            "p50": 19,
+            "p95": 71,
+            "p99": 98
+          },
+          "t_restaurant_orders": {
+            "p50": 18,
+            "p95": 43,
+            "p99": 51
+          },
+          "t_order_create": {
+            "p50": 32,
+            "p95": 70,
+            "p99": 89
+          },
+          "t_search": {
+            "p50": 9,
+            "p95": 23,
+            "p99": 31
+          },
+          "t_driver_location": {
+            "p50": 17,
+            "p95": 42,
+            "p99": 69
+          },
+          "t_driver_me": {
+            "p50": 13,
+            "p95": 32,
+            "p99": 48
+          },
+          "t_browse": {
+            "p50": 14,
+            "p95": 33,
+            "p99": 50
+          },
+          "t_restaurant_detail": {
+            "p50": 22,
+            "p95": 55,
+            "p99": 80
+          },
+          "t_order_quote": {
+            "p50": 20,
+            "p95": 48,
+            "p99": 64
+          },
+          "t_order_tracking": {
+            "p50": 12,
+            "p95": 28,
+            "p99": 39
+          }
+        }
+      },
+      "50": {
+        "rps": 137.2,
+        "total_reqs": 15113,
+        "dur": {
+          "p50": 20,
+          "p90": 75,
+          "p95": 107,
+          "p99": 196,
+          "max": 624
+        },
+        "err_pct": 0,
+        "groups": {
+          "t_driver_me": {
+            "p50": 28,
+            "p95": 121,
+            "p99": 143
+          },
+          "t_driver_location": {
+            "p50": 34,
+            "p95": 129,
+            "p99": 186
+          },
+          "t_restaurant_detail": {
+            "p50": 29,
+            "p95": 147,
+            "p99": 236
+          },
+          "t_search": {
+            "p50": 18,
+            "p95": 83,
+            "p99": 118
+          },
+          "t_order_quote": {
+            "p50": 38,
+            "p95": 182,
+            "p99": 246
+          },
+          "t_order_create": {
+            "p50": 63,
+            "p95": 297,
+            "p99": 378
+          },
+          "t_admin": {
+            "p50": 30,
+            "p95": 113,
+            "p99": 195
+          },
+          "t_browse": {
+            "p50": 25,
+            "p95": 107,
+            "p99": 169
+          },
+          "t_restaurant_orders": {
+            "p50": 34,
+            "p95": 133,
+            "p99": 166
+          },
+          "t_order_tracking": {
+            "p50": 22,
+            "p95": 94,
+            "p99": 149
+          }
+        }
+      },
+      "100": {
+        "rps": 176.4,
+        "total_reqs": 19512,
+        "dur": {
+          "p50": 150,
+          "p90": 377,
+          "p95": 508,
+          "p99": 804,
+          "max": 1138
+        },
+        "err_pct": 0,
+        "groups": {
+          "t_order_quote": {
+            "p50": 455,
+            "p95": 813,
+            "p99": 918
+          },
+          "t_order_create": {
+            "p50": 670,
+            "p95": 941,
+            "p99": 1040
+          },
+          "t_restaurant_detail": {
+            "p50": 202,
+            "p95": 575,
+            "p99": 693
+          },
+          "t_browse": {
+            "p50": 205,
+            "p95": 351,
+            "p99": 427
+          },
+          "t_search": {
+            "p50": 182,
+            "p95": 333,
+            "p99": 377
+          },
+          "t_driver_location": {
+            "p50": 252,
+            "p95": 485,
+            "p99": 543
+          },
+          "t_admin": {
+            "p50": 193,
+            "p95": 414,
+            "p99": 486
+          },
+          "t_restaurant_orders": {
+            "p50": 275,
+            "p95": 482,
+            "p99": 523
+          },
+          "t_order_tracking": {
+            "p50": 196,
+            "p95": 367,
+            "p99": 436
+          },
+          "t_driver_me": {
+            "p50": 246,
+            "p95": 431,
+            "p99": 468
+          }
+        }
+      },
+      "150": {
+        "rps": 173.4,
+        "total_reqs": 19247,
+        "dur": {
+          "p50": 313,
+          "p90": 906,
+          "p95": 1199,
+          "p99": 1760,
+          "max": 3090
+        },
+        "err_pct": 0,
+        "groups": {
+          "t_order_create": {
+            "p50": 1023,
+            "p95": 1353,
+            "p99": 2091
+          },
+          "t_order_quote": {
+            "p50": 1394,
+            "p95": 2167,
+            "p99": 2934
+          },
+          "t_search": {
+            "p50": 529,
+            "p95": 851,
+            "p99": 965
+          },
+          "t_driver_me": {
+            "p50": 642,
+            "p95": 944,
+            "p99": 1395
+          },
+          "t_browse": {
+            "p50": 357,
+            "p95": 582,
+            "p99": 845
+          },
+          "t_order_tracking": {
+            "p50": 480,
+            "p95": 878,
+            "p99": 1272
+          },
+          "t_driver_location": {
+            "p50": 533,
+            "p95": 1001,
+            "p99": 1164
+          },
+          "t_restaurant_detail": {
+            "p50": 368,
+            "p95": 1371,
+            "p99": 1603
+          },
+          "t_admin": {
+            "p50": 421,
+            "p95": 985,
+            "p99": 1599
+          },
+          "t_restaurant_orders": {
+            "p50": 635,
+            "p95": 998,
+            "p99": 1545
+          }
+        }
+      }
+    },
+    "load_300vu": {
+      "rps": 197.2,
+      "total_reqs": 59336,
+      "dur": {
+        "p50": 376,
+        "p90": 1213,
+        "p95": 1763,
+        "p99": 3054,
+        "max": 7499
+      },
+      "err_pct": 0,
+      "groups": {
+        "t_search": {
+          "p50": 636,
+          "p95": 1861,
+          "p99": 2705
+        },
+        "t_order_create": {
+          "p50": 1032,
+          "p95": 1906,
+          "p99": 2700
+        },
+        "t_driver_location": {
+          "p50": 589,
+          "p95": 1799,
+          "p99": 2703
+        },
+        "t_driver_me": {
+          "p50": 689,
+          "p95": 1940,
+          "p99": 2831
+        },
+        "t_order_quote": {
+          "p50": 1779,
+          "p95": 4662,
+          "p99": 6451
+        },
+        "t_restaurant_orders": {
+          "p50": 770,
+          "p95": 1999,
+          "p99": 2943
+        },
+        "t_restaurant_detail": {
+          "p50": 418,
+          "p95": 2239,
+          "p99": 3936
+        },
+        "t_browse": {
+          "p50": 387,
+          "p95": 899,
+          "p99": 1358
+        },
+        "t_admin": {
+          "p50": 423,
+          "p95": 1528,
+          "p99": 2819
+        },
+        "t_order_tracking": {
+          "p50": 584,
+          "p95": 1627,
+          "p99": 2409
+        }
+      }
+    },
+    "soak_65vu_10min": {
+      "rps": 204,
+      "total_reqs": 132833,
+      "dur": {
+        "p50": 34,
+        "p90": 117,
+        "p95": 157,
+        "p99": 275,
+        "max": 1028
+      },
+      "err_pct": 0,
+      "groups": {
+        "t_order_quote": {
+          "p50": 76,
+          "p95": 264,
+          "p99": 366
+        },
+        "t_order_tracking": {
+          "p50": 38,
+          "p95": 129,
+          "p99": 183
+        },
+        "t_restaurant_detail": {
+          "p50": 46,
+          "p95": 188,
+          "p99": 285
+        },
+        "t_search": {
+          "p50": 35,
+          "p95": 123,
+          "p99": 169
+        },
+        "t_order_create": {
+          "p50": 119,
+          "p95": 416,
+          "p99": 555
+        },
+        "t_driver_me": {
+          "p50": 48,
+          "p95": 154,
+          "p99": 215
+        },
+        "t_browse": {
+          "p50": 45,
+          "p95": 150,
+          "p99": 211
+        },
+        "t_admin": {
+          "p50": 46,
+          "p95": 159,
+          "p99": 248
+        },
+        "t_restaurant_orders": {
+          "p50": 59,
+          "p95": 187,
+          "p99": 244
+        },
+        "t_driver_location": {
+          "p50": 53,
+          "p95": 189,
+          "p99": 259
+        }
+      }
+    }
+  },
+  "resources": {
+    "control_old_50vu": {
+      "samples": 10,
+      "host_cpu_pct_avg": 77.9,
+      "node_cpu_cores_approx": 0.72,
+      "node_ram_mb_min": 67,
+      "node_ram_mb_max": 170,
+      "pg_cpu_pct_avg": 246.3,
+      "pg_cpu_pct_max": 494.05,
+      "pg_active_conns_avg": 6.2,
+      "pg_active_conns_max": 18
+    },
+    "knee_50": {
+      "samples": 11,
+      "host_cpu_pct_avg": 54.9,
+      "node_cpu_cores_approx": 0.69,
+      "node_ram_mb_min": 114,
+      "node_ram_mb_max": 178,
+      "pg_cpu_pct_avg": 46,
+      "pg_cpu_pct_max": 100.87,
+      "pg_active_conns_avg": 1.7,
+      "pg_active_conns_max": 4
+    },
+    "knee_150": {
+      "samples": 10,
+      "host_cpu_pct_avg": 84.5,
+      "node_cpu_cores_approx": 0.98,
+      "node_ram_mb_min": 191,
+      "node_ram_mb_max": 201,
+      "pg_cpu_pct_avg": 70.2,
+      "pg_cpu_pct_max": 79.06,
+      "pg_active_conns_avg": 1.2,
+      "pg_active_conns_max": 2
+    },
+    "load_300vu": {
+      "samples": 30,
+      "host_cpu_pct_avg": 73.6,
+      "node_cpu_cores_approx": 0.9,
+      "node_ram_mb_min": 199,
+      "node_ram_mb_max": 214,
+      "pg_cpu_pct_avg": 62.2,
+      "pg_cpu_pct_max": 94.86,
+      "pg_active_conns_avg": 1.5,
+      "pg_active_conns_max": 4
+    },
+    "soak_65vu_10min": {
+      "samples": 65,
+      "host_cpu_pct_avg": 71.6,
+      "node_cpu_cores_approx": 0.86,
+      "node_ram_mb_min": 205,
+      "node_ram_mb_max": 214,
+      "pg_cpu_pct_avg": 62.7,
+      "pg_cpu_pct_max": 100.64,
+      "pg_active_conns_avg": 1.4,
+      "pg_active_conns_max": 4
+    }
+  },
+  "endpoint_timings_sequential": {
+    "before_old_code": {
+      "admin_dashboard": {
+        "status": 200,
+        "cold_ms": 503.2,
+        "warm_median_ms": 406.3,
+        "max_ms": 518.6
+      },
+      "admin_analytics": {
+        "status": 200,
+        "cold_ms": 531.1,
+        "warm_median_ms": 443.5,
+        "max_ms": 544.3
+      },
+      "admin_accounting": {
+        "status": 200,
+        "cold_ms": 553.4,
+        "warm_median_ms": 531.9,
+        "max_ms": 674.6
+      },
+      "admin_live_ops": {
+        "status": 200,
+        "cold_ms": 25.2,
+        "warm_median_ms": 24.8,
+        "max_ms": 29.2
+      },
+      "admin_restaurants_100": {
+        "status": 200,
+        "cold_ms": 109.7,
+        "warm_median_ms": 88.3,
+        "max_ms": 109.7
+      },
+      "restaurant_stats": {
+        "status": 200,
+        "cold_ms": 17.3,
+        "warm_median_ms": 15.6,
+        "max_ms": 17.5
+      },
+      "restaurant_orders_poll": {
+        "status": 200,
+        "cold_ms": 16.7,
+        "warm_median_ms": 12.2,
+        "max_ms": 16.7
+      },
+      "driver_earnings_today": {
+        "status": 200,
+        "cold_ms": 17.3,
+        "warm_median_ms": 16.7,
+        "max_ms": 17.7
+      },
+      "driver_earnings_month": {
+        "status": 200,
+        "cold_ms": 16.5,
+        "warm_median_ms": 16,
+        "max_ms": 16.5
+      },
+      "driver_me": {
+        "status": 200,
+        "cold_ms": 32.2,
+        "warm_median_ms": 39.8,
+        "max_ms": 41.2
+      },
+      "restaurant_list_geo": {
+        "status": 200,
+        "cold_ms": 43.2,
+        "warm_median_ms": 24.5,
+        "max_ms": 43.2
+      },
+      "restaurant_detail": {
+        "status": 200,
+        "cold_ms": 47.1,
+        "warm_median_ms": 35.2,
+        "max_ms": 47.1
+      }
+    },
+    "after_new_code": {
+      "admin_dashboard": {
+        "status": 200,
+        "cold_ms": 146.6,
+        "warm_median_ms": 9.1,
+        "max_ms": 146.6
+      },
+      "admin_analytics": {
+        "status": 200,
+        "cold_ms": 442.5,
+        "warm_median_ms": 8.1,
+        "max_ms": 442.5
+      },
+      "admin_accounting": {
+        "status": 200,
+        "cold_ms": 711.8,
+        "warm_median_ms": 548.2,
+        "max_ms": 711.8
+      },
+      "admin_live_ops": {
+        "status": 200,
+        "cold_ms": 30.4,
+        "warm_median_ms": 23.1,
+        "max_ms": 41.7
+      },
+      "admin_restaurants_100": {
+        "status": 200,
+        "cold_ms": 261.4,
+        "warm_median_ms": 106.5,
+        "max_ms": 261.4
+      },
+      "restaurant_stats": {
+        "status": 200,
+        "cold_ms": 19.6,
+        "warm_median_ms": 13.3,
+        "max_ms": 62
+      },
+      "restaurant_orders_poll": {
+        "status": 200,
+        "cold_ms": 18.8,
+        "warm_median_ms": 10.2,
+        "max_ms": 18.8
+      },
+      "driver_earnings_today": {
+        "status": 200,
+        "cold_ms": 15.2,
+        "warm_median_ms": 12,
+        "max_ms": 15.2
+      },
+      "driver_earnings_month": {
+        "status": 200,
+        "cold_ms": 13.6,
+        "warm_median_ms": 12.9,
+        "max_ms": 22.2
+      },
+      "driver_me": {
+        "status": 200,
+        "cold_ms": 13,
+        "warm_median_ms": 13,
+        "max_ms": 27.4
+      },
+      "restaurant_list_geo": {
+        "status": 200,
+        "cold_ms": 25.4,
+        "warm_median_ms": 12.2,
+        "max_ms": 25.4
+      },
+      "restaurant_detail": {
+        "status": 200,
+        "cold_ms": 26.1,
+        "warm_median_ms": 9.9,
+        "max_ms": 26.1
+      }
+    }
+  },
+  "pg_stat_statements_top10": {
+    "before_old_code_50vu": [
+      {
+        "calls": 1176,
+        "total_ms": 179190,
+        "mean_ms": 152.37,
+        "pct": 46.7,
+        "query": "SELECT d.user_id FROM drivers d JOIN users u ON u.id = d.user_id WHERE d.is_online = $1 AND COALESCE(d.is_busy, $2) = $3 AND u.is_active = $4 AND COALESCE(u.is_"
+      },
+      {
+        "calls": 44,
+        "total_ms": 46354,
+        "mean_ms": 1053.51,
+        "pct": 12.1,
+        "query": "SELECT COUNT(*) as count FROM orders WHERE ((created_at) AT TIME ZONE $1 AT TIME ZONE $2)::date = (NOW() AT TIME ZONE $3)::date"
+      },
+      {
+        "calls": 44,
+        "total_ms": 38164,
+        "mean_ms": 867.35,
+        "pct": 9.9,
+        "query": "SELECT COALESCE(SUM(total),$1) as total FROM orders WHERE status=$2 AND ((created_at) AT TIME ZONE $3 AT TIME ZONE $4)::date = (NOW() AT TIME ZONE $5)::date"
+      },
+      {
+        "calls": 2287,
+        "total_ms": 37200,
+        "mean_ms": 16.27,
+        "pct": 9.7,
+        "query": "SELECT oi.menu_item_id AS id, SUM(oi.quantity) AS q FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.restaurant_id = $1 AND oi.menu_item_id IS NO"
+      },
+      {
+        "calls": 315,
+        "total_ms": 33889,
+        "mean_ms": 107.58,
+        "pct": 8.8,
+        "query": "SELECT d.user_id FROM drivers d JOIN users u ON u.id = d.user_id WHERE d.is_online = $1 AND COALESCE(d.is_busy, $2) = $3 AND u.is_active = $4 AND COALESCE(u.is_"
+      },
+      {
+        "calls": 2287,
+        "total_ms": 19173,
+        "mean_ms": 8.38,
+        "pct": 5,
+        "query": "SELECT r.*, c.name_ar as category_name, c.icon as category_icon, CASE WHEN $1::float IS NOT NULL AND $2::float IS NOT NULL AND r.lat IS NOT NULL AND r.lng IS NO"
+      },
+      {
+        "calls": 44,
+        "total_ms": 5840,
+        "mean_ms": 132.72,
+        "pct": 1.5,
+        "query": "SELECT COUNT(*) as count FROM users WHERE role=$1 AND is_active=$2"
+      },
+      {
+        "calls": 44,
+        "total_ms": 5416,
+        "mean_ms": 123.09,
+        "pct": 1.4,
+        "query": "SELECT TO_CHAR(created_at AT TIME ZONE $1 AT TIME ZONE $2, $3) as date, COALESCE(SUM(total),$4) as revenue, COUNT(*) as orders FROM orders WHERE status=$5 AND c"
+      },
+      {
+        "calls": 44,
+        "total_ms": 4760,
+        "mean_ms": 108.18,
+        "pct": 1.2,
+        "query": "SELECT status, COUNT(*) as count FROM orders WHERE created_at > NOW() - INTERVAL $1 GROUP BY status"
+      },
+      {
+        "calls": 2287,
+        "total_ms": 2082,
+        "mean_ms": 0.91,
+        "pct": 0.5,
+        "query": "SELECT * FROM menu_items WHERE restaurant_id=$1 AND is_available=$2 ORDER BY sort_order, id"
+      }
+    ],
+    "after_new_code_50vu": [
+      {
+        "calls": 1519,
+        "total_ms": 2373,
+        "mean_ms": 1.56,
+        "pct": 15.3,
+        "query": "SELECT DISTINCT driver_id FROM orders WHERE driver_assigned_at IS NULL AND driver_id IS NOT NULL AND status IN ($1 /*, ... */) AND id <> $2"
+      },
+      {
+        "calls": 4298,
+        "total_ms": 2264,
+        "mean_ms": 0.53,
+        "pct": 14.6,
+        "query": "WITH d AS MATERIALIZED ( SELECT user_id, current_lat, current_lng FROM drivers WHERE is_online = $5 AND COALESCE(is_busy, $6) = $7 AND current_lat BETWEEN $1 AN"
+      },
+      {
+        "calls": 215,
+        "total_ms": 2011,
+        "mean_ms": 9.35,
+        "pct": 13,
+        "query": "SELECT oi.menu_item_id AS id, SUM(oi.quantity) AS q FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.restaurant_id = $1 AND oi.menu_item_id IS NO"
+      },
+      {
+        "calls": 830,
+        "total_ms": 1520,
+        "mean_ms": 1.83,
+        "pct": 9.8,
+        "query": "WITH d AS MATERIALIZED ( SELECT user_id, current_lat, current_lng FROM drivers WHERE is_online = $1 AND COALESCE(is_busy, $2) = $3 ) SELECT d.user_id, d.current"
+      },
+      {
+        "calls": 266,
+        "total_ms": 799,
+        "mean_ms": 3,
+        "pct": 5.2,
+        "query": "SELECT r.*, c.name_ar as category_name, c.icon as category_icon, CASE WHEN $1::float IS NOT NULL AND $2::float IS NOT NULL AND r.lat IS NOT NULL AND r.lng IS NO"
+      },
+      {
+        "calls": 1290,
+        "total_ms": 590,
+        "mean_ms": 0.46,
+        "pct": 3.8,
+        "query": "SELECT * FROM menu_items WHERE restaurant_id=$1 AND is_available=$2 ORDER BY sort_order, id"
+      },
+      {
+        "calls": 1228,
+        "total_ms": 529,
+        "mean_ms": 0.43,
+        "pct": 3.4,
+        "query": "UPDATE orders SET driver_id=$1, driver_offer_expires_at = NOW() + INTERVAL $2 WHERE id=$3 AND driver_id IS NULL AND driver_assigned_at IS NULL AND status IN ($4"
+      },
+      {
+        "calls": 1225,
+        "total_ms": 519,
+        "mean_ms": 0.42,
+        "pct": 3.4,
+        "query": "UPDATE orders SET driver_id=$3, driver_offer_expires_at=$4 WHERE id=$1 AND driver_id=$2 AND driver_assigned_at IS NULL RETURNING id, restaurant_id"
+      },
+      {
+        "calls": 8686,
+        "total_ms": 445,
+        "mean_ms": 0.05,
+        "pct": 2.9,
+        "query": "SELECT * FROM users WHERE id=$1 AND is_active=$2 AND is_blocked=$3"
+      },
+      {
+        "calls": 46,
+        "total_ms": 388,
+        "mean_ms": 8.43,
+        "pct": 2.5,
+        "query": "SELECT o.id, o.order_number, o.status, o.total, o.order_type, o.driver_assigned_at, o.delivery_lat, o.delivery_lng, o.created_at, r.name_ar AS restaurant_name, "
+      }
+    ],
+    "after_new_code_soak": [
+      {
+        "calls": 9033,
+        "total_ms": 21279,
+        "mean_ms": 2.36,
+        "pct": 20,
+        "query": "SELECT DISTINCT driver_id FROM orders WHERE driver_assigned_at IS NULL AND driver_id IS NOT NULL AND status IN ($1 /*, ... */) AND id <> $2"
+      },
+      {
+        "calls": 25241,
+        "total_ms": 13591,
+        "mean_ms": 0.54,
+        "pct": 12.7,
+        "query": "WITH d AS MATERIALIZED ( SELECT user_id, current_lat, current_lng FROM drivers WHERE is_online = $5 AND COALESCE(is_busy, $6) = $7 AND current_lat BETWEEN $1 AN"
+      },
+      {
+        "calls": 5081,
+        "total_ms": 9388,
+        "mean_ms": 1.85,
+        "pct": 8.8,
+        "query": "WITH d AS MATERIALIZED ( SELECT user_id, current_lat, current_lng FROM drivers WHERE is_online = $1 AND COALESCE(is_busy, $2) = $3 ) SELECT d.user_id, d.current"
+      },
+      {
+        "calls": 972,
+        "total_ms": 7689,
+        "mean_ms": 7.91,
+        "pct": 7.2,
+        "query": "SELECT oi.menu_item_id AS id, SUM(oi.quantity) AS q FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.restaurant_id = $1 AND oi.menu_item_id IS NO"
+      },
+      {
+        "calls": 1673,
+        "total_ms": 5514,
+        "mean_ms": 3.3,
+        "pct": 5.2,
+        "query": "SELECT r.*, c.name_ar as category_name, c.icon as category_icon, CASE WHEN $1::float IS NOT NULL AND $2::float IS NOT NULL AND r.lat IS NOT NULL AND r.lng IS NO"
+      },
+      {
+        "calls": 77269,
+        "total_ms": 3672,
+        "mean_ms": 0.05,
+        "pct": 3.4,
+        "query": "SELECT * FROM users WHERE id=$1 AND is_active=$2 AND is_blocked=$3"
+      },
+      {
+        "calls": 412,
+        "total_ms": 3661,
+        "mean_ms": 8.89,
+        "pct": 3.4,
+        "query": "SELECT o.id, o.order_number, o.status, o.total, o.order_type, o.driver_assigned_at, o.delivery_lat, o.delivery_lng, o.created_at, r.name_ar AS restaurant_name, "
+      },
+      {
+        "calls": 8827,
+        "total_ms": 3617,
+        "mean_ms": 0.41,
+        "pct": 3.4,
+        "query": "SELECT * FROM menu_items WHERE restaurant_id=$1 AND is_available=$2 ORDER BY sort_order, id"
+      },
+      {
+        "calls": 7132,
+        "total_ms": 2887,
+        "mean_ms": 0.4,
+        "pct": 2.7,
+        "query": "UPDATE orders SET driver_id=$1, driver_offer_expires_at = NOW() + INTERVAL $2 WHERE id=$3 AND driver_id IS NULL AND driver_assigned_at IS NULL AND status IN ($4"
+      },
+      {
+        "calls": 7145,
+        "total_ms": 2863,
+        "mean_ms": 0.4,
+        "pct": 2.7,
+        "query": "UPDATE orders SET driver_id=$3, driver_offer_expires_at=$4 WHERE id=$1 AND driver_id=$2 AND driver_assigned_at IS NULL RETURNING id, restaurant_id"
+      }
+    ]
+  }
+}

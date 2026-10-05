@@ -1,15 +1,17 @@
 ﻿const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, adminOnly } = require('../middleware/auth');
+const cache = require('../utils/cache');
+const { serverError } = require('../utils/http');
+
+router.use(cache.invalidateOnWrite()); // رسوم التوصيل المعروضة بقائمة المطاعم تعتمد على المناطق
 
 // Get all zones
 router.get('/', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM delivery_zones WHERE is_active=true ORDER BY min_km');
     res.json({ success: true, data: rows });
-  } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
-  }
+  } catch (e) { serverError(res, e); }
 });
 
 // Calculate fee for a distance
@@ -26,9 +28,7 @@ router.get('/calculate', async (req, res) => {
     // نفس قاعدة التسعير الفعلية: المنطقة المطابقة، وإلا أغلى منطقة، وإن لا مناطق → 5
     const fee = await getZoneFee(pool, distKm);
     res.json({ success: true, data: { fee, distance_km: distKm.toFixed(2), zone: rows[0] } });
-  } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
-  }
+  } catch (e) { serverError(res, e); }
 });
 
 // Update zone price (admin)
@@ -41,9 +41,7 @@ router.put('/:id', auth, adminOnly, async (req, res) => {
     );
     const { rows } = await pool.query('SELECT * FROM delivery_zones WHERE id=$1', [req.params.id]);
     res.json({ success: true, data: rows[0] });
-  } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
-  }
+  } catch (e) { serverError(res, e); }
 });
 
 // Create zone (admin)
@@ -55,9 +53,7 @@ router.post('/', auth, adminOnly, async (req, res) => {
       [name, min_km, max_km, price]
     );
     res.status(201).json({ success: true, data: rows[0] });
-  } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
-  }
+  } catch (e) { serverError(res, e); }
 });
 
 // Delete zone (admin)
@@ -65,9 +61,7 @@ router.delete('/:id', auth, adminOnly, async (req, res) => {
   try {
     await pool.query('DELETE FROM delivery_zones WHERE id=$1', [req.params.id]);
     res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
-  }
+  } catch (e) { serverError(res, e); }
 });
 
 module.exports = router;

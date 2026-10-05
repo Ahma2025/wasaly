@@ -16,3 +16,9 @@ ios/Pods/
 ios/build/
 pgdata/
 releases/
+
+# Load-test artifacts (local only — contain JWTs / seeded data / raw k6 output)
+backend/scratch/
+backend/loadtest/tokens.json
+backend/loadtest/*tokens*.json
+backend/loadtest/raw/

@@ -133,6 +133,20 @@ const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS support_messages (id SERIAL PRIMARY KEY, ticket_id INTEGER, sender_id INTEGER, message TEXT, is_admin BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE INDEX IF NOT EXISTS idx_support_messages_ticket ON support_messages(ticket_id)`,
 
+  // ═══ جولة الأداء 2026-10-05 (اختبار الحِمل) ═══
+  // لوحة الإدارة: عدّ/جمع حسب الحالة ضمن نطاق تاريخ (اليوم بتوقيت فلسطين كنطاق نصف مفتوح)
+  `CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at DESC) INCLUDE (total)`,
+  // لوحة المطعم (كل 20ث) + إحصاءات اليوم للمطعم
+  `CREATE INDEX IF NOT EXISTS idx_orders_rest_created ON orders(restaurant_id, created_at DESC)`,
+  // التوزيع: السائقون الذين لديهم عرض قائم (صغير جداً — فقط العروض غير المقبولة)
+  `CREATE INDEX IF NOT EXISTS idx_orders_open_offers ON orders(driver_id) WHERE driver_assigned_at IS NULL AND driver_id IS NOT NULL AND status IN ('confirmed','preparing','ready')`,
+  // /drivers/me: الطلب الحالي للسائق (نفس شرط الاستعلام حرفياً حتى يُستخدم الفهرس الجزئي)
+  `CREATE INDEX IF NOT EXISTS idx_orders_driver_active ON orders(driver_id, created_at DESC) WHERE status NOT IN ('delivered','cancelled')`,
+  // أرباح السائق (اليوم/الشهر) حسب وقت التسليم
+  `CREATE INDEX IF NOT EXISTS idx_orders_driver_delivered ON orders(driver_id, delivered_at DESC) WHERE status = 'delivered'`,
+  // مربّع البحث حول نقطة الاستلام للسائقين المتصلين
+  `CREATE INDEX IF NOT EXISTS idx_drivers_online_loc ON drivers(current_lat, current_lng) WHERE is_online = true`,
+
   // ⚙️ مجموعات الإضافات "اختيار متعدد" كانت تُحفظ بـ max_selections=1 → التطبيق يعاملها كاختيار واحد
   `UPDATE item_options o SET max_selections = GREATEST(2, (SELECT COUNT(*) FROM item_option_values v WHERE v.option_id = o.id))
      WHERE o.type IN ('multiple','multi','checkbox') AND COALESCE(o.max_selections, 1) <= 1

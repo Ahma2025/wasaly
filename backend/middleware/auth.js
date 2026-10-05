@@ -1,16 +1,22 @@
 const jwt = require('jsonwebtoken');
+const { jwtVerifyKey } = require('../utils/jwtKey');
 const pool = require('../config/database');
+const { isTokenDenied } = require('../utils/security');
 
 const auth = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ success: false, message: 'No token' });
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, jwtVerifyKey());
+    // 🔒 توكن سُجّل خروجه (POST /auth/logout) → مرفوض حتى انتهاء صلاحيته
+    if (await isTokenDenied(token)) return res.status(401).json({ success: false, message: 'Invalid token' });
     const { rows } = await pool.query('SELECT * FROM users WHERE id=$1 AND is_active=true AND is_blocked=false', [decoded.id]);
     if (!rows[0]) return res.status(401).json({ success: false, message: 'User not found' });
 
     req.user = rows[0];
+    req.token = token;
+    req.tokenDecoded = decoded;
     next();
   } catch {
     res.status(401).json({ success: false, message: 'Invalid token' });
@@ -22,9 +28,11 @@ const optionalAuth = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (token) {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const { rows } = await pool.query('SELECT * FROM users WHERE id=$1 AND is_active=true AND is_blocked=false', [decoded.id]);
-      if (rows[0]) req.user = rows[0];
+      const decoded = jwt.verify(token, jwtVerifyKey());
+      if (!(await isTokenDenied(token))) {
+        const { rows } = await pool.query('SELECT * FROM users WHERE id=$1 AND is_active=true AND is_blocked=false', [decoded.id]);
+        if (rows[0]) req.user = rows[0];
+      }
     }
   } catch { /* توكن غير صالح → نكمل كزائر */ }
   next();

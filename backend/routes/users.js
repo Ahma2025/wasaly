@@ -1,5 +1,6 @@
 ﻿const router = require('express').Router();
 const pool = require('../config/database');
+const { serverError } = require('../utils/http');
 const { auth } = require('../middleware/auth');
 
 // Save FCM token for push notifications
@@ -12,7 +13,7 @@ router.post('/fcm-token', auth, async (req, res) => {
     await pool.query('UPDATE users SET fcm_token=$1 WHERE id=$2', [token, req.user.id]);
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    serverError(res, e);
   }
 });
 
@@ -33,7 +34,7 @@ router.put('/profile', auth, async (req, res) => {
     );
     res.json({ success: true, data: rows[0] });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    serverError(res, e);
   }
 });
 
@@ -57,7 +58,7 @@ router.post('/addresses', auth, async (req, res) => {
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    serverError(res, e);
   }
 });
 
@@ -73,7 +74,7 @@ router.put('/addresses/:id', auth, async (req, res) => {
     );
     res.json({ success: true, data: rows[0] });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    serverError(res, e);
   }
 });
 
@@ -96,7 +97,7 @@ router.post('/favorites/:restaurantId', auth, async (req, res) => {
     if (!/^\d+$/.test(String(req.params.restaurantId))) return res.status(400).json({ success: false, message: 'مطعم غير صحيح' });
     await pool.query('INSERT INTO favorites (user_id, restaurant_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.user.id, req.params.restaurantId]);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 router.delete('/favorites/:restaurantId', auth, async (req, res) => {

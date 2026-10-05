@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const pool = require('../config/database');
+const { serverError } = require('../utils/http');
 const { auth, adminOnly } = require('../middleware/auth');
 
 // عام — فقط النشطة
@@ -9,7 +10,7 @@ router.get('/', async (req, res) => {
       `SELECT * FROM banners WHERE is_active=true AND (starts_at IS NULL OR starts_at <= NOW()) AND (ends_at IS NULL OR ends_at >= NOW()) ORDER BY sort_order`
     );
     res.json({ success: true, data: rows });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // للإدمن — كل الإعلانات
@@ -17,7 +18,7 @@ router.get('/all', auth, adminOnly, async (req, res) => {
   try {
     const { rows } = await pool.query(`SELECT * FROM banners ORDER BY sort_order, created_at DESC`);
     res.json({ success: true, data: rows });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // إضافة إعلان
@@ -30,7 +31,7 @@ router.post('/', auth, adminOnly, async (req, res) => {
       [title_ar, title_en, image, link_type, link_value, sort_order ?? 0, starts_at, ends_at, is_active ?? true]
     );
     res.status(201).json({ success: true, data: rows[0] });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // تفعيل/إيقاف
@@ -41,7 +42,7 @@ router.patch('/:id/toggle', auth, adminOnly, async (req, res) => {
     const newVal = !rows[0].is_active;
     await pool.query('UPDATE banners SET is_active=$1 WHERE id=$2', [newVal, req.params.id]);
     res.json({ success: true, is_active: newVal });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // حذف
@@ -49,7 +50,7 @@ router.delete('/:id', auth, adminOnly, async (req, res) => {
   try {
     await pool.query('DELETE FROM banners WHERE id=$1', [req.params.id]);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 module.exports = router;

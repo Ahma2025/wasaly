@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const webpush = require('web-push');
 const pool = require('../config/database');
+const { serverError } = require('../utils/http');
 const { auth } = require('../middleware/auth');
 
 if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
@@ -33,7 +34,7 @@ router.post('/subscribe', auth, async (req, res) => {
 
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    serverError(res, e);
   }
 });
 

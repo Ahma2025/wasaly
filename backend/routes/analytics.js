@@ -1,5 +1,6 @@
 ﻿const router = require('express').Router();
 const pool = require('../config/database');
+const { serverError } = require('../utils/http');
 const { auth, adminOnly } = require('../middleware/auth');
 
 router.get('/overview', auth, adminOnly, async (req, res) => {
@@ -22,7 +23,7 @@ router.get('/overview', auth, adminOnly, async (req, res) => {
 
     res.json({ success: true, data: { revenue: revenue.rows[0].total, orders: orders.rows[0].count, newUsers: users.rows[0].count, avgOrder: avgOrder.rows[0].avg, hourly: hourly.rows } });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    serverError(res, e);
   }
 });
 

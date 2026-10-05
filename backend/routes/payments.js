@@ -46,7 +46,10 @@ router.post('/lahza/init', auth, async (req, res) => {
       await releaseCardOrder(req.io, order.id, { paid: false }).catch(() => {});
       return res.status(502).json({ success: false, message: 'تعذّر بدء الدفع' });
     }
-    if (d.reference) await pool.query('UPDATE orders SET payment_reference=$1 WHERE id=$2', [d.reference, order.id]);
+    if (d.reference) {
+      await pool.query('UPDATE orders SET payment_reference=$1 WHERE id=$2', [d.reference, order.id]);
+      require('../utils/cache').invalidateRestaurantOrders(order.restaurant_id);
+    }
     res.json({ success: true, authorization_url: d.authorization_url, reference: d.reference });
   } catch (e) {
     // التطبيق يخبر الزبون أن الطلب محفوظ للدفع عند الاستلام → نطلقه كطلب نقدي

@@ -2,6 +2,24 @@ const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, optionalAuth, adminOnly, restaurantOnly } = require('../middleware/auth');
 const { saveNotification, sendFCM, getUserTokens, notifyUser } = require('../utils/notifications');
+const cache = require('../utils/cache');
+const { serverError, intParam, clampInt, strParam } = require('../utils/http');
+const { hebronRange } = require('../utils/time');
+
+// ⏱️ مدد الكاش (ms) — قابلة للضبط بمتغيّرات البيئة
+const LIST_TTL = Number(process.env.CACHE_RESTAURANTS_TTL_MS) || 45000;
+const DETAIL_TTL = Number(process.env.CACHE_RESTAURANT_DETAIL_TTL_MS) || 45000;
+const POPULAR_TTL = Number(process.env.CACHE_POPULAR_TTL_MS) || 10 * 60 * 1000;
+const REST_ORDERS_TTL = Number(process.env.CACHE_RESTAURANT_ORDERS_TTL_MS) || 5000;
+
+const round2s = (n) => (Math.round((n + Number.EPSILON) * 100) / 100).toFixed(2); // نفس شكل round(numeric,2) من Postgres (نص)
+function haversine(aLat, aLng, bLat, bLng) { // نفس معادلة SQL القديمة
+  const rad = Math.PI / 180;
+  const s1 = Math.sin((bLat - aLat) * rad / 2), s2 = Math.sin((bLng - aLng) * rad / 2);
+  return 6371 * 2 * Math.asin(Math.sqrt(s1 * s1 + Math.cos(aLat * rad) * Math.cos(bLat * rad) * s2 * s2));
+}
+const getZones = () => cache.wrapVersioned(cache.V.catalog, 'zones', LIST_TTL, async () =>
+  (await pool.query('SELECT min_km, max_km, price FROM delivery_zones WHERE is_active=true ORDER BY min_km')).rows);
 
 // 🔒 الحقول الداخلية لا تظهر للعامة (إلا للإدارة أو صاحب المطعم نفسه)
 const PRIVATE_FIELDS = ['owner_id', 'commission_rate', 'email'];
@@ -16,11 +34,24 @@ function publicView(row, user) {
 // Get all restaurants (with filters)
 router.get('/', optionalAuth, async (req, res) => {
   try {
-    const { lat, lng, category_id, search, sort, city, owner_id } = req.query;
-    const safeLimit = Math.min(parseInt(req.query.limit) || 20, 100);
-    const safeOffset = Math.max(parseInt(req.query.offset) || 0, 0);
-    const userLat = lat ? parseFloat(lat) : null;
-    const userLng = lng ? parseFloat(lng) : null;
+    const lat = strParam(req.query.lat), lng = strParam(req.query.lng);
+    const search = strParam(req.query.search), sort = strParam(req.query.sort), city = strParam(req.query.city);
+    const store_type = strParam(req.query.store_type);
+    const owner_id = intParam(req.query.owner_id), category_id = intParam(req.query.category_id);
+    if (owner_id === null || category_id === null) return res.status(400).json({ success: false, message: 'قيمة غير صالحة في الطلب' });
+    const safeLimit = clampInt(req.query.limit, 20, 1, 100);
+    const safeOffset = clampInt(req.query.offset, 0, 0, 100000);
+    const pLat = lat ? parseFloat(lat) : null;
+    const pLng = lng ? parseFloat(lng) : null;
+    const exactLat = Number.isFinite(pLat) && Math.abs(pLat) <= 90 ? pLat : null;
+    const exactLng = Number.isFinite(pLng) && Math.abs(pLng) <= 180 ? pLng : null;
+    const hasLoc = exactLat !== null && exactLng !== null;
+    // ⚡️ كاش 45ث مفتاحه الاستعلام المطبَّع (الموقع مقرّب لخانتين ≈ 1كم). المسافة والرسوم تُعاد حسابها بالإحداثيات الدقيقة.
+    const userLat = hasLoc ? Math.round(exactLat * 100) / 100 : null;
+    const userLng = hasLoc ? Math.round(exactLng * 100) / 100 : null;
+    const cacheKey = 'rlist:' + JSON.stringify([userLat, userLng, owner_id ?? '', category_id ?? '', city || '', search || '',
+      store_type || '', sort || '', safeLimit, safeOffset]);
+    const rows = await cache.wrapVersioned(cache.V.catalog, cacheKey, LIST_TTL, async () => {
 
     let query = `
       SELECT r.*, c.name_ar as category_name, c.icon as category_icon,
@@ -38,28 +69,40 @@ router.get('/', optionalAuth, async (req, res) => {
       LEFT JOIN categories c ON r.category_id = c.id
       WHERE r.is_active=true
     `;
-    const params = [Number.isFinite(userLat) ? userLat : null, Number.isFinite(userLng) ? userLng : null];
+    const params = [userLat, userLng];
     let paramIdx = 3;
-    if (owner_id) { query += ` AND r.owner_id = $${paramIdx++}`; params.push(owner_id); }
-    if (category_id) { query += ` AND r.category_id = $${paramIdx++}`; params.push(category_id); }
+    if (owner_id !== undefined) { query += ` AND r.owner_id = $${paramIdx++}`; params.push(owner_id); }
+    if (category_id !== undefined) { query += ` AND r.category_id = $${paramIdx++}`; params.push(category_id); }
     if (city) { query += ` AND r.city = $${paramIdx++}`; params.push(city); }
     if (search) { query += ` AND (r.name_ar ILIKE $${paramIdx} OR r.name_en ILIKE $${paramIdx})`; params.push(`%${search}%`); paramIdx++; }
-    const { store_type } = req.query;
     if (store_type) { query += ` AND r.store_type = $${paramIdx++}`; params.push(store_type); }
-    else if (!owner_id) { query += ` AND (r.store_type = 'restaurant' OR r.store_type IS NULL)`; }
+    else if (owner_id === undefined) { query += ` AND (r.store_type = 'restaurant' OR r.store_type IS NULL)`; }
 
     const orderMap = { rating: 'r.rating DESC', fastest: 'r.delivery_time_min ASC', nearest: 'distance_km ASC NULLS LAST', newest: 'r.created_at DESC' };
     query += ` ORDER BY r.is_featured DESC, ${orderMap[sort] || 'r.rating DESC'}`;
     query += ` LIMIT $${paramIdx++} OFFSET $${paramIdx++}`;
     params.push(safeLimit, safeOffset);
 
-    const { rows } = await pool.query(query, params);
+      return (await pool.query(query, params)).rows;
+    });
+    // نسخة لكل طلب (لا نعدّل كائنات الكاش المشتركة) + مسافة دقيقة من موقع الزبون الفعلي
+    const out = rows.map(r => {
+      const o = { ...r };
+      if (hasLoc && r.lat !== null && r.lat !== undefined && r.lng !== null && r.lng !== undefined) {
+        o.distance_km = round2s(haversine(exactLat, exactLng, parseFloat(r.lat), parseFloat(r.lng)));
+      }
+      return o;
+    });
+    if (hasLoc && sort === 'nearest') {
+      out.sort((a, b) => (b.is_featured === true) - (a.is_featured === true)
+        || ((a.distance_km == null) - (b.distance_km == null)) || (parseFloat(a.distance_km) - parseFloat(b.distance_km)));
+    }
     // رسوم التوصيل المعروضة = نفس رسوم المنطقة التي يُحاسَب بها فعلاً (حين يرسل التطبيق موقع الزبون)
-    if (params[0] !== null && params[1] !== null) {
-      const { rows: zones } = await pool.query('SELECT min_km, max_km, price FROM delivery_zones WHERE is_active=true ORDER BY min_km');
+    if (hasLoc) {
+      const zones = await getZones();
       if (zones.length) {
         const maxPrice = Math.max(...zones.map(z => parseFloat(z.price) || 0));
-        for (const r of rows) {
+        for (const r of out) {
           if (r.distance_km === null || r.distance_km === undefined) continue;
           const d = parseFloat(r.distance_km);
           const z = zones.find(x => parseFloat(x.min_km) <= d && d < parseFloat(x.max_km));
@@ -68,74 +111,81 @@ router.get('/', optionalAuth, async (req, res) => {
         }
       }
     }
-    res.json({ success: true, data: rows.map(r => publicView(r, req.user)) });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+    res.json({ success: true, data: out.map(r => publicView(r, req.user)) });
+  } catch (e) { serverError(res, e, 'GET /restaurants'); }
 });
 
 // ⚠️ المسارات الثابتة قبل /:id (كانت محجوبة وترجع 500)
 router.get('/featured/list', optionalAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM restaurants WHERE is_featured=true AND is_active=true LIMIT 10');
+    const rows = await cache.wrapVersioned(cache.V.catalog, 'rfeatured', LIST_TTL, async () =>
+      (await pool.query('SELECT * FROM restaurants WHERE is_featured=true AND is_active=true LIMIT 10')).rows);
     res.json({ success: true, data: rows.map(r => publicView(r, req.user)) });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { serverError(res, e); }
 });
 
 router.get('/top/rated', optionalAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM restaurants WHERE is_active=true ORDER BY rating DESC LIMIT 20');
+    const rows = await cache.wrapVersioned(cache.V.catalog, 'rtop', LIST_TTL, async () =>
+      (await pool.query('SELECT * FROM restaurants WHERE is_active=true ORDER BY rating DESC LIMIT 20')).rows);
     res.json({ success: true, data: rows.map(r => publicView(r, req.user)) });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { serverError(res, e); }
 });
 
 // Get single restaurant (public menu: active categories + available items only)
 router.get('/:id', optionalAuth, async (req, res) => {
   try {
     if (!/^\d+$/.test(String(req.params.id))) return res.status(404).json({ success: false, message: 'Restaurant not found' });
-    const { rows } = await pool.query(
-      `SELECT r.*, c.name_ar as category_name FROM restaurants r
-       LEFT JOIN categories c ON r.category_id = c.id WHERE r.id=$1`, [req.params.id]);
-    if (!rows[0]) return res.status(404).json({ success: false, message: 'Restaurant not found' });
+    const data = await cache.wrapVersioned(cache.V.catalog, `rdetail:${req.params.id}`, DETAIL_TTL, () => loadRestaurantDetail(req.params.id));
+    if (!data) return res.status(404).json({ success: false, message: 'Restaurant not found' });
+    res.json({ success: true, data: { ...publicView(data.restaurant, req.user), hours: data.hours, menu: data.menu } });
+  } catch (e) { serverError(res, e, 'GET /restaurants/:id'); }
+});
 
-    const { rows: hours } = await pool.query('SELECT * FROM restaurant_hours WHERE restaurant_id=$1 ORDER BY day_of_week', [req.params.id]);
-    const { rows: menuCategories } = await pool.query(
-      'SELECT * FROM menu_categories WHERE restaurant_id=$1 AND is_active=true ORDER BY sort_order, id', [req.params.id]);
-    const { rows: items } = await pool.query(
-      'SELECT * FROM menu_items WHERE restaurant_id=$1 AND is_available=true ORDER BY sort_order, id', [req.params.id]);
-    const itemIds = items.map(i => i.id);
-    const { rows: options } = itemIds.length
-      ? await pool.query('SELECT * FROM item_options WHERE item_id = ANY($1::int[]) ORDER BY id', [itemIds]) : { rows: [] };
-    const optIds = options.map(o => o.id);
-    const { rows: values } = optIds.length
-      ? await pool.query('SELECT * FROM item_option_values WHERE option_id = ANY($1::int[]) ORDER BY id', [optIds]) : { rows: [] };
-    for (const o of options) o.values = values.filter(v => String(v.option_id) === String(o.id));
-    for (const it of items) it.options = options.filter(o => String(o.item_id) === String(it.id));
-    for (const cat of menuCategories) cat.items = items.filter(i => String(i.category_id) === String(cat.id));
-
-    try {
+// الأصناف الأكثر طلباً — تجميعة مكلفة نسبياً → كاش طويل (10 دقائق) مستقل عن كاش المنيو
+async function popularItemIds(restaurantId) {
+  try {
+    const ids = await cache.wrap(`rpopular:${restaurantId}`, POPULAR_TTL, async () => {
       const { rows: top } = await pool.query(
         `SELECT oi.menu_item_id AS id, SUM(oi.quantity) AS q
          FROM order_items oi JOIN orders o ON oi.order_id = o.id
          WHERE o.restaurant_id = $1 AND oi.menu_item_id IS NOT NULL
-         GROUP BY oi.menu_item_id ORDER BY q DESC LIMIT 3`, [req.params.id]);
-      const topIds = new Set(top.map(t => String(t.id)));
-      for (const it of items) if (topIds.has(String(it.id))) it.is_popular = true;
-    } catch (e) { /* non-fatal */ }
+         GROUP BY oi.menu_item_id ORDER BY q DESC LIMIT 3`, [restaurantId]);
+      return top.map(t => String(t.id));
+    });
+    return new Set(ids || []);
+  } catch { return new Set(); } // non-fatal
+}
 
-    res.json({ success: true, data: { ...publicView(rows[0], req.user), hours, menu: menuCategories } });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
+async function loadRestaurantDetail(id) {
+  const { rows } = await pool.query(
+    `SELECT r.*, c.name_ar as category_name FROM restaurants r
+     LEFT JOIN categories c ON r.category_id = c.id WHERE r.id=$1`, [id]);
+  if (!rows[0]) return null;
+  const [{ rows: hours }, { rows: menuCategories }, { rows: items }, topIds] = await Promise.all([
+    pool.query('SELECT * FROM restaurant_hours WHERE restaurant_id=$1 ORDER BY day_of_week', [id]),
+    pool.query('SELECT * FROM menu_categories WHERE restaurant_id=$1 AND is_active=true ORDER BY sort_order, id', [id]),
+    pool.query('SELECT * FROM menu_items WHERE restaurant_id=$1 AND is_available=true ORDER BY sort_order, id', [id]),
+    popularItemIds(id),
+  ]);
+  const itemIds = items.map(i => i.id);
+  const { rows: options } = itemIds.length
+    ? await pool.query('SELECT * FROM item_options WHERE item_id = ANY($1::int[]) ORDER BY id', [itemIds]) : { rows: [] };
+  const optIds = options.map(o => o.id);
+  const { rows: values } = optIds.length
+    ? await pool.query('SELECT * FROM item_option_values WHERE option_id = ANY($1::int[]) ORDER BY id', [optIds]) : { rows: [] };
+  // تجميع O(n) بالخرائط بدل filter داخل حلقة
+  const valsByOpt = new Map(), optsByItem = new Map(), itemsByCat = new Map();
+  for (const v of values) { const k = String(v.option_id); if (!valsByOpt.has(k)) valsByOpt.set(k, []); valsByOpt.get(k).push(v); }
+  for (const o of options) { o.values = valsByOpt.get(String(o.id)) || []; const k = String(o.item_id); if (!optsByItem.has(k)) optsByItem.set(k, []); optsByItem.get(k).push(o); }
+  for (const it of items) {
+    it.options = optsByItem.get(String(it.id)) || [];
+    if (topIds.has(String(it.id))) it.is_popular = true;
+    const k = String(it.category_id); if (!itemsByCat.has(k)) itemsByCat.set(k, []); itemsByCat.get(k).push(it);
   }
-});
+  for (const cat of menuCategories) cat.items = itemsByCat.get(String(cat.id)) || [];
+  return { restaurant: rows[0], hours, menu: menuCategories };
+}
 
 // Create restaurant (admin)
 router.post('/', auth, adminOnly, async (req, res) => {
@@ -145,11 +195,9 @@ router.post('/', auth, adminOnly, async (req, res) => {
       `INSERT INTO restaurants (name_ar, name_en, description_ar, category_id, phone, email, address, lat, lng, city, owner_id, min_order, delivery_fee, delivery_time_min, delivery_time_max)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
       [name_ar, name_en, description_ar, category_id, phone, email, address, lat, lng, city, owner_id, min_order, delivery_fee, delivery_time_min, delivery_time_max]);
+    await cache.invalidateCatalog();
     res.status(201).json({ success: true, data: rows[0] });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { serverError(res, e); }
 });
 
 async function ownsRestaurant(req) {
@@ -176,11 +224,9 @@ router.put('/:id', auth, restaurantOnly, async (req, res) => {
     updates.push('updated_at=NOW()');
     values.push(req.params.id);
     const { rows } = await pool.query(`UPDATE restaurants SET ${updates.join(',')} WHERE id=$${values.length} RETURNING *`, values);
+    await cache.invalidateCatalog();
     res.json({ success: true, data: rows[0] });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { serverError(res, e); }
 });
 
 // Toggle restaurant open/close
@@ -189,36 +235,34 @@ router.patch('/:id/toggle', auth, restaurantOnly, async (req, res) => {
     if (!(await ownsRestaurant(req))) return deny(res);
     const { rows } = await pool.query('UPDATE restaurants SET is_open = NOT is_open WHERE id=$1 RETURNING is_open', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ success: false, message: 'المطعم غير موجود' });
+    await cache.invalidateCatalog();
     res.json({ success: true, is_open: rows[0].is_open });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { serverError(res, e); }
 });
 
 // Get restaurant orders (owner) — طلبات البطاقة غير المدفوعة لا تظهر حتى يتأكد الدفع
 router.get('/:id/orders', auth, restaurantOnly, async (req, res) => {
   try {
     if (!(await ownsRestaurant(req))) return deny(res);
-    const { status } = req.query;
-    const safeLimit = Math.min(parseInt(req.query.limit) || 20, 100);
-    const safeOffset = Math.max(parseInt(req.query.offset) || 0, 0);
+    const status = strParam(req.query.status);
+    const safeLimit = clampInt(req.query.limit, 20, 1, 100);
+    const safeOffset = clampInt(req.query.offset, 0, 0, 100000);
+    const statuses = status ? status.split(',').map(x => x.trim()).filter(Boolean).sort() : [];
+    // ⚡️ التطبيق يسأل كل 20 ثانية: كاش 5ث لكل مطعم+فلتر، ويُبطَل فوراً عند أي تغيير على طلبات هذا المطعم
+    const rid = String(req.params.id);
+    const key = `rorders:${rid}:${statuses.join(',')}:${safeLimit}:${safeOffset}`;
+    const rows = await cache.wrapVersioned(cache.V.restOrders(rid), key, REST_ORDERS_TTL, async () => {
     let q = `SELECT o.*, u.name as customer_name, u.phone as customer_phone FROM orders o
              LEFT JOIN users u ON o.customer_id = u.id WHERE o.restaurant_id=$1
              AND NOT (o.payment_method='card' AND COALESCE(o.payment_status,'pending') <> 'paid' AND o.status='pending' AND COALESCE(o.total,0) > 0)`;
     const params = [req.params.id];
-    if (status) {
-      const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
-      if (statuses.length) { params.push(statuses); q += ` AND o.status = ANY($${params.length}::text[])`; }
-    }
+    if (statuses.length) { params.push(statuses); q += ` AND o.status = ANY($${params.length}::text[])`; }
     q += ` ORDER BY o.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(safeLimit, safeOffset);
-    const { rows } = await pool.query(q, params);
+      return (await pool.query(q, params)).rows;
+    });
     res.json({ success: true, data: rows });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { serverError(res, e); }
 });
 
 // Restaurant stats — ملكية إلزامية؛ الإيراد = subtotal (بدون رسوم التوصيل/البقشيش)؛ "اليوم" بتوقيت فلسطين
@@ -227,7 +271,8 @@ router.get('/:id/stats', auth, restaurantOnly, async (req, res) => {
     if (!(await ownsRestaurant(req))) return deny(res);
     const id = req.params.id;
     const LOCAL = `(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Hebron')`;
-    const [sales, topItems, orders, today] = await Promise.all([
+    const today = hebronRange('day');
+    const [sales, topItems, orders, todayQ] = await Promise.all([
       pool.query(`SELECT to_char(${LOCAL}, 'YYYY-MM-DD') as date, SUM(subtotal) as revenue, COUNT(*) as count
                   FROM orders WHERE restaurant_id=$1 AND status='delivered' AND created_at > NOW()-INTERVAL '30 days'
                   GROUP BY 1 ORDER BY date`, [id]),
@@ -237,17 +282,14 @@ router.get('/:id/stats', auth, restaurantOnly, async (req, res) => {
       pool.query(`SELECT status, COUNT(*) FROM orders WHERE restaurant_id=$1 GROUP BY status`, [id]),
       pool.query(`SELECT COUNT(*) FILTER (WHERE status <> 'cancelled') AS today_orders,
                          COALESCE(SUM(subtotal) FILTER (WHERE status <> 'cancelled'), 0) AS today_revenue
-                  FROM orders WHERE restaurant_id=$1 AND ${LOCAL}::date = (NOW() AT TIME ZONE 'Asia/Hebron')::date`, [id]),
+                  FROM orders WHERE restaurant_id=$1 AND created_at >= $2::timestamp AND created_at < $3::timestamp`, [id, today.start, today.end]),
     ]);
     res.json({ success: true, data: {
       sales: sales.rows, topItems: topItems.rows, ordersByStatus: orders.rows,
-      today_orders: parseInt(today.rows[0]?.today_orders || 0),
-      today_revenue: Math.round(parseFloat(today.rows[0]?.today_revenue || 0) * 100) / 100,
+      today_orders: parseInt(todayQ.rows[0]?.today_orders || 0),
+      today_revenue: Math.round(parseFloat(todayQ.rows[0]?.today_revenue || 0) * 100) / 100,
     } });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
-  }
+  } catch (e) { serverError(res, e); }
 });
 
 // ===== الزبائن المميزون (VIP) =====
@@ -262,7 +304,7 @@ router.get('/:id/customers', auth, restaurantOnly, async (req, res) => {
        GROUP BY u.id, u.name, u.phone
        ORDER BY orders DESC LIMIT 200`, [req.params.id]);
     res.json({ success: true, data: rows });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // إضافة زبون كمميز — يجب أن يكون زبوناً طلب من هذا المطعم فعلاً
@@ -286,7 +328,7 @@ router.post('/:id/vip', auth, restaurantOnly, async (req, res) => {
       try { const t = await getUserTokens(customer_id); if (t.length) await sendFCM(t, '🌟 زبون مميز!', msg, { type: 'vip' }, 'com.wasaly.customer'); } catch { /* ignore */ }
     } catch (e) { console.error('vip notify:', e.message); }
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 router.delete('/:id/vip/:customerId', auth, restaurantOnly, async (req, res) => {
@@ -294,7 +336,7 @@ router.delete('/:id/vip/:customerId', auth, restaurantOnly, async (req, res) => 
     if (!(await ownsRestaurant(req))) return deny(res);
     await pool.query('DELETE FROM vip_customers WHERE restaurant_id=$1 AND customer_id=$2', [String(req.params.id), String(req.params.customerId)]);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 module.exports = router;

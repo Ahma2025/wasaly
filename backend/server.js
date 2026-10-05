@@ -52,14 +52,14 @@ const _redisRL = getRedis();
 app.use(async (req, res, next) => {
   if (req.path === '/health') return next();
   const ip = req.ip || 'unknown';
-  if (_redisRL) {
+  if (_redisRL && _redisRL.status === 'ready') { // Redis غير جاهز → عدّاد الذاكرة (لا ننتظر اتصالاً معلّقاً)
     try {
       const key = `rl:${ip}`;
       const results = await _redisRL.multi().set(key, 0, 'PX', RL_WINDOW, 'NX').incr(key).exec();
       const n = Number(results?.[1]?.[1]) || 0;
       if (n > RL_MAX) return res.status(429).json({ success: false, message: 'طلبات كثيرة، انتظر قليلاً' });
       return next();
-    } catch { return next(); } // Redis معطّل → لا نمنع المستخدم
+    } catch { /* Redis معطّل → نكمل بعدّاد الذاكرة */ }
   }
   const now = Date.now();
   let r = _rl.get(ip);
@@ -154,10 +154,13 @@ app.get('/portal/*', (req, res) => res.sendFile(path.join(portalDist, 'index.htm
 // 404 للـ API
 app.use('/api', (req, res) => res.status(404).json({ success: false, message: 'المسار غير موجود' }));
 
+const { isInputError } = require('./utils/http');
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
+  // مدخلات غير صالحة تصل Postgres (مثلاً نص لعمود رقمي) → 400 وليس 500
+  if (isInputError(err)) return res.status(400).json({ success: false, message: 'قيمة غير صالحة في الطلب' });
   const status = err.status || err.statusCode || (err.type === 'entity.parse.failed' ? 400 : 500);
-  if (status >= 500) console.error(err.stack || err.message);
+  if (status >= 500) console.error(`[${req.method} ${req.originalUrl.split('?')[0]}]`, err.stack || err.message);
   const message = status < 500 ? (err.expose === false ? 'خطأ في الطلب' : (err.message || 'خطأ في الطلب')) : 'حدث خطأ في الخادم';
   res.status(status).json({ success: false, message });
 });
