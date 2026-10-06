@@ -121,6 +121,7 @@ app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/reviews', require('./routes/reviews'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/categories', require('./routes/categories'));
+app.use('/api/store-types', require('./routes/store-types'));
 app.use('/api/banners', require('./routes/banners'));
 app.use('/api/wallet', require('./routes/wallet'));
 app.use('/api/support', require('./routes/support'));

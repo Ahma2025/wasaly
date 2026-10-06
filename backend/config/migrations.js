@@ -3,6 +3,9 @@
 // ملاحظة: أعمدة المال الجديدة DOUBLE PRECISION (ترجع أرقاماً للعميل، لا نصوصاً مثل NUMERIC) والتقريب لخانتين بالكود.
 const MIGRATIONS = [
   `ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS store_type VARCHAR(20) DEFAULT 'restaurant'`,
+  // 🏪 أقسام المتاجر: القيمة القديمة 'market' = سوبرماركت (الفلتر ?store_type=market ما زال يعمل كـ"كل غير المطاعم")
+  `UPDATE restaurants SET store_type='supermarket' WHERE store_type='market'`,
+  `CREATE INDEX IF NOT EXISTS idx_rest_store_type ON restaurants(store_type) WHERE is_active=true`,
   `ALTER TABLE banners ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
   `ALTER TABLE banners ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
   `CREATE TABLE IF NOT EXISTS vip_customers (id SERIAL PRIMARY KEY, restaurant_id TEXT, customer_id TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,

@@ -8,6 +8,7 @@ const { serverError, clampInt, strParam } = require('../utils/http');
 const { hebronRange } = require('../utils/time');
 const { invalidateSocketAuth } = require('../utils/socket');
 const driverLoc = require('../utils/driverLocation');
+const storeTypes = require('../utils/storeTypes');
 
 const DASH_TTL = Number(process.env.CACHE_ADMIN_DASHBOARD_TTL_MS) || 30000;
 const ANALYTICS_TTL = Number(process.env.CACHE_ADMIN_ANALYTICS_TTL_MS) || 60000;
@@ -169,6 +170,8 @@ router.post('/restaurants', auth, adminOnly, async (req, res) => {
       phone, email, min_order, delivery_fee, delivery_time_min, delivery_time_max,
       owner_phone, owner_password, owner_name, store_type } = req.body;
     if (!name_ar) return res.status(400).json({ success: false, message: 'اسم المطعم مطلوب' });
+    const stKey = (store_type === undefined || store_type === null || store_type === '') ? 'restaurant' : storeTypes.normalize(store_type);
+    if (!stKey) return res.status(400).json({ success: false, message: 'قسم المتجر غير معروف' });
 
     let owner_id = null;
     if (owner_phone) {
@@ -195,7 +198,7 @@ router.post('/restaurants', auth, adminOnly, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,true,true,$15) RETURNING *`,
       [name_ar, description_ar, category_id || null, city, address, lat || 31.9, lng || 35.2,
        phone, email, min_order || 10, delivery_fee || 5, delivery_time_min || 20, delivery_time_max || 40, owner_id,
-       store_type || 'restaurant']);
+       stKey]);
     res.status(201).json({ success: true, data: rows[0] });
   } catch (e) { serverError(res, e); }
 });
@@ -206,7 +209,13 @@ router.put('/restaurants/:id', auth, adminOnly, async (req, res) => {
     const allowed = ['name_ar', 'name_en', 'description_ar', 'category_id', 'city', 'address', 'lat', 'lng', 'phone', 'email',
       'delivery_fee', 'min_order', 'delivery_time_min', 'delivery_time_max', 'store_type', 'logo', 'cover_image', 'opens_at', 'closes_at'];
     const sets = []; const vals = [];
-    for (const k of allowed) if (req.body[k] !== undefined) { vals.push(req.body[k]); sets.push(`${k}=$${vals.length}`); }
+    const body = { ...req.body };
+    if (body.store_type !== undefined) {
+      const k = storeTypes.normalize(body.store_type);
+      if (!k) return res.status(400).json({ success: false, message: 'قسم المتجر غير معروف' });
+      body.store_type = k; // 'market' القديمة تُحفظ supermarket
+    }
+    for (const k of allowed) if (body[k] !== undefined) { vals.push(body[k]); sets.push(`${k}=$${vals.length}`); }
     if (!sets.length) return res.status(400).json({ success: false, message: 'لا يوجد ما يُحدَّث' });
     vals.push(req.params.id);
     await pool.query(`UPDATE restaurants SET ${sets.join(', ')}, updated_at=NOW() WHERE id=$${vals.length}`, vals);

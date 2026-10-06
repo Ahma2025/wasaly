@@ -5,6 +5,7 @@ const { saveNotification, sendFCM, getUserTokens, notifyUser } = require('../uti
 const cache = require('../utils/cache');
 const { serverError, intParam, clampInt, strParam } = require('../utils/http');
 const { hebronRange } = require('../utils/time');
+const storeTypes = require('../utils/storeTypes');
 
 // ⏱️ مدد الكاش (ms) — قابلة للضبط بمتغيّرات البيئة
 const LIST_TTL = Number(process.env.CACHE_RESTAURANTS_TTL_MS) || 45000;
@@ -36,7 +37,10 @@ router.get('/', optionalAuth, async (req, res) => {
   try {
     const lat = strParam(req.query.lat), lng = strParam(req.query.lng);
     const search = strParam(req.query.search), sort = strParam(req.query.sort), city = strParam(req.query.city);
-    const store_type = strParam(req.query.store_type);
+    const stFilter = storeTypes.parseFilter(strParam(req.query.store_type));
+    // قسم غير معروف → قائمة فارغة (نفس سلوك التطابق التام القديم، بلا 400 للتطبيقات المنشورة)
+    if (stFilter && stFilter.invalid) return res.json({ success: true, data: [] });
+    const store_type = stFilter ? [...stFilter.values].sort().join(',') + (stFilter.includeNull ? '+null' : '') : '';
     const owner_id = intParam(req.query.owner_id), category_id = intParam(req.query.category_id);
     if (owner_id === null || category_id === null) return res.status(400).json({ success: false, message: 'قيمة غير صالحة في الطلب' });
     const safeLimit = clampInt(req.query.limit, 20, 1, 100);
@@ -75,7 +79,10 @@ router.get('/', optionalAuth, async (req, res) => {
     if (category_id !== undefined) { query += ` AND r.category_id = $${paramIdx++}`; params.push(category_id); }
     if (city) { query += ` AND r.city = $${paramIdx++}`; params.push(city); }
     if (search) { query += ` AND (r.name_ar ILIKE $${paramIdx} OR r.name_en ILIKE $${paramIdx})`; params.push(`%${search}%`); paramIdx++; }
-    if (store_type) { query += ` AND r.store_type = $${paramIdx++}`; params.push(store_type); }
+    if (stFilter) {
+      query += ` AND (r.store_type = ANY($${paramIdx++}::text[])${stFilter.includeNull ? ' OR r.store_type IS NULL' : ''})`;
+      params.push(stFilter.values);
+    }
     else if (owner_id === undefined) { query += ` AND (r.store_type = 'restaurant' OR r.store_type IS NULL)`; }
 
     const orderMap = { rating: 'r.rating DESC', fastest: 'r.delivery_time_min ASC', nearest: 'distance_km ASC NULLS LAST', newest: 'r.created_at DESC' };
@@ -88,6 +95,10 @@ router.get('/', optionalAuth, async (req, res) => {
     // نسخة لكل طلب (لا نعدّل كائنات الكاش المشتركة) + مسافة دقيقة من موقع الزبون الفعلي
     const out = rows.map(r => {
       const o = { ...r };
+      // القسم المطبَّع + market_type للتطبيقات القديمة (تصنّف شاشة الماركت به قبل التخمين من الاسم)
+      const st = storeTypes.normalize(r.store_type) || 'restaurant';
+      o.store_type = st;
+      if (st !== 'restaurant' && !o.market_type) o.market_type = st === 'sweets' ? 'bakery' : st;
       if (hasLoc && r.lat !== null && r.lat !== undefined && r.lng !== null && r.lng !== undefined) {
         o.distance_km = round2s(haversine(exactLat, exactLng, parseFloat(r.lat), parseFloat(r.lng)));
       }

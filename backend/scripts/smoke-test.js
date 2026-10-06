@@ -471,6 +471,33 @@ async function waitEvent(sock, ev, pred = () => true, ms = 4000) {
     const own = expectStatus(await call('GET', `/restaurants?owner_id=REPLACE`.replace('REPLACE', 0)), 200);
     assert(Array.isArray(own.data), 'owner filter');
   });
+  await step('store types: /store-types list + counts, filter by key / list / legacy market, admin validation', async () => {
+    const before = expectStatus(await call('GET', '/store-types'), 200).data;
+    assert(Array.isArray(before) && before.length >= 9 && before.every(t => t.key && t.name_ar && t.emoji && typeof t.count === 'number'), 'store-types shape');
+    const petsBefore = before.find(t => t.key === 'pets').count;
+    expectStatus(await call('POST', '/admin/restaurants', { token: S.admin, body: { name_ar: 'نوع خطأ', store_type: 'casino' } }), 400);
+    const d = expectStatus(await call('POST', '/admin/restaurants', { token: S.admin, body: {
+      name_ar: 'متجر حيوانات', lat: R_LAT, lng: R_LNG, store_type: 'pets', owner_phone: phone(), owner_password: pass() } }), 201);
+    const pid = d.data.id;
+    assert(d.data.store_type === 'pets', 'store_type not saved');
+    const after = expectStatus(await call('GET', '/store-types'), 200).data;
+    assert(after.find(t => t.key === 'pets').count === petsBefore + 1, 'pets count not updated (cache not invalidated?)');
+    const pets = expectStatus(await call('GET', '/restaurants?store_type=pets&limit=100'), 200).data;
+    assert(pets.some(r => r.id === pid) && pets.every(r => r.store_type === 'pets'), 'filter by key');
+    const legacy = expectStatus(await call('GET', '/restaurants?store_type=market&limit=100'), 200).data;
+    assert(legacy.some(r => r.id === pid) && legacy.every(r => r.store_type !== 'restaurant'), 'legacy market = all non-restaurant');
+    assert(legacy.find(r => r.id === pid).market_type === 'pets', 'market_type for old apps');
+    const multi = expectStatus(await call('GET', '/restaurants?store_type=pets,restaurant&limit=100'), 200).data;
+    assert(multi.some(r => r.id === pid) && multi.some(r => r.id === S.restA), 'comma list filter');
+    const plain = expectStatus(await call('GET', '/restaurants?limit=100'), 200).data;
+    assert(!plain.some(r => r.id === pid) && plain.some(r => r.id === S.restA), 'default list = restaurants only');
+    expectStatus(await call('GET', '/restaurants?store_type=nope'), 200);
+    expectStatus(await call('PUT', `/admin/restaurants/${pid}`, { token: S.admin, body: { store_type: 'nope' } }), 400);
+    expectStatus(await call('PUT', `/admin/restaurants/${pid}`, { token: S.admin, body: { store_type: 'market' } }), 200);
+    const sm = expectStatus(await call('GET', '/restaurants?store_type=supermarket&limit=100'), 200).data;
+    assert(sm.some(r => r.id === pid && r.store_type === 'supermarket'), 'market alias saved as supermarket');
+    expectStatus(await call('DELETE', `/admin/restaurants/${pid}`, { token: S.admin }), 200);
+  });
   await step('restaurant stats: other owner → 403, own → 200', async () => {
     expectStatus(await call('GET', `/restaurants/${S.restA}/stats`, { token: S.owner2 }), 403);
     expectStatus(await call('GET', `/restaurants/${S.restA}/stats`, { token: S.owner }), 200);
