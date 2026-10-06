@@ -6,35 +6,49 @@ import { FiUsers, FiShoppingBag, FiTruck, FiPackage, FiClock, FiPlus, FiBell, Fi
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import PageSkeleton from '../components/Skeleton';
-import { statusMeta, fmtToday, num, fmtDate } from '../utils/format';
-import { AnimatedNumber, KpiTile, SectionHeader, EmptyState, ErrorState, ChartTooltip } from '../components/ui';
+import { statusMeta, fmtToday, num, fmtDate, lastDays, hebronHour } from '../utils/format';
+import { arCount } from '../utils/plural';
+import { AnimatedNumber, KpiTile, SectionHeader, EmptyState, ErrorState, ChartTooltip, useVisiblePolling } from '../components/ui';
 
-const hello = () => { const h = new Date().getHours(); return h < 12 ? 'صباح الخير' : h < 18 ? 'مساء الخير' : 'مساء النور'; };
+// «مساء النور» ردّ على التحية لا تحية — A-42
+const hello = () => { const h = hebronHour(); return h < 12 ? 'صباح الخير' : 'مساء الخير'; };
+const POLL_MS = 45000;
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const [data, setData] = useState(readCache('adm_dashboard') || null);
   const [loading, setLoading] = useState(!readCache('adm_dashboard'));
+  const [stale, setStale] = useState(false);
 
-  const load = useCallback(() => {
-    setLoading(l => l || !data);
-    api.get('/admin/dashboard')
-      .then(r => { setData(r.data); writeCache('adm_dashboard', r.data); })
-      .catch(e => { if (e?.status !== 401 && e?.status !== 403) toast.error('فشل تحميل البيانات'); })
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(l => l || !data);
+    return api.get('/admin/dashboard')
+      .then(r => { setData(r.data); writeCache('adm_dashboard', r.data); setStale(false); })
+      .catch(e => { setStale(true); if (!silent && e?.status !== 401 && e?.status !== 403) toast.error('فشل تحميل البيانات', { id: 'dash' }); })
       .finally(() => setLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
+  // «مباشر» حقيقي: تحديث صامت كل 45 ثانية أثناء ظهور الصفحة — A-36
+  useVisiblePolling(() => load(true), POLL_MS);
 
   if (loading) return <div className="page"><PageSkeleton cards={4} rows={6} /></div>;
-  if (!data) return <div className="page"><ErrorState onRetry={load} /></div>;
+  if (!data) return <div className="page"><ErrorState onRetry={() => load()} /></div>;
 
-  const statusRows = data?.ordersByStatus || [];
+  // picked_up و on_the_way نفس التسمية → صف واحد
+  const statusRows = Object.values((data?.ordersByStatus || []).reduce((acc, s) => {
+    const k = s.status === 'picked_up' ? 'on_the_way' : s.status;
+    acc[k] = { status: k, count: (acc[k]?.count || 0) + (Number(s.count) || 0) };
+    return acc;
+  }, {}));
   const statusTotal = statusRows.reduce((a, s) => a + (Number(s.count) || 0), 0);
   const maxStatus = Math.max(1, ...statusRows.map(s => Number(s.count) || 0));
-  const weekly = (data?.weeklyRevenue || []).map(w => ({ ...w, revenue: num(w.revenue) }));
+  // آخر 7 أيام بتوقيت فلسطين مع أصفار للأيام بلا مبيعات، والمتوسط ÷ 7 — A-19
+  const byDay = Object.fromEntries((data?.weeklyRevenue || []).map(w => [String(w.date).slice(0, 10), w]));
+  const weekly = lastDays(7).map(d => ({ date: d, revenue: num(byDay[d]?.revenue), orders: parseInt(byDay[d]?.orders) || 0 }));
   const weekTotal = weekly.reduce((a, w) => a + w.revenue, 0);
-  const weekAvg = weekly.length ? weekTotal / weekly.length : 0;
+  const weekAvg = weekTotal / 7;
+  const hasWeek = weekTotal > 0;
 
   return (
     <div className="page">
@@ -53,23 +67,25 @@ export default function Dashboard() {
           <div className="relative flex flex-col sm:flex-row sm:items-end gap-5">
             <div className="flex-1 min-w-0">
               <p className="hidden lg:block text-white/80 text-xs font-bold mb-3">{hello()} · {fmtToday()}</p>
-              <p className="text-white/90 text-sm font-bold flex items-center gap-2">إجمالي مدفوعات اليوم <span className="glass rounded-full px-2 py-0.5 text-[10px] flex items-center gap-1"><span className="live-dot !bg-white" /> مباشر</span></p>
+              <p className="text-white/90 text-sm font-bold flex items-center gap-2">إجمالي مدفوعات اليوم {stale
+                ? <span className="glass rounded-full px-2 py-0.5 text-[10px] flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-white/60" /> غير محدّث</span>
+                : <span className="glass rounded-full px-2 py-0.5 text-[10px] flex items-center gap-1" title="يتحدّث كل 45 ثانية"><span className="live-dot !bg-white" /> مباشر</span>}</p>
               <p className="text-[44px] sm:text-[56px] leading-none font-black mt-2 tracking-tight">
                 <AnimatedNumber value={num(data?.revenueToday)} decimals={2} duration={1200} /><span className="text-2xl sm:text-3xl font-extrabold mr-1 opacity-90">₪</span>
               </p>
-              <p className="text-white/70 text-[11px] font-medium mt-2 leading-relaxed max-w-md">طلبات مُسلّمة اليوم · يشمل رسوم التوصيل والإكرامية — ليس عمولة المنصّة (راجع المحاسبة)</p>
+              <p className="text-white/70 text-[11px] font-medium mt-2 leading-relaxed max-w-md">طلبات مُسلّمة اليوم · يشمل رسوم التوصيل وإكرامية السائق — ليس عمولة المنصّة (راجع المحاسبة)</p>
               <div className="flex gap-2 mt-4 flex-wrap">
                 <button onClick={() => navigate('/orders')} className="glass rounded-full px-3.5 py-1.5 text-xs font-extrabold flex items-center gap-1.5 hover:bg-white/25">
-                  <FiPackage /> <span className="num">{data?.ordersToday ?? 0}</span> طلب اليوم
+                  <FiPackage /> {arCount(data?.ordersToday ?? 0, 'order', { zero: 'لا طلبات' })} اليوم
                 </button>
                 {data?.pendingOrders > 0 && (
-                  <button onClick={() => navigate('/orders')} className="bg-white text-brand-700 rounded-full px-3.5 py-1.5 text-xs font-extrabold flex items-center gap-1.5 shadow-lg">
+                  <button onClick={() => navigate('/orders?status=pending')} className="bg-white text-brand-700 rounded-full px-3.5 py-1.5 text-xs font-extrabold flex items-center gap-1.5 shadow-lg">
                     <FiClock /> <span className="num">{data.pendingOrders}</span> بالانتظار
                   </button>
                 )}
               </div>
             </div>
-            {weekly.length > 1 && (
+            {hasWeek && (
               <div className="sm:w-[46%] h-[110px] sm:h-[130px] -mx-2 sm:mx-0" aria-hidden="true">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={weekly} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
@@ -86,10 +102,10 @@ export default function Dashboard() {
               </div>
             )}
           </div>
-          {weekly.length > 0 && (
+          {hasWeek && (
             <div className="relative grid grid-cols-2 gap-3 mt-5 pt-4 border-t border-white/20">
               <div><p className="text-white/70 text-[11px] font-bold">مدفوعات 7 أيام</p><p className="text-lg font-black"><AnimatedNumber value={weekTotal} decimals={0} /> ₪</p></div>
-              <div><p className="text-white/70 text-[11px] font-bold">المتوسط اليومي</p><p className="text-lg font-black"><AnimatedNumber value={weekAvg} decimals={0} /> ₪</p></div>
+              <div><p className="text-white/70 text-[11px] font-bold">المتوسط اليومي (÷ 7)</p><p className="text-lg font-black"><AnimatedNumber value={weekAvg} decimals={0} /> ₪</p></div>
             </div>
           )}
         </section>
@@ -123,12 +139,12 @@ export default function Dashboard() {
         <KpiTile icon={<FiShoppingBag />} label="المتاجر النشطة" value={data?.totalRestaurants} tint="#16A34A" onClick={() => navigate('/restaurants')} />
         <KpiTile icon={<FiTruck />} label="سائقون متصلون" value={data?.activeDrivers} tint="#8B5CF6" onClick={() => navigate('/live')} />
         <KpiTile icon={<FiPackage />} label="طلبات اليوم" value={data?.ordersToday} tint="#FF6B00" onClick={() => navigate('/orders')}
-          hint={data?.pendingOrders > 0 ? `${data.pendingOrders} بانتظار المطعم` : undefined} />
+          hint={data?.pendingOrders > 0 ? `${arCount(data.pendingOrders, 'order')} بانتظار المطعم` : undefined} />
       </div>
 
       <div className="grid gap-4 lg:gap-6 lg:grid-cols-3">
         {/* Weekly chart */}
-        {weekly.length > 0 ? (
+        {hasWeek ? (
           <section className="card p-4 sm:p-5 lg:col-span-2">
             <SectionHeader title="مدفوعات آخر 7 أيام" hint="₪ · الطلبات المسلّمة فقط"
               action={<span className="text-[11px] font-extrabold text-ink-3 bg-surface-sunken rounded-full px-2.5 py-1 num">{weekTotal.toFixed(0)} ₪</span>} />

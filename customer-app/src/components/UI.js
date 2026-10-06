@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Animated, Modal, Pressable, PanResponder, Dimensions, TouchableOpacity, Platform, Easing } from 'react-native';
+import { View, Text, StyleSheet, Animated, Modal, Pressable, PanResponder, Dimensions, TouchableOpacity, Platform, Easing, Keyboard } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,7 +18,7 @@ export function Chip({ label, icon, emoji, selected, onPress, size = 'md', style
   const fg = selected ? '#FFF' : (tone || C.text);
   return (
     <Press onPress={() => { haptic.select(); onPress && onPress(); }} haptic={false} scaleTo={0.94}
-      accessibilityRole="button" accessibilityLabel={accessibilityLabel || label}
+      accessibilityRole="button" accessibilityLabel={accessibilityLabel || label} accessibilityState={{ selected: !!selected }}
       style={[{ borderRadius: 999 }, selected && C.shadow.glow, style]}>
       <View style={[styles.chip, pad, { backgroundColor: C.card, borderColor: selected ? 'transparent' : C.border }]}>
         {selected && <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[StyleSheet.absoluteFill, { borderRadius: 999 }]} />}
@@ -154,6 +154,33 @@ export function BottomSheet({ visible, onClose, children, title, footer, maxHeig
   const drag = useRef(new Animated.Value(0)).current;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // الكيبورد ما يغطي حقول الشيت (مثل "سبب آخر" بنافذة الإلغاء) — نرفع الشيت بارتفاعه
+  const [kbH, setKbH] = useState(0);
+  const kbRef = useRef(0);
+  const sheetRef = useRef(null);
+  useEffect(() => {
+    if (!mounted) return undefined;
+    const showEv = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEv = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const apply = (v) => { kbRef.current = v; setKbH(v); };
+    const a = Keyboard.addListener(showEv, (e) => {
+      const kbTop = e?.endCoordinates?.screenY;
+      const kbHeight = e?.endCoordinates?.height || 0;
+      // iOS: شريط "تم" فوق الكيبورد (KeyboardToolbar) ارتفاعه 44
+      const extra = Platform.OS === 'ios' ? 44 : 0;
+      const node = sheetRef.current;
+      if (node && node.measureInWindow && Number.isFinite(kbTop)) {
+        // نقيس فعلياً: لو النافذة انضغطت لحالها (adjustResize) ما منضيف شي
+        node.measureInWindow((x, y, w, h) => {
+          const bottom = y + h - kbRef.current;
+          const overlap = bottom - kbTop;
+          apply(Number.isFinite(overlap) ? Math.max(0, overlap) + (overlap > 0 ? extra : 0) : kbHeight + extra);
+        });
+      } else apply(kbHeight + extra);
+    });
+    const b = Keyboard.addListener(hideEv, () => apply(0));
+    return () => { a.remove(); b.remove(); };
+  }, [mounted]);
 
   useEffect(() => {
     if (visible) {
@@ -186,7 +213,7 @@ export function BottomSheet({ visible, onClose, children, title, footer, maxHeig
       <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: C.overlay, opacity: fade }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="إغلاق" />
       </Animated.View>
-      <Animated.View style={[styles.sheet, { backgroundColor: C.card, maxHeight: SCREEN_H * maxHeight, paddingBottom: footer ? 0 : Math.max(insets.bottom, 16), transform: [{ translateY: Animated.add(y, drag) }] }]}>
+      <Animated.View ref={sheetRef} style={[styles.sheet, { backgroundColor: C.card, maxHeight: SCREEN_H * maxHeight - kbH, paddingBottom: (footer ? 0 : Math.max(insets.bottom, 16)) + kbH, transform: [{ translateY: Animated.add(y, drag) }] }]}>
         <View {...pan.panHandlers} style={styles.handleArea}>
           <View style={[styles.handle, { backgroundColor: C.border }]} />
           {!!title && (

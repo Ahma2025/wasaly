@@ -79,7 +79,7 @@ export default function SplashScreen({ onFinish, onReady }) {
         <Animated.Text style={[styles.name, { opacity: word, transform: [{ translateY: wordY }] }]}>وصلّي</Animated.Text>
         <Animated.View style={[styles.tagPill, { opacity: word }]}>
           <View style={styles.tagDot} />
-          <Text style={styles.tag}>كابتن التوصيل</Text>
+          <Text style={styles.tag}>تطبيق السائق</Text>
         </Animated.View>
 
         <View style={styles.barTrack}>
@@ -89,7 +89,7 @@ export default function SplashScreen({ onFinish, onReady }) {
         </View>
       </Animated.View>
 
-      <Text style={styles.bottom}>وصلّي · تطبيق المندوبين</Text>
+      <Text style={styles.bottom}>وصلّي · تطبيق السائقين</Text>
     </View>
   );
 }

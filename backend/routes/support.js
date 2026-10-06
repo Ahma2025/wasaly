@@ -131,9 +131,10 @@ router.post('/chat/user/:userId', auth, adminOnly, async (req, res) => {
     try {
       const { rows: ur } = await pool.query('SELECT role FROM users WHERE id::text=$1', [uid]);
       const role = ur[0]?.role || 'customer';
-      saveNotification(uid, `وصلي إدارة: ${msg}`, 'support', {});
-      notifyUser(req.io, uid, 'support_message', {});
-      try { const t = await getUserTokens(uid); if (t.length) await sendFCM(t, '💬 وصلي إدارة', msg, { type: 'support' }, bundleFor(role)); } catch {}
+      // C-26/C-27/D-11: نوع support + نص الرد كـ body (التطبيقات توجّه type=support → شاشة محادثة الدعم)
+      saveNotification(uid, `وصلي إدارة: ${msg}`, 'support', { screen: 'SupportChat' }, msg);
+      notifyUser(req.io, uid, 'support_message', { message: msg });
+      try { const t = await getUserTokens(uid); if (t.length) await sendFCM(t, '💬 وصلي إدارة', msg, { type: 'support', screen: 'SupportChat' }, bundleFor(role)); } catch {}
     } catch (e) {}
     res.status(201).json({ success: true, data: rows[0] });
   } catch (e) { serverError(res, e); }

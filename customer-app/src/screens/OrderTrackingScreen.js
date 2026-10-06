@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView, Animated, ActivityIndicator, Modal, Pressable, TextInput, Alert, BackHandler } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView, Animated, ActivityIndicator, Modal, Pressable, TextInput, Alert, BackHandler, RefreshControl } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
@@ -7,18 +7,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import { LinearGradient } from 'expo-linear-gradient';
-import api from '../utils/api';
+import api, { isNetworkError, NETWORK_MESSAGE } from '../utils/api';
 import { Skeleton } from '../components/Skeleton';
+import { plural, pluralNoun } from '../utils/plural';
 import GradientHeader from '../components/GradientHeader';
 import { FadeIn, PopIn, Press, Pulse, Ripple, GradientButton } from '../components/Anim';
 import { BottomSheet, Chip, Burst, ProgressRing } from '../components/UI';
 import EmptyState from '../components/EmptyState';
 import { haptic, isReducedMotion, EASE_OUT, SPRING_POP } from '../utils/motion';
 import { useTheme } from '../context/ThemeContext';
-import { SOCKET_URL, SUPPORT_PHONE } from '../config';
+import { SOCKET_URL, SUPPORT_PHONE, SERVER_URL } from '../config';
 import { leafletPage, TILE_URL } from '../utils/leaflet';
-import { statusLabel, CANCELLABLE_STATUSES, isPersonalOrder } from '../utils/status';
-import { startCardPayment } from '../utils/payments';
+import { statusLabel, CANCELLABLE_STATUSES, isPersonalOrder, isDriverAssigned, isAwaitingCardPayment } from '../utils/status';
+import { startCardPayment, abandonCardPayment } from '../utils/payments';
 
 // خطوات حسب نوع الطلب
 const STEPS = {
@@ -37,12 +38,16 @@ const STEPS = {
     { key: 'ready',      label: 'جاهز للاستلام', icon: 'storefront-outline',       desc: 'طلبك جاهز — تفضّل استلمه من المطعم' },
     { key: 'delivered',  label: 'تم الاستلام',   icon: 'gift-outline',             desc: 'بالهنا والعافية! 🎉' },
   ],
+  // التوصيل الشخصي: قبول السائق = preparing/ready بالسيرفر → خطوة «السائق بالطريق للاستلام»
   personal: [
-    { key: 'confirmed',  label: 'البحث عن سائق', icon: 'search-outline',           desc: 'عم نبحث عن أقرب سائق متاح' },
-    { key: 'on_the_way', label: 'في الطريق',     icon: 'bicycle-outline',          desc: 'السائق في الطريق' },
-    { key: 'delivered',  label: 'تم التوصيل',    icon: 'flag-outline',             desc: 'تم التوصيل بنجاح 🎉' },
+    { key: 'confirmed',  label: 'البحث عن سائق',          icon: 'search-outline',  desc: 'عم نبحث عن أقرب سائق متاح' },
+    { key: 'to_pickup',  label: 'السائق بالطريق للاستلام', icon: 'navigate-outline', desc: 'السائق قبل طلبك ومتوجّه لنقطة الاستلام' },
+    { key: 'on_the_way', label: 'في الطريق',              icon: 'bicycle-outline', desc: 'السائق استلم وهو بالطريق للتسليم' },
+    { key: 'delivered',  label: 'تم التوصيل',             icon: 'flag-outline',    desc: 'تم التوصيل بنجاح 🎉' },
   ],
 };
+// حالة السيرفر → مفتاح الخطوة (الشخصي)
+const PERSONAL_STEP = { pending: 'confirmed', confirmed: 'confirmed', preparing: 'to_pickup', ready: 'to_pickup', on_the_way: 'on_the_way', delivered: 'delivered' };
 
 const CANCEL_REASONS = ['تأخر الطلب', 'غيّرت رأيي', 'طلبت بالغلط', 'بدي أعدّل الطلب'];
 
@@ -88,6 +93,7 @@ export default function OrderTrackingScreen() {
   const route = useRoute();
   const id = route.params?.orderId;
   const fromCheckout = !!route.params?.fromCheckout;
+  const cashChosen = !!route.params?.cashChosen;
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { colors: COLORS, isDark } = useTheme();
@@ -96,13 +102,17 @@ export default function OrderTrackingScreen() {
   const [order, setOrder] = useState(null);
   const [driverLoc, setDriverLoc] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [now, setNow] = useState(Date.now());
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelling, setCancelling] = useState(false);
   const [mapFailed, setMapFailed] = useState(false);
-  const [celebrate, setCelebrate] = useState(fromCheckout);
+  const [celebrate, setCelebrate] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [switchingCash, setSwitchingCash] = useState(false);
+  const celebratedRef = useRef(false);
   const webViewRef = useRef(null);
   const socketRef = useRef(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -139,11 +149,20 @@ export default function OrderTrackingScreen() {
       if (o?.group_id) { navigation.replace('GroupTracking', { groupId: o.group_id, fromCheckout }); return; }
       setOrder(o);
       setLoadError('');
-      if (o.driver_lat && o.driver_lng) setDriverLoc({ lat: parseFloat(o.driver_lat), lng: parseFloat(o.driver_lng) });
+      // موقع السائق فقط بعد ما يقبل الطلب فعلاً (مش وقت العرض عليه)
+      if (o.driver_lat && o.driver_lng && isDriverAssigned(o)) setDriverLoc({ lat: parseFloat(o.driver_lat), lng: parseFloat(o.driver_lng) });
     } catch (e) {
-      setLoadError(e?.message === 'Network error' ? 'تعذّر الاتصال — تأكد من الإنترنت' : (e?.message || 'تعذّر تحميل الطلب'));
-    } finally { setLoading(false); }
+      setLoadError(isNetworkError(e) ? NETWORK_MESSAGE : (e?.message || 'تعذّر تحميل الطلب'));
+    } finally { setLoading(false); setRefreshing(false); }
   }, [id, navigation, fromCheckout]);
+
+  // احتفال "تم استلام طلبك" بعد الطلب — مش وهو لسا بانتظار إتمام الدفع بالبطاقة
+  useEffect(() => {
+    if (!fromCheckout || celebratedRef.current || !order) return;
+    if (isAwaitingCardPayment(order) || order.status === 'cancelled') return;
+    celebratedRef.current = true;
+    setCelebrate(true);
+  }, [fromCheckout, order]);
 
   // تحديث عند كل رجوع للشاشة (مثلاً بعد التقييم) + كل 30 ثانية احتياطاً
   useFocusEffect(useCallback(() => {
@@ -162,7 +181,11 @@ export default function OrderTrackingScreen() {
         socketRef.current = socket;
         socket.on('driver:location', ({ lat, lng, orderId, order_id }) => {
           const oid = orderId ?? order_id;
-          if (!oid || String(oid) === String(id)) setDriverLoc({ lat: parseFloat(lat), lng: parseFloat(lng) });
+          if (!oid || String(oid) === String(id)) {
+            // قبل قبول السائق ما منعرض موقع حدا
+            if (orderRef.current && !isDriverAssigned(orderRef.current)) return;
+            setDriverLoc({ lat: parseFloat(lat), lng: parseFloat(lng) });
+          }
         });
         socket.on('order_status', ({ order_id, status }) => {
           if (String(order_id) === String(id)) {
@@ -183,12 +206,15 @@ export default function OrderTrackingScreen() {
     webViewRef.current.postMessage(JSON.stringify({ type: 'driver_location', lat: driverLoc.lat, lng: driverLoc.lng }));
   }, [driverLoc]);
 
+  const orderRef = useRef(null);
+  orderRef.current = order;
   const personal = isPersonalOrder(order);
   const orderType = personal ? 'personal' : (order?.order_type === 'pickup' ? 'pickup' : 'delivery');
   const steps = STEPS[orderType];
   const status = order?.status;
   const isCancelled = status === 'cancelled';
   const isDelivered = status === 'delivered';
+  const driverAssigned = isDriverAssigned(order);
   const showMap = !!order && !isCancelled && orderType !== 'pickup' && status !== 'pending';
 
   // تُبنى الخريطة مرة واحدة لكل طلب؛ حركة السائق عبر postMessage
@@ -199,20 +225,50 @@ export default function OrderTrackingScreen() {
       startLat, startLng,
       startEmoji: personal ? '🟢' : '🏪', startLabel: personal ? 'نقطة الاستلام' : 'المطعم',
       destLat: order.delivery_lat, destLng: order.delivery_lng,
-      driverLat: order.driver_lat, driverLng: order.driver_lng, dark: isDark,
+      driverLat: driverAssigned ? order.driver_lat : null, driverLng: driverAssigned ? order.driver_lng : null, dark: isDark,
     }) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [showMap, order?.id, startLat, startLng, order?.delivery_lat, order?.delivery_lng, isDark]
   );
 
+  // دفع بالبطاقة لسا ما اكتمل: «ادفع الآن» (مع حماية من فتح أكثر من صفحة دفع) أو «ادفع كاش بدلاً من ذلك»
+  const payNow = async () => {
+    if (paying) return;
+    setPaying(true);
+    try { await startCardPayment(navigation, id); } finally { setPaying(false); }
+  };
+  const payCash = () => {
+    Alert.alert('الدفع كاش عند الاستلام', 'بدنا نحوّل طلبك لكاش عند الاستلام ونبعته للمطعم الآن. متأكد؟', [
+      { text: 'تراجع', style: 'cancel' },
+      {
+        text: 'نعم، كاش', onPress: async () => {
+          setSwitchingCash(true);
+          const res = await abandonCardPayment(id);
+          await fetchOrder();
+          setSwitchingCash(false);
+          if (res === 'paid') Alert.alert('تم الدفع ✅', 'لقينا دفعتك بالبطاقة مكتملة — طلبك بالطريق للمطعم.');
+          else if (res === 'unsupported' || res === 'failed') {
+            Alert.alert('الدفع كاش', res === 'failed'
+              ? 'تعذّر الاتصال — حاول مرة ثانية بعد شوي.'
+              : 'تمام — رح يوصل طلبك للمطعم كطلب كاش خلال دقائق.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const paidByCard = order?.payment_method === 'card' && order?.payment_status === 'paid';
+  const cardRefundNote = paidByCard ? `المبلغ المدفوع بالبطاقة (${parseFloat(order.total || 0).toFixed(2)}₪) رح يرجع لبطاقتك خلال أيام عمل، وفريق الدعم رح يتابع معك.` : '';
+
   const cancelOrder = async () => {
     setCancelling(true);
     try {
-      await api.patch(`/orders/${id}/cancel`, { reason: cancelReason.trim() || undefined });
+      const r = await api.patch(`/orders/${id}/cancel`, { reason: cancelReason.trim() || undefined });
       setCancelOpen(false);
       setOrder(prev => (prev ? { ...prev, status: 'cancelled' } : prev));
       fetchOrder();
-      Alert.alert('تم إلغاء الطلب', 'تم إلغاء طلبك، وأي مبلغ من المحفظة أو نقاط مستخدمة رجعت لحسابك.');
+      const refundTxt = r?.refund_message || cardRefundNote;
+      Alert.alert('تم إلغاء الطلب', `تم إلغاء طلبك، وأي مبلغ من محفظة وصلّي أو نقاط مستخدمة رجعت لحسابك.${refundTxt ? `\n\n${refundTxt}` : ''}`);
     } catch (e) {
       Alert.alert('تعذّر الإلغاء', e?.message || 'حاول مرة أخرى');
       fetchOrder();
@@ -242,30 +298,44 @@ export default function OrderTrackingScreen() {
     </View>
   );
 
-  const currentIdx = steps.findIndex(s => s.key === status);
+  const stepKey = personal ? PERSONAL_STEP[status] : status;
+  const currentIdx = steps.findIndex(s => s.key === stepKey);
   const knownStatus = currentIdx >= 0 || isCancelled;
-  // طلب شخصي بحالة "pending" أو أي حالة قبل التأكيد → أول خطوة
-  const effIdx = currentIdx >= 0 ? currentIdx : (personal && status === 'pending' ? 0 : -1);
+  const effIdx = currentIdx;
   const currentStep = effIdx >= 0 ? steps[effIdx] : null;
   const canCancel = CANCELLABLE_STATUSES.includes(status);
   const rated = order.rating_restaurant != null || order.rating_driver != null;
   const paymentPending = order.payment_method === 'card' && order.payment_status !== 'paid' && !isCancelled && !isDelivered;
-  const personalWaiting = personal && status === 'confirmed' && !order.driver_name;
+  // بانتظار إتمام الدفع: الطلب ما وصل للمطعم لسا (السيرفر بيستنى الدفع أو التحويل لكاش)
+  const awaitingPay = isAwaitingCardPayment(order);
+  const personalWaiting = personal && ['pending', 'confirmed'].includes(status) && !driverAssigned;
 
-  const hero = isCancelled ? HERO.cancelled : (HERO[status] || HERO.pending);
+  const hero = isCancelled ? HERO.cancelled : awaitingPay ? HERO.awaiting_payment
+    : personal && stepKey === 'to_pickup' ? HERO.to_pickup : (HERO[status] || HERO.pending);
   const heroColors = COLORS.gradients[hero.g] || COLORS.gradients.sunset;
   const etaMs = order.estimated_delivery_time ? new Date(order.estimated_delivery_time).getTime() : null;
   const createdMs = order.created_at ? new Date(order.created_at).getTime() : null;
   const mins = etaMs ? Math.round((etaMs - now) / 60000) : null;
-  const showEta = !isCancelled && !isDelivered && etaMs && !personal;
+  const showEta = !isCancelled && !isDelivered && etaMs && !personal && !awaitingPay;
   const etaProgress = showEta && createdMs && etaMs > createdMs ? (now - createdMs) / (etaMs - createdMs) : (effIdx >= 0 ? (effIdx + 1) / steps.length : 0);
+  // بعد مرور الوقت المتوقّع: «قرّب» فقط لو فعلاً بالطريق، وإلا «متأخر شوي»
+  const late = showEta && !(mins > 0);
+  const nearNow = late && status === 'on_the_way';
+  const heroTitle = isCancelled ? 'تم إلغاء الطلب' : awaitingPay ? 'بانتظار إتمام الدفع' : (currentStep?.label || statusLabel(status, order));
+  const heroDescTxt = isCancelled
+    ? (order.cancel_reason ? `السبب: ${order.cancel_reason}` : 'للاستفسار تواصل مع الدعم')
+    : awaitingPay ? 'طلبك محفوظ — بيوصل للمطعم أول ما يكتمل الدفع، أو اختار الدفع كاش عند الاستلام'
+      : !knownStatus ? 'نحدّث حالة طلبك — اسحب للتحديث أو تواصل مع الدعم'
+        : personalWaiting ? 'عم نبحث عن أقرب سائق متاح، رح نبلغك فور القبول'
+          : currentStep?.desc;
 
   return (
     <View style={styles.container}>
       <GradientHeader title={personal ? 'تتبع الطلب الشخصي' : 'تتبع الطلب'} subtitle={`#${order.order_number || id}`} onBack={goBack}
-        right={<TouchableOpacity onPress={() => navigation.navigate('SupportChat')} accessibilityLabel="الدعم" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}><Ionicons name="headset-outline" size={20} color="#FFF" /></TouchableOpacity>} />
+        rightIcon="headset-outline" rightLabel="الدعم" onRight={() => navigation.navigate('SupportChat')} />
 
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 30 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 30 }} showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchOrder(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} progressBackgroundColor={COLORS.card} />}>
 
         {/* بطاقة الحالة (تتحوّل لونياً وأيقونةً حسب الحالة) */}
         <PopIn key={isCancelled ? 'cancelled' : status} from={0.94}>
@@ -280,32 +350,34 @@ export default function OrderTrackingScreen() {
                 </Animated.View>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.heroTitle}>{isCancelled ? 'تم إلغاء الطلب' : (currentStep?.label || statusLabel(status, order))}</Text>
-                <Text style={styles.heroDesc}>
-                  {isCancelled
-                    ? (order.cancel_reason ? `السبب: ${order.cancel_reason}` : 'للاستفسار تواصل مع الدعم')
-                    : !knownStatus ? 'نحدّث حالة طلبك — اسحب للتحديث أو تواصل مع الدعم'
-                      : personalWaiting ? 'عم نبحث عن أقرب سائق متاح، رح نبلغك فور القبول'
-                        : currentStep?.desc}
-                </Text>
+                <Text style={styles.heroTitle}>{heroTitle}</Text>
+                <Text style={styles.heroDesc}>{heroDescTxt}</Text>
               </View>
               {showEta && (
                 <ProgressRing progress={etaProgress} size={68} stroke={5}>
                   <View style={{ position: 'absolute', alignItems: 'center' }}>
-                    <Text style={styles.ringNum}>{mins > 0 ? mins : '✓'}</Text>
-                    <Text style={styles.ringLbl}>{mins > 0 ? 'دقيقة' : 'قرّب'}</Text>
+                    {late
+                      ? <Ionicons name={nearNow ? 'bicycle' : 'time'} size={22} color="#FFF" />
+                      : <Text style={styles.ringNum}>{mins}</Text>}
+                    <Text style={styles.ringLbl}>{late ? (nearNow ? 'قرّب' : 'متأخر شوي') : pluralNoun(mins, 'minute')}</Text>
                   </View>
                 </ProgressRing>
               )}
             </View>
-            {showEta && (
+            {showEta && (late && !nearNow ? (
+              <TouchableOpacity style={styles.etaBox} onPress={() => navigation.navigate('SupportChat')} accessibilityRole="button" hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                <Ionicons name="time" size={14} color="#FFF" />
+                <Text style={styles.etaText}>طلبك متأخر شوي عن المتوقع — راسل الدعم</Text>
+                <Ionicons name="chevron-back" size={13} color="#FFF" />
+              </TouchableOpacity>
+            ) : (
               <View style={styles.etaBox}>
                 <Ionicons name="time" size={14} color="#FFF" />
                 <Text style={styles.etaText}>
-                  {mins > 0 ? `${orderType === 'pickup' ? 'الجاهزية' : 'الوصول'} المتوقّع خلال ~${mins} دقيقة` : 'قرّب كثير، شكراً لصبرك 🙏'}
+                  {!late ? `${orderType === 'pickup' ? 'الجاهزية' : 'الوصول'} المتوقّع خلال ~${plural(mins, 'minute', { bare: true })}` : 'قرّب كثير، شكراً لصبرك 🙏'}
                 </Text>
               </View>
-            )}
+            ))}
           </LinearGradient>
         </PopIn>
 
@@ -314,7 +386,7 @@ export default function OrderTrackingScreen() {
           <FadeIn delay={60} style={styles.mapWrap}>
             <WebView
               ref={webViewRef}
-              source={{ html: mapHtml }}
+              source={{ html: mapHtml, baseUrl: SERVER_URL }}
               style={styles.map}
               javaScriptEnabled
               domStorageEnabled
@@ -348,20 +420,31 @@ export default function OrderTrackingScreen() {
 
         {paymentPending && (
           <FadeIn style={[styles.payCard, { backgroundColor: COLORS.warnBg, borderColor: COLORS.warnBorder }]}>
-            <View style={[styles.payIcon, { backgroundColor: COLORS.warnFill }]}><Ionicons name="card" size={18} color="#FFF" /></View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.payTitle}>الدفع بالبطاقة لم يكتمل</Text>
-              <Text style={styles.paySub}>تقدر تدفع الآن، أو تدفع للسائق/المطعم عند الاستلام.</Text>
+            <View style={styles.payTop}>
+              <View style={[styles.payIcon, { backgroundColor: COLORS.warnFill }]}><Ionicons name="card" size={18} color="#FFF" /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.payTitle}>الدفع بالبطاقة لم يكتمل</Text>
+                <Text style={styles.paySub}>{cashChosen && awaitingPay
+                  ? 'اخترت الدفع كاش — رح يوصل طلبك للمطعم خلال دقائق.'
+                  : 'كمّل الدفع الآن، أو حوّله لكاش عند الاستلام وبيوصل للمطعم فوراً.'}</Text>
+              </View>
             </View>
-            <Press style={styles.payBtn} onPress={() => startCardPayment(navigation, id)} accessibilityRole="button">
-              <LinearGradient colors={COLORS.gradients.sunset} style={StyleSheet.absoluteFill} />
-              <Text style={styles.payBtnTxt}>ادفع الآن</Text>
-            </Press>
+            <View style={styles.payActions}>
+              <Press style={[styles.payBtn, { flex: 1 }, (paying || switchingCash) && { opacity: 0.7 }]} onPress={payNow} disabled={paying || switchingCash}
+                accessibilityRole="button" accessibilityLabel="ادفع الآن بالبطاقة" accessibilityState={{ busy: paying }}>
+                <LinearGradient colors={COLORS.gradients.sunset} style={StyleSheet.absoluteFill} />
+                {paying ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.payBtnTxt}>ادفع الآن</Text>}
+              </Press>
+              <Press style={[styles.payCashBtn, { flex: 1 }, (paying || switchingCash) && { opacity: 0.7 }]} onPress={payCash} disabled={paying || switchingCash}
+                accessibilityRole="button" accessibilityLabel="ادفع كاش بدلاً من ذلك">
+                {switchingCash ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Text style={styles.payCashTxt}>ادفع كاش بدلاً من ذلك</Text>}
+              </Press>
+            </View>
           </FadeIn>
         )}
 
-        {/* السائق */}
-        {!!order.driver_name && !isCancelled && (
+        {/* السائق — فقط بعد قبوله الطلب (مش وقت عرضه عليه) */}
+        {driverAssigned && !isCancelled && (
           <FadeIn delay={80} style={styles.driverCard}>
             <View>
               <LinearGradient colors={COLORS.gradients.sunset} style={styles.driverAvatar}>
@@ -403,7 +486,7 @@ export default function OrderTrackingScreen() {
           {personal ? (
             <>
               <InfoRow styles={styles} icon={order.service_type === 'ride' ? 'person-outline' : 'cube-outline'} color={COLORS.primary}
-                label="الخدمة" value={order.service_type === 'ride' ? `توصيل راكب${order.passengers ? ` · ${order.passengers} راكب` : ''}` : 'توصيل طرد'} />
+                label="الخدمة" value={order.service_type === 'ride' ? `توصيل راكب${order.passengers ? ` · ${plural(order.passengers, 'passenger')}` : ''}` : 'توصيل طرد'} />
               {!!order.pickup_address && <InfoRow styles={styles} icon="radio-button-on-outline" color={COLORS.green} label="الاستلام" value={order.pickup_address} />}
               {!!order.recipient_name && <InfoRow styles={styles} icon="person-circle-outline" color={COLORS.primary} label="المستلم" value={`${order.recipient_name}${order.recipient_phone ? ` · ${order.recipient_phone}` : ''}`} />}
             </>
@@ -458,6 +541,8 @@ export default function OrderTrackingScreen() {
           <GradientButton title="قيّم تجربتك" icon={<Ionicons name="star" size={18} color="#FFF" />} onPress={() => navigation.navigate('Rating', {
             orderId: id,
             restaurantName: personal ? 'طلب شخصي' : order.restaurant_name,
+            restaurantId: order.restaurant_id,
+            storeType: order.store_type || order.restaurant_store_type,
             driverName: order.driver_name,
             isPersonal: personal,
           })} />
@@ -475,6 +560,12 @@ export default function OrderTrackingScreen() {
           <View style={styles.modalIcon}><Ionicons name="alert-circle" size={36} color={COLORS.red} /></View>
           <Text style={styles.modalTitle}>إلغاء الطلب؟</Text>
           <Text style={styles.modalSub}>متأكد بدك تلغي الطلب #{order.order_number || id}؟ ما بنقدر نرجّعه بعد الإلغاء.</Text>
+          {!!cardRefundNote && (
+            <View style={styles.refundNote}>
+              <Ionicons name="card-outline" size={15} color={COLORS.primary} />
+              <Text style={styles.refundNoteTxt}>{cardRefundNote}</Text>
+            </View>
+          )}
           <View style={styles.reasonsWrap}>
             {CANCEL_REASONS.map(r => (
               <Chip key={r} size="sm" label={r} selected={cancelReason === r} onPress={() => setCancelReason(cancelReason === r ? '' : r)} />
@@ -499,6 +590,8 @@ export default function OrderTrackingScreen() {
 
 // ألوان وأيقونات بطاقة الحالة
 const HERO = {
+  awaiting_payment: { g: 'gold', icon: 'card' },
+  to_pickup:  { g: 'info',    icon: 'navigate' },
   pending:    { g: 'gold',    icon: 'hourglass' },
   confirmed:  { g: 'info',    icon: 'checkmark-done' },
   preparing:  { g: 'violet',  icon: 'flame' },
@@ -622,12 +715,18 @@ const makeStyles = (C) => StyleSheet.create({
   liveText: { color: '#FFF', fontWeight: '900', fontSize: 11 },
   recenterBtn: { position: 'absolute', bottom: 12, right: 12, backgroundColor: C.card, borderRadius: 14, width: 42, height: 42, alignItems: 'center', justifyContent: 'center', zIndex: 10, ...C.shadow.card },
   mapFailTxt: { fontSize: 12.5, color: C.gray, fontWeight: '600' },
-  payCard: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10, borderRadius: 20, padding: 14, borderWidth: 1 },
+  payCard: { gap: 12, borderRadius: 20, padding: 14, borderWidth: 1 },
+  payTop: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
+  payActions: { flexDirection: 'row-reverse', gap: 8 },
   payIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   payTitle: { fontSize: 14, fontWeight: '900', color: C.text, textAlign: 'right' },
-  paySub: { fontSize: 12, color: C.sub, marginTop: 2, textAlign: 'right', fontWeight: '500' },
-  payBtn: { borderRadius: 14, paddingHorizontal: 14, height: 40, justifyContent: 'center', overflow: 'hidden' },
-  payBtnTxt: { color: '#FFF', fontWeight: '900', fontSize: 13 },
+  paySub: { fontSize: 12, color: C.sub, marginTop: 2, textAlign: 'right', fontWeight: '500', lineHeight: 18 },
+  payBtn: { borderRadius: 14, paddingHorizontal: 14, height: 44, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  payBtnTxt: { color: '#FFF', fontWeight: '900', fontSize: 13.5 },
+  payCashBtn: { borderRadius: 14, paddingHorizontal: 10, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: C.card, borderWidth: 1.5, borderColor: C.tintBorder },
+  payCashTxt: { color: C.primary, fontWeight: '900', fontSize: 13 },
+  refundNote: { flexDirection: 'row-reverse', alignItems: 'flex-start', gap: 6, marginTop: 12, backgroundColor: C.tint, borderRadius: 14, padding: 10, alignSelf: 'stretch' },
+  refundNoteTxt: { flex: 1, fontSize: 12.5, color: C.text, fontWeight: '600', textAlign: 'right', lineHeight: 19 },
   card: { backgroundColor: C.card, borderRadius: 24, padding: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, ...C.shadow.soft },
   cardTitleRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginBottom: 12 },
   cardIcon: { width: 30, height: 30, borderRadius: 10, backgroundColor: C.tint, alignItems: 'center', justifyContent: 'center' },

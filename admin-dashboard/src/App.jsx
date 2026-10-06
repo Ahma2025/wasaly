@@ -11,7 +11,9 @@ import PageSkeleton from './components/Skeleton';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ConfirmProvider, useConfirm, usePresence } from './components/ui';
 import { currentAdmin, logout, clearSession } from './utils/session';
-import { fmtToday } from './utils/format';
+import { revokeAndLogout } from './utils/api';
+import { fmtToday, normalizeAr } from './utils/format';
+import { useOverlay, closeTopOverlay } from './utils/backStack';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Users = lazy(() => import('./pages/Users'));
@@ -56,6 +58,27 @@ const MORE = [
 ];
 
 const ALL = [...PRIMARY, ...MORE];
+
+/* كلمات بحث إضافية للبحث السريع (تُطبَّع بلا همزات/تاء مربوطة) — A-46 */
+const ALIASES = {
+  '/': ['لوحة', 'رئيسية', 'ملخص', 'dashboard', 'home'],
+  '/live': ['خريطة', 'مباشر', 'عمليات حية', 'تتبع', 'live', 'map'],
+  '/orders': ['طلبات', 'اوردر', 'orders'],
+  '/restaurants': ['مطاعم', 'متاجر', 'محلات', 'صيدليات', 'stores'],
+  '/drivers': ['سائقين', 'سواقين', 'مناديب', 'كباتن', 'drivers'],
+  '/users': ['مستخدمين', 'زبائن', 'حسابات', 'عملاء', 'users'],
+  '/accounting': ['محاسبه', 'عمولات', 'ارباح', 'مالية', 'فلوس', 'accounting'],
+  '/analytics': ['تحليلات', 'احصائيات', 'تقارير', 'analytics'],
+  '/zones': ['مناطق', 'اسعار التوصيل', 'رسوم', 'كيلو', 'zones'],
+  '/personal-delivery': ['توصيل شخصي', 'طرد', 'راكب', 'مشوار'],
+  '/multi-orders': ['مجمعه', 'مجمع', 'عده مطاعم', 'multi'],
+  '/coupons': ['كوبونات', 'خصم', 'اكواد', 'coupons'],
+  '/notifications': ['اشعارات', 'بث', 'رسائل جماعية', 'notifications'],
+  '/banners': ['اعلانات', 'بانرات', 'بنر', 'سلايدر', 'banners'],
+  '/reviews': ['تقييمات', 'نجوم', 'ملاحظات', 'reviews'],
+  '/chats': ['محادثات', 'دعم', 'شات', 'رسائل', 'support'],
+};
+const SEARCH_INDEX = ALL.map(i => ({ ...i, hay: normalizeAr([i.label, ...(ALIASES[i.to] || [])].join(' ')) }));
 const byTo = Object.fromEntries(ALL.map(i => [i.to, i]));
 
 /* الشريط الجانبي (≥1024px) — أقسام مجمّعة */
@@ -84,7 +107,11 @@ function useLogout() {
   const confirm = useConfirm();
   return async (after) => {
     const ok = await confirm({ title: 'تسجيل الخروج', message: 'سيتم مسح البيانات المخزّنة على هذا الجهاز والرجوع لشاشة الدخول.', confirmText: 'خروج', icon: <FiLogOut /> });
-    if (ok) { after?.(); logout('manual'); }
+    if (!ok) return;
+    after?.();
+    // إلغاء التوكن عند الخادم أولاً (حد 4 ثوانٍ) — A-14
+    const t = toast.loading('جارٍ تسجيل الخروج…');
+    try { await revokeAndLogout('manual'); } finally { toast.dismiss(t); }
   };
 }
 
@@ -111,9 +138,12 @@ function CommandPalette({ open, onClose }) {
   const [idx, setIdx] = useState(0);
   const inputRef = useRef(null);
   const items = useMemo(() => {
-    const s = q.trim();
-    return ALL.filter(i => !s || i.label.includes(s));
+    const s = normalizeAr(q);
+    if (!s) return ALL;
+    const words = s.split(' ').filter(Boolean);
+    return SEARCH_INDEX.filter(i => words.every(w => i.hay.includes(w) || i.hay.includes(w.replace(/^ال/, ''))));
   }, [q]);
+  useOverlay(open, onClose);
 
   useEffect(() => { if (open) { setQ(''); setIdx(0); setTimeout(() => inputRef.current?.focus(), 30); } }, [open]);
   useEffect(() => { setIdx(0); }, [q]);
@@ -168,6 +198,7 @@ function MoreSheet({ open, onClose }) {
   const { pathname } = useLocation();
   const doLogout = useLogout();
   const { mounted, closing } = usePresence(open, 220);
+  useOverlay(open, onClose);
   if (!mounted) return null;
 
   const go = (to) => { onClose(); navigate(to); };
@@ -211,15 +242,9 @@ function MoreSheet({ open, onClose }) {
   );
 }
 
-function BottomNav() {
-  const navigate = useNavigate();
-  const { pathname } = useLocation();
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreActive = MORE.some(m => isActive(m.to, pathname));
-
-  useEffect(() => { setMoreOpen(false); }, [pathname]);
-
-  const Tab = ({ active, onClick, icon: Icon, label }) => (
+/* تبويب الشريط السفلي — على مستوى الوحدة حتى لا يُعاد إنشاؤه كل render فتعمل حركته — A-45 */
+function Tab({ active, onClick, icon: Icon, label }) {
+  return (
     <button onClick={onClick} className="flex-1 flex flex-col items-center justify-center gap-1 pt-2 pb-1.5 relative min-h-[56px]" aria-current={active ? 'page' : undefined}>
       <span className={`w-12 h-8 rounded-full flex items-center justify-center text-[20px] transition-all duration-300 ease-spring ${active ? 'grad-sunset text-white shadow-brand -translate-y-0.5 scale-105' : 'text-ink-3'}`}>
         <Icon />
@@ -227,6 +252,15 @@ function BottomNav() {
       <span className={`text-[11px] font-bold transition-colors ${active ? 'text-brand-700' : 'text-ink-3'}`}>{label}</span>
     </button>
   );
+}
+
+function BottomNav() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreActive = MORE.some(m => isActive(m.to, pathname));
+
+  useEffect(() => { setMoreOpen(false); }, [pathname]);
 
   return (
     <div className="lg:hidden">
@@ -319,6 +353,7 @@ function AdminMenu() {
   const ref = useRef(null);
   const doLogout = useLogout();
   const me = currentAdmin();
+  useOverlay(open, () => setOpen(false));
   useEffect(() => {
     if (!open) return;
     const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
@@ -392,7 +427,28 @@ function MobileHeader({ current, onSearch }) {
   );
 }
 
+/**
+ * زر الرجوع في أندرويد (MainActivity يستدعي window.__wasalyBack):
+ * 1) يغلق النافذة العليا  2) يرجع صفحة للخلف  3) من الرئيسية → يصغّر التطبيق بدل إغلاقه — X-04
+ */
+function useBackNavigation() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const locRef = useRef(location);
+  locRef.current = location;
+  useEffect(() => {
+    window.__wasalyNav = () => {
+      const l = locRef.current;
+      if (l.key && l.key !== 'default') { navigate(-1); return true; }
+      if (l.pathname !== '/') { navigate('/', { replace: true }); return true; }
+      return false;
+    };
+    return () => { delete window.__wasalyNav; };
+  }, [navigate]);
+}
+
 function AppLayout() {
+  useBackNavigation();
   const { pathname } = useLocation();
   const current = ALL.find(i => isActive(i.to, pathname));
   const [collapsed, setCollapsed] = useState(() => ls.get('adm_sidebar') === '1');
@@ -466,6 +522,15 @@ export default function App() {
 
   // إخفاء شاشة البداية فور جاهزية التطبيق
   useEffect(() => { window.__hideSplash?.(); }, []);
+
+  // جسر زر الرجوع (أندرويد) — يرجّع true إن عالجه التطبيق، false → يصغّر التطبيق
+  useEffect(() => {
+    window.__wasalyBack = () => {
+      if (closeTopOverlay()) return true;
+      return typeof window.__wasalyNav === 'function' ? !!window.__wasalyNav() : false;
+    };
+    return () => { delete window.__wasalyBack; };
+  }, []);
 
   // 401/403 أو خروج يدوي → شاشة الدخول
   useEffect(() => {

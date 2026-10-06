@@ -3,16 +3,21 @@ import { Animated, Pressable, Easing, View, ActivityIndicator, StyleSheet } from
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
-import { useReducedMotion, isReducedMotion, EASE_OUT, SPRING, SPRING_POP, haptic, stagger } from '../utils/motion';
+import { useReducedMotion, isReducedMotion, EASE_OUT, SPRING, SPRING_POP, haptic, stagger, STAGGER_CAP } from '../utils/motion';
 
-/* دخول ناعم: تلاشٍ + انزلاق للأعلى — مع تأخير للتتابع (stagger) */
-export function FadeIn({ children, delay = 0, from = 16, duration = 380, style, index }) {
-  const v = useRef(new Animated.Value(isReducedMotion() ? 1 : 0)).current;
+/*
+  دخول ناعم: تلاشٍ + انزلاق للأعلى — مع تأخير للتتابع (stagger)
+  index ≥ 8 أو skip → بدون حركة (العناصر اللي بتظهر وقت التمرير ما بتضل فاضية)
+*/
+export function FadeIn({ children, delay = 0, from = 16, duration = 380, style, index, skip }) {
+  const still = !!skip || (index != null && index >= STAGGER_CAP);
+  const v = useRef(new Animated.Value(isReducedMotion() || still ? 1 : 0)).current;
   const d = index != null ? stagger(index) + delay : delay;
   useEffect(() => {
-    if (isReducedMotion()) { v.setValue(1); return; }
+    if (isReducedMotion() || still) { v.setValue(1); return; }
     Animated.timing(v, { toValue: 1, duration, delay: d, easing: EASE_OUT, useNativeDriver: true }).start();
   }, []);
+  if (still) return <View style={style}>{children}</View>;
   const translateY = v.interpolate({ inputRange: [0, 1], outputRange: [from, 0] });
   return <Animated.View style={[style, { opacity: v, transform: [{ translateY }] }]}>{children}</Animated.View>;
 }
@@ -55,14 +60,19 @@ function splitStyle(style) {
   return [outer, inner];
 }
 
-export function Press({ children, onPress, onLongPress, style, scaleTo = 0.96, haptic: withHaptic = true, disabled, accessibilityLabel, accessibilityRole, hitSlop }) {
+export function Press({ children, onPress, onLongPress, style, scaleTo = 0.96, haptic: withHaptic = true, disabled, accessibilityLabel, accessibilityRole, hitSlop,
+  accessible, accessibilityState, accessibilityHint, accessibilityActions, onAccessibilityAction }) {
   const scale = useRef(new Animated.Value(1)).current;
   const down = () => Animated.spring(scale, { toValue: scaleTo, ...SPRING, stiffness: 320 }).start();
   const up = () => Animated.spring(scale, { toValue: 1, ...SPRING_POP }).start();
   const [outer, inner] = splitStyle(style);
+  // قارئ الشاشة: حالة الاختيار/التعطيل تمرّ للـ Pressable (selected/checked/disabled)
+  const a11yState = disabled ? { ...(accessibilityState || {}), disabled: true } : accessibilityState;
   return (
     <Pressable style={outer} onPressIn={down} onPressOut={up} disabled={disabled} hitSlop={hitSlop} onLongPress={onLongPress}
-      accessibilityLabel={accessibilityLabel} accessibilityRole={accessibilityRole}
+      accessible={accessible} accessibilityLabel={accessibilityLabel} accessibilityRole={accessibilityRole}
+      accessibilityState={a11yState} accessibilityHint={accessibilityHint}
+      accessibilityActions={accessibilityActions} onAccessibilityAction={onAccessibilityAction}
       onPress={() => { if (withHaptic) haptic.light(); onPress && onPress(); }}>
       <Animated.View style={[inner, { transform: [{ scale }] }]}>{children}</Animated.View>
     </Pressable>

@@ -7,16 +7,23 @@ export const num = (v) => {
 };
 export const money = (v) => `${num(v).toFixed(2)}₪`;
 
+// جدول الحالات الموحّد لتطبيقات وصلّي الأربعة (DESIGN.md):
+// pending=warning · confirmed=info · preparing=brand · ready=violet · on_the_way=coral · delivered=success · cancelled=danger
+// color = لون الشريط/الأيقونة، fg = لون النص على الخلفية الفاتحة bg (تباين مقروء)، icon = Ionicons
 export const STATUS = {
-  pending:    { label: 'بانتظار المطعم', color: COLORS.amber,  bg: COLORS.amberSoft },
-  confirmed:  { label: 'مؤكد',          color: COLORS.blue,   bg: COLORS.blueSoft },
-  preparing:  { label: 'قيد التحضير',    color: COLORS.amber,  bg: COLORS.amberSoft },
-  ready:      { label: 'جاهز',          color: COLORS.purple, bg: COLORS.purpleSoft },
-  on_the_way: { label: 'في الطريق',      color: COLORS.primary, bg: COLORS.tint },
-  delivered:  { label: 'تم التوصيل',     color: COLORS.green,  bg: COLORS.greenSoft },
-  cancelled:  { label: 'ملغي',          color: COLORS.red,    bg: COLORS.redSoft },
+  pending:    { label: 'بانتظار المطعم', color: COLORS.amber,    fg: COLORS.amberDeep, bg: COLORS.amberSoft,  icon: 'hourglass-outline' },
+  confirmed:  { label: 'مؤكد',          color: COLORS.blue,     fg: COLORS.blueDeep,  bg: COLORS.blueSoft,   icon: 'checkmark-circle-outline' },
+  preparing:  { label: 'قيد التحضير',    color: COLORS.primary,  fg: COLORS.brandText, bg: COLORS.brandSoft,  icon: 'flame-outline' },
+  ready:      { label: 'جاهز',          color: COLORS.purple,   fg: COLORS.purpleDeep, bg: COLORS.purpleSoft, icon: 'bag-check-outline' },
+  // 🧺 الطلب المجمّع: السائق يجمع الطلبات من المطاعم
+  picking_up: { label: 'تجمع الطلبات',   color: COLORS.primary,  fg: COLORS.brandText, bg: COLORS.brandSoft,  icon: 'git-network-outline' },
+  on_the_way: { label: 'في الطريق',      color: COLORS.coral,    fg: COLORS.coralDeep, bg: COLORS.coralSoft,  icon: 'bicycle-outline' },
+  delivered:  { label: 'تم التوصيل',     color: COLORS.green,    fg: COLORS.greenDeep, bg: COLORS.greenSoft,  icon: 'checkmark-done' },
+  cancelled:  { label: 'ملغي',          color: COLORS.red,      fg: COLORS.redDeep,   bg: COLORS.redSoft,    icon: 'close-circle-outline' },
 };
-export const statusInfo = (s) => STATUS[s] || { label: s || '—', color: COLORS.gray, bg: COLORS.bg };
+// شارة "طلب مجمّع" بلون لا تستخدمه أي حالة
+export const GROUP_CHIP = { color: COLORS.teal, fg: COLORS.tealDeep, bg: COLORS.tealSoft, icon: 'layers-outline' };
+export const statusInfo = (s) => STATUS[s] || { label: s || '—', color: COLORS.gray, fg: COLORS.sub, bg: COLORS.bg, icon: 'ellipse-outline' };
 
 export const isPersonal = (o) => o?.order_type === 'personal';
 export const isRide = (o) => isPersonal(o) && o?.service_type === 'ride';
@@ -46,7 +53,9 @@ export const dropLabel = (o) => (isPersonal(o) ? 'نقطة التسليم' : 'ع
 export const driverFee = (o) => (o?.driver_fee != null && o.driver_fee !== '' ? num(o.driver_fee) : num(o?.delivery_fee));
 export const tipOf = (o) => num(o?.tip);
 
-const PAY = { cash: 'كاش عند الاستلام', card: 'بطاقة', online: 'دفع إلكتروني', wallet: 'المحفظة', paid: 'مدفوع' };
+// المصطلحات الموحّدة (X-11): «كاش عند الاستلام» · «محفظة وصلّي» · «إكرامية السائق» · «رسوم مطعم إضافي»
+export const TERMS = { cash: 'كاش عند الاستلام', wallet: 'محفظة وصلّي', tip: 'إكرامية السائق', extraStopFee: 'رسوم مطعم إضافي' };
+const PAY = { cash: TERMS.cash, card: 'بطاقة', online: 'دفع إلكتروني', wallet: TERMS.wallet, paid: 'مدفوع' };
 export const paymentLabel = (m) => PAY[m] || (m ? String(m) : 'كاش عند الاستلام');
 
 // المبلغ المطلوب تحصيله من الزبون (من السيرفر إن وُجد وإلا نحسبه)
@@ -86,28 +95,50 @@ export function parseItems(o) {
   });
 }
 
-// تواريخ بالتقويم الميلادي دائماً (ar-SA يعطي هجري)
+// تواريخ بالتقويم الميلادي دائماً (ar-SA يعطي هجري) وأرقام لاتينية وبتوقيت فلسطين (X-08)
 const LOCALE = 'ar-EG-u-ca-gregory-nu-latn';
+export const TZ = 'Asia/Hebron';
+// بعض محركات JS (Hermes القديم) ترفض timeZone → نعيد المحاولة بدونه ثم صيغة يدوية
+function localeFmt(date, method, opts) {
+  try { return date[method](LOCALE, { ...opts, timeZone: TZ }); } catch {}
+  try { return date[method](LOCALE, opts); } catch {}
+  return null;
+}
+const pad2 = (n) => String(n).padStart(2, '0');
 export function fmtDate(d, withTime = true) {
   if (!d) return '';
   const date = d instanceof Date ? d : new Date(d);
   if (isNaN(date.getTime())) return String(d);
-  try {
-    const day = date.toLocaleDateString(LOCALE, { day: 'numeric', month: 'long', year: 'numeric', calendar: 'gregory' });
-    if (!withTime) return day;
-    const time = date.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit', calendar: 'gregory' });
-    return `${day} · ${time}`;
-  } catch {
-    const p = (n) => String(n).padStart(2, '0');
-    return `${date.getFullYear()}/${p(date.getMonth() + 1)}/${p(date.getDate())}${withTime ? ` ${p(date.getHours())}:${p(date.getMinutes())}` : ''}`;
-  }
+  const day = localeFmt(date, 'toLocaleDateString', { day: 'numeric', month: 'long', year: 'numeric', calendar: 'gregory' });
+  const time = withTime ? localeFmt(date, 'toLocaleTimeString', { hour: '2-digit', minute: '2-digit', calendar: 'gregory' }) : '';
+  if (day != null && time != null) return withTime ? `${day} · ${time}` : day;
+  return `${date.getFullYear()}/${pad2(date.getMonth() + 1)}/${pad2(date.getDate())}${withTime ? ` ${pad2(date.getHours())}:${pad2(date.getMinutes())}` : ''}`;
 }
 export function fmtTime(d) {
   if (!d) return '';
   const date = new Date(d);
   if (isNaN(date.getTime())) return '';
-  try { return date.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' }); }
-  catch { return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`; }
+  const t = localeFmt(date, 'toLocaleTimeString', { hour: '2-digit', minute: '2-digit' });
+  return t != null ? t : `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+// تاريخ اليوم بتوقيت فلسطين "YYYY-MM-DD" (احتياط: تاريخ الجهاز)
+export function hebronToday() {
+  const now = new Date();
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+    const get = (t) => parts.find(p => p.type === t)?.value;
+    const y = get('year'), m = get('month'), dd = get('day');
+    if (y && m && dd) return `${y}-${m}-${dd}`;
+  } catch {}
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+// إزاحة يوم على "YYYY-MM-DD" بحساب UTC (بلا أثر للتوقيت الصيفي)
+export function shiftYmd(ymd, days) {
+  const [y, m, dd] = String(ymd).split('-').map(Number);
+  const t = Date.UTC(y, (m || 1) - 1, dd || 1) + days * 86400000;
+  const d = new Date(t);
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
 }
 // "2026-10-05" → "الأحد ٥ أكتوبر"
 export function fmtDay(ymd) {

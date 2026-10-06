@@ -9,6 +9,17 @@ import { readCache, writeCache } from '../utils/cache';
 import { FadeIn, PopIn, SkeletonCard, Skeleton, CountUp, AnimatedBar, EmptyState } from '../components/Anim';
 import { COLORS, GRADIENTS, SHADOW, RTL, RADIUS } from '../theme';
 import { fmtDate, num } from '../utils/format';
+import { arCount } from '../utils/plural';
+
+// توزيع النجوم من السيرفر إن أرسله (على كل التقييمات) — وإلا نحسبه من القائمة المحمّلة ونوضّح ذلك
+function normDist(src) {
+  if (!src || typeof src !== 'object') return null;
+  const d = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+  let any = false;
+  if (Array.isArray(src)) src.forEach(r => { const s = Math.round(num(r?.rating ?? r?.stars)); if (s >= 1 && s <= 5) { d[s] += parseInt(r?.count, 10) || 0; any = true; } });
+  else [1, 2, 3, 4, 5].forEach(s => { if (src[s] != null || src[String(s)] != null) { d[s] = parseInt(src[s] ?? src[String(s)], 10) || 0; any = true; } });
+  return any ? d : null;
+}
 
 // نجوم آمنة: تقيّد التقييم بين ٠ و٥ (repeat بقيمة سالبة كان يرمي RangeError)
 export const starStr = (n) => {
@@ -39,32 +50,38 @@ export default function ReviewsScreen() {
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(false);
+  const [serverDist, setServerDist] = useState(null);
 
   const load = useCallback(async () => {
     try {
       const d = await api.get('/reviews/driver/me');
       const data = Array.isArray(d?.data) ? d.data : [];
-      setList(data); setAvg(num(d?.avg_rating)); setCount(parseInt(d?.count, 10) || data.length);
-      writeCache('driver_reviews', { data, avg: num(d?.avg_rating), count: parseInt(d?.count, 10) || data.length });
-    } catch {} finally { setLoading(false); }
+      const dist = normDist(d?.distribution);
+      setList(data); setAvg(num(d?.avg_rating)); setCount(parseInt(d?.count, 10) || data.length); setServerDist(dist);
+      setError(false);
+      writeCache('driver_reviews', { data, avg: num(d?.avg_rating), count: parseInt(d?.count, 10) || data.length, dist });
+    } catch { setError(true); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => {
     (async () => {
       const cached = await readCache('driver_reviews');
-      if (cached) { setList(cached.data || []); setAvg(num(cached.avg)); setCount(cached.count || 0); setLoading(false); }
+      if (cached) { setList(cached.data || []); setAvg(num(cached.avg)); setCount(cached.count || 0); setServerDist(cached.dist || null); setLoading(false); }
       load();
     })();
   }, [load]);
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
-  // توزيع التقييمات من القائمة المحمّلة
+  // D-26: توزيع التقييمات — من السيرفر (كل التقييمات) أو من آخر ما حُمّل مع توضيح ذلك
   const dist = useMemo(() => {
+    if (serverDist) return serverDist;
     const d = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
     list.forEach(r => { const s = Math.round(num(r.driver_rating)); if (s >= 1 && s <= 5) d[s] += 1; });
     return d;
-  }, [list]);
+  }, [list, serverDist]);
+  const partialDist = !serverDist && count > list.length && list.length > 0;
   const distMax = Math.max(1, ...Object.values(dist));
 
   const header = (
@@ -77,7 +94,7 @@ export default function ReviewsScreen() {
             {loading && !avg ? <Skeleton width={80} height={48} tone="dark" radius={12} />
               : <CountUp value={avg} format={(n) => (avg > 0 ? n.toFixed(1) : '—')} style={styles.avg} />}
             <Stars value={avg} size={17} color="#FFF" empty="rgba(255,255,255,0.4)" />
-            <Text style={styles.count}>{count} تقييم</Text>
+            <Text style={styles.count}>{count > 0 ? arCount(count, 'review') : 'لا تقييمات'}</Text>
           </View>
           <View style={{ flex: 1, gap: 5 }}>
             {[5, 4, 3, 2, 1].map((s, i) => (
@@ -89,6 +106,7 @@ export default function ReviewsScreen() {
                 </View>
               </View>
             ))}
+            {partialDist && <Text style={styles.distNote}>التوزيع حسب آخر {arCount(list.length, 'review')}</Text>}
           </View>
         </View>
       </LinearGradient>
@@ -106,6 +124,8 @@ export default function ReviewsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />}
         ListEmptyComponent={loading ? (
           <View style={{ gap: 10 }}>{[0, 1, 2].map(i => <SkeletonCard key={i} lines={3} />)}</View>
+        ) : error ? (
+          <EmptyState icon="cloud-offline-outline" tone="red" title="تعذّر تحميل التقييمات" text="تحقّق من الاتصال ثم أعد المحاولة" actionLabel="إعادة المحاولة" actionIcon="refresh" onAction={() => { setLoading(true); load(); }} />
         ) : (
           <EmptyState icon="star-outline" tone="gold" title="لا توجد تقييمات بعد" text="بعد كل توصيلة يمكن للزبون تقييم خدمتك — ستظهر التقييمات هنا" />
         )}
@@ -149,6 +169,7 @@ const styles = StyleSheet.create({
   avg: { color: '#FFF', fontSize: 48, fontWeight: '900', lineHeight: 56, textShadowColor: 'rgba(0,0,0,0.12)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 8 },
   count: { color: '#FFF', fontSize: 12.5, marginTop: 6, fontWeight: '700' },
   distLabel: { color: '#FFF', fontSize: 12, fontWeight: '800', width: 10, textAlign: 'center' },
+  distNote: { color: 'rgba(255,255,255,0.9)', fontSize: 10.5, fontWeight: '700', textAlign: 'right', marginTop: 2 },
   card: { backgroundColor: COLORS.card, borderRadius: RADIUS.md + 2, padding: 14, marginBottom: 10 },
   avatar: { width: 42, height: 42, borderRadius: 14, backgroundColor: COLORS.sec, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 17, fontWeight: '900', color: COLORS.primary },

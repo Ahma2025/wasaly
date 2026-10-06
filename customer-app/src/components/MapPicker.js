@@ -3,6 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../context/ThemeContext';
 import { leafletPage, TILE_URL } from '../utils/leaflet';
+import { SERVER_URL } from '../config';
 
 const DEFAULT_CENTER = { lat: 31.9, lng: 35.2 };
 
@@ -85,7 +86,8 @@ function MapPicker({ initial, onCenterChange, markers, showPin = true, height = 
       <WebView
         ref={webRef}
         originWhitelist={['*']}
-        source={{ html }}
+        // baseUrl: صفحة HTML محلية بدون origin → خوادم OSM بترفض الطلبات (Referer) والخريطة بتطلع رمادية
+        source={{ html, baseUrl: SERVER_URL }}
         onMessage={onMessage}
         style={{ flex: 1, backgroundColor: 'transparent' }}
         javaScriptEnabled

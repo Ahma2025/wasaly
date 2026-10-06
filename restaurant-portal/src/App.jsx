@@ -1,16 +1,22 @@
-import React, { Suspense, lazy, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
 import { FiHome, FiPackage, FiStar, FiSettings, FiLogOut, FiChevronLeft } from 'react-icons/fi';
 import { MdOutlineRestaurantMenu, MdStorefront } from 'react-icons/md';
 import SupportWidget from './components/SupportWidget';
 import PageSkeleton from './components/Skeleton';
+import ErrorBoundary from './components/ErrorBoundary';
+import PushBanner from './components/PushBanner';
 import Login from './pages/Login';
 import { RestaurantProvider, useRestaurant } from './context/RestaurantContext';
 import { LiveOrdersProvider, useLiveOrders } from './context/LiveOrdersContext';
 import { setUnauthorizedHandler } from './utils/api';
 import { clearSession, logout } from './utils/auth';
 import { ROUTER_BASENAME, LOGO_URL } from './utils/config';
+import { installBackHandler } from './utils/backButton';
+import { canLeave } from './utils/navGuard';
+import { fmtLongToday } from './utils/format';
+import { pl } from './utils/plural';
 import { useConfirm, cx } from './components/ui';
 
 // تقسيم الحزمة: كل صفحة تُحمَّل عند الحاجة (المخططات والخرائط لا تثقل التشغيل الأول)
@@ -29,12 +35,24 @@ const NAV = [
 ];
 const isActive = (to, pathname) => (to === '/' ? pathname === '/' : pathname.startsWith(to));
 
+// تنقّل يحترم حارس التغييرات غير المحفوظة (الإعدادات)
+function useGo() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  return async (to) => {
+    if (to === pathname) return;
+    if (await canLeave()) navigate(to);
+  };
+}
+
 function useLogout() {
   const navigate = useNavigate();
   const [dialog, confirm] = useConfirm();
   const doLogout = async () => {
+    if (!(await canLeave())) return;
     const ok = await confirm({ title: 'تسجيل الخروج', message: 'سيتوقف وصول إشعارات الطلبات على هذا الجهاز حتى تسجّل الدخول مجددًا. إعدادات الطابعة تبقى محفوظة.', confirmText: 'خروج', danger: true });
     if (!ok) return;
+    // الخروج فوري: الجلسة تُمسح محليًا والسيرفر يُبلَّغ بالخلفية
     await logout();
     navigate('/login', { replace: true });
   };
@@ -65,7 +83,7 @@ function LiveBadge({ connected, light }) {
 
 // ─── القائمة السفلية (جوال/تابلت) مع مؤشّر منزلق ───
 function BottomNav() {
-  const navigate = useNavigate();
+  const go = useGo();
   const { pathname } = useLocation();
   const { pendingCount } = useLiveOrders();
   const idx = Math.max(0, NAV.findIndex(n => isActive(n.to, pathname)));
@@ -83,7 +101,8 @@ function BottomNav() {
           const Icon = item.icon;
           const badge = item.to === '/orders' && pendingCount > 0 ? pendingCount : 0;
           return (
-            <button key={item.to} onClick={() => navigate(item.to)} aria-current={active ? 'page' : undefined}
+            <button key={item.to} onClick={() => go(item.to)} aria-current={active ? 'page' : undefined}
+              aria-label={badge > 0 ? `${item.label} — ${pl(badge, 'order')} بانتظار القبول` : undefined}
               className={cx('no-press relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5', active ? 'text-brand-600' : 'text-ink-3 hover:text-ink-2')}>
               <span className={cx('relative transition-transform duration-300 ease-spring', active && '-translate-y-0.5 scale-110')}>
                 <Icon size={21} aria-hidden />
@@ -104,7 +123,7 @@ function BottomNav() {
 
 // ─── القائمة الجانبية (≥1024px) ───
 function Sidebar({ onLogout }) {
-  const navigate = useNavigate();
+  const go = useGo();
   const { pathname } = useLocation();
   const { restaurant } = useRestaurant();
   const { pendingCount, connected } = useLiveOrders();
@@ -119,7 +138,7 @@ function Sidebar({ onLogout }) {
         </div>
       </div>
 
-      <button onClick={() => navigate('/settings')} className="no-press mx-4 mb-4 p-3 rounded-[18px] grad-mesh text-white flex items-center gap-3 text-right sheen shadow-brand">
+      <button onClick={() => go('/settings')} className="no-press mx-4 mb-4 p-3 rounded-[18px] grad-mesh text-white flex items-center gap-3 text-right sheen shadow-brand">
         <RestaurantAvatar restaurant={restaurant} size={42} className="glass text-white relative z-[1]" />
         <div className="flex-1 min-w-0 relative z-[1]">
           <p className="font-extrabold truncate leading-tight">{restaurant.name_ar || 'المطعم'}</p>
@@ -137,7 +156,7 @@ function Sidebar({ onLogout }) {
           const Icon = item.icon;
           const badge = item.to === '/orders' && pendingCount > 0 ? pendingCount : 0;
           return (
-            <button key={item.to} onClick={() => navigate(item.to)} aria-current={active ? 'page' : undefined}
+            <button key={item.to} onClick={() => go(item.to)} aria-current={active ? 'page' : undefined}
               className={cx('no-press group relative w-full flex items-center gap-3 h-12 px-3 rounded-[14px] font-bold text-[15px] text-right',
                 active ? 'bg-brand-50 text-brand-700' : 'text-ink-2 hover:bg-surface hover:text-ink')}>
               <span aria-hidden className={cx('absolute start-0 top-2.5 bottom-2.5 w-1 rounded-full grad-brand transition-all duration-300', active ? 'opacity-100' : 'opacity-0 scale-y-0')} />
@@ -166,7 +185,7 @@ function Sidebar({ onLogout }) {
 
 // ─── الهيدر اللاصق مع الحالة المباشرة ───
 function Header({ onLogout }) {
-  const navigate = useNavigate();
+  const go = useGo();
   const { pathname } = useLocation();
   const { restaurant } = useRestaurant();
   const { connected, pendingCount } = useLiveOrders();
@@ -190,7 +209,7 @@ function Header({ onLogout }) {
           <div className="flex-1 min-w-0">
             <p className="font-extrabold leading-tight text-[16px] truncate">{restaurant.name_ar || 'المطعم'}</p>
             <div className="flex items-center gap-2.5 mt-1">
-              <button onClick={() => navigate('/settings')} className={cx('no-press inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap', restaurant.is_open ? 'bg-white/20' : 'bg-black/15 text-white/90')}>
+              <button onClick={() => go('/settings')} className={cx('no-press inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap', restaurant.is_open ? 'bg-white/20' : 'bg-black/15 text-white/90')}>
                 <span className={cx('w-1.5 h-1.5 rounded-full', restaurant.is_open ? 'bg-emerald-300' : 'bg-white/60')} />
                 {restaurant.is_open ? 'مفتوح الآن' : 'مغلق'}
               </button>
@@ -198,7 +217,7 @@ function Header({ onLogout }) {
             </div>
           </div>
           {pendingCount > 0 && !pathname.startsWith('/orders') && (
-            <button onClick={() => navigate('/orders')} className="h-9 px-3 rounded-full bg-white text-brand-700 text-xs font-extrabold flex items-center gap-1.5 shadow-soft animate-pop" aria-label={`${pendingCount} طلب بانتظار القبول`}>
+            <button onClick={() => go('/orders')} className="h-9 px-3 rounded-full bg-white text-brand-700 text-xs font-extrabold flex items-center gap-1.5 shadow-soft animate-pop" aria-label={`${pl(pendingCount, 'order')} بانتظار القبول`}>
               <span className="w-2 h-2 rounded-full bg-coral pulse-dot" /> <span className="tnum">{pendingCount}</span> جديد
             </button>
           )}
@@ -212,11 +231,11 @@ function Header({ onLogout }) {
       <header className={cx('hidden lg:block sticky top-0 z-30 glass-light border-b transition-shadow duration-300', scrolled ? 'border-surface-line shadow-soft' : 'border-transparent')}>
         <div className="max-w-6xl mx-auto px-8 h-16 flex items-center gap-4">
           <div className="flex-1 min-w-0">
-            <p className="text-[12px] font-bold text-ink-3">{new Date().toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+            <p className="text-[12px] font-bold text-ink-3">{fmtLongToday()}</p>
             <p className="font-extrabold text-ink leading-tight">{current?.label || ''}</p>
           </div>
           {pendingCount > 0 && (
-            <button onClick={() => navigate('/orders')} className="h-10 px-4 rounded-full bg-coral text-white text-sm font-extrabold flex items-center gap-2 shadow-[0_10px_24px_rgba(245,59,87,.3)] animate-pop">
+            <button onClick={() => go('/orders')} className="h-10 px-4 rounded-full bg-coral text-white text-sm font-extrabold flex items-center gap-2 shadow-[0_10px_24px_rgba(245,59,87,.3)] animate-pop">
               <span className="w-2 h-2 rounded-full bg-white animate-pulse" /> <span className="tnum">{pendingCount}</span> بانتظار القبول
             </button>
           )}
@@ -256,18 +275,22 @@ function Shell() {
       <div className="lg:ps-[var(--sidebar-w)]">
         <Header onLogout={doLogout} />
         <main className="page-bottom-space max-w-3xl lg:max-w-6xl mx-auto px-4 pt-4 lg:px-8 lg:pt-6">
-          <Suspense fallback={<PageSkeleton cards={4} rows={4} />}>
-            <div key={pathname} className="route-enter">
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/orders" element={<Orders />} />
-                <Route path="/menu" element={<Menu />} />
-                <Route path="/reviews" element={<Reviews />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </div>
-          </Suspense>
+          <PushBanner />
+          {/* حماية الصفحات: خطأ في صفحة لا يوقف تنبيهات الطلبات والطباعة (LiveOrdersProvider خارج الحماية) */}
+          <ErrorBoundary resetKey={pathname}>
+            <Suspense fallback={<PageSkeleton cards={4} rows={4} />}>
+              <div key={pathname} className="route-enter">
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/orders" element={<Orders />} />
+                  <Route path="/menu" element={<Menu />} />
+                  <Route path="/reviews" element={<Reviews />} />
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </div>
+            </Suspense>
+          </ErrorBoundary>
         </main>
       </div>
       <BottomNav />
@@ -290,7 +313,17 @@ function ProtectedRoute({ children }) {
   return localStorage.getItem('token') ? children : <Navigate to="/login" replace />;
 }
 
-// انتهاء الجلسة (401) → خروج وتوجيه لصفحة الدخول
+// زر الرجوع في أندرويد: يغلق النافذة المفتوحة ← يرجع صفحة ← ضغطتان للخروج من الرئيسية
+function BackButtonHandler() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const pathRef = useRef(pathname);
+  pathRef.current = pathname;
+  useEffect(() => installBackHandler(navigate, () => pathRef.current), [navigate]);
+  return null;
+}
+
+// انتهاء الجلسة (401 مؤكَّد بطلب /auth/me) → خروج وتوجيه لصفحة الدخول
 function AuthWatcher() {
   const navigate = useNavigate();
   useEffect(() => {
@@ -308,6 +341,7 @@ export default function App() {
   return (
     <BrowserRouter basename={ROUTER_BASENAME}>
       <AuthWatcher />
+      <BackButtonHandler />
       <Toaster position="top-center" containerStyle={{ top: 'calc(var(--sat) + 12px)' }}
         toastOptions={{
           className: 'wasaly-toast',

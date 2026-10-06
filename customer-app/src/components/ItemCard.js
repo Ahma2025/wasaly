@@ -30,10 +30,12 @@ export default function ItemCard({ item, onAdd, onPress }) {
   };
   const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '90deg'] });
 
+  // قارئ الشاشة: الكرت (الاسم والسعر) عنصر، وزر "+" عنصر منفصل ظاهر (مش مخفي داخل عنصر أب)
+  const a11yOpen = { accessibilityActions: [{ name: 'activate' }], onAccessibilityAction: (e) => { if (e.nativeEvent.actionName === 'activate') onPress && onPress(); } };
   return (
-    <Press style={styles.card} onPress={onPress} scaleTo={0.97} haptic={false}>
-      <View style={styles.row} accessible accessibilityRole="button" accessibilityLabel={`${item.name_ar}، ${shown.toFixed(2)} شيكل`}>
-        <View style={styles.imageWrap}>
+    <Press style={styles.card} onPress={onPress} scaleTo={0.97} haptic={false} accessible={false}>
+      <View style={styles.row}>
+        <View style={styles.imageWrap} accessible={false}>
           {item.image ? (
             <Image source={{ uri: item.image }} style={styles.image} />
           ) : (
@@ -57,7 +59,8 @@ export default function ItemCard({ item, onAdd, onPress }) {
             </Animated.View>
           </Pressable>
         </View>
-        <View style={styles.info}>
+        <View style={styles.info} accessible accessibilityRole="button" accessibilityLabel={`${item.name_ar}، ${shown.toFixed(2)} شيكل${hasDiscount ? `، بدل ${price.toFixed(2)}` : ''}`}
+          accessibilityHint="اضغط مرتين لعرض التفاصيل والإضافات" onAccessibilityTap={onPress} {...a11yOpen}>
           <View style={styles.badges}>
             {(!!item.is_popular || !!item.is_bestseller) && (
               <View style={[styles.badge, styles.badgeHot]}><Ionicons name="flame" size={10} color={COLORS.primary} /><Text style={styles.badgeHotText}>الأكثر طلباً</Text></View>

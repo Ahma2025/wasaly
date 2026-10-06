@@ -14,6 +14,8 @@ import ErrorBoundary from './src/components/ErrorBoundary';
 import api from './src/utils/api';
 import { writeCache } from './src/utils/cache';
 import { notificationData } from './src/utils/pushNotifications';
+import { notificationTarget } from './src/utils/notifRoute';
+import { KB_TOOLBAR_H } from './src/config';
 
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { CartProvider } from './src/context/CartContext';
@@ -97,9 +99,12 @@ function MainTabs() {
   );
 }
 
-function AppNavigator() {
+function AppNavigator({ onAppReady }) {
   const { user, loading } = useAuth();
   const { colors: C } = useTheme();
+
+  // شاشة البداية (فوق التطبيق) تختفي لما تجهز الجلسة — التحميل بيصير خلفها مش بعدها
+  useEffect(() => { if (!loading && onAppReady) onAppReady(); }, [loading]);
 
   // تجهيز مسبق لبيانات الصفحات لحظة الدخول — عشان تفتح فورية بدون تحميل
   useEffect(() => {
@@ -170,11 +175,8 @@ function NotificationRouter({ navigationRef, navReady }) {
     const id = response?.notification?.request?.identifier;
     if (id && handled.current.has(id)) return;
     if (id) handled.current.add(id);
-    const data = notificationData(response);
-    if (data?.type === 'cart_reminder') { pending.current = { name: 'Main', params: { screen: 'سلتي' } }; }
-    // طلب مجمّع (عدة مطاعم) → شاشة تتبّع المجموعة
-    else if (data?.group_id && data.group_id !== 'null' && !data.code) { pending.current = { name: 'GroupTracking', params: { groupId: data.group_id } }; }
-    else if (data?.order_id) { pending.current = { name: 'OrderTracking', params: { orderId: data.order_id } }; }
+    const target = notificationTarget(notificationData(response));
+    if (target) pending.current = target;
     flush();
   };
   const flush = () => {
@@ -200,7 +202,12 @@ function NotificationRouter({ navigationRef, navReady }) {
   return null;
 }
 
+/*
+  شريط "تم" فوق كيبورد iOS — بلون الثيم (فاتح/داكن) و pointerEvents="box-none" حتى ما يحجب اللمس.
+  الشاشات اللي فيها حقول بأسفلها تضيف KB_TOOLBAR_H لإزاحة الكيبورد (KeyboardAvoidingView/BottomSheet)
+*/
 function KeyboardToolbar() {
+  const { colors: C } = useTheme();
   const [kbHeight, setKbHeight] = useState(0);
   const [visible, setVisible] = useState(false);
 
@@ -215,28 +222,28 @@ function KeyboardToolbar() {
   if (!visible || Platform.OS !== 'ios') return null;
 
   return (
-    <View style={[styles.kbToolbar, { bottom: kbHeight }]}>
-      <TouchableOpacity onPress={() => Keyboard.dismiss()} style={styles.doneBtn} hitSlop={{ top: 10, bottom: 10, left: 20, right: 20 }}>
-        <Text style={styles.doneBtnText}>تم</Text>
+    <View pointerEvents="box-none" style={[styles.kbToolbar, { bottom: kbHeight, backgroundColor: C.elev || C.card, borderTopColor: C.border }]}>
+      <TouchableOpacity onPress={() => Keyboard.dismiss()} style={styles.doneBtn} hitSlop={{ top: 10, bottom: 10, left: 20, right: 20 }}
+        accessibilityRole="button" accessibilityLabel="إخفاء لوحة المفاتيح">
+        <Text style={[styles.doneBtnText, { color: C.primary }]}>تم</Text>
       </TouchableOpacity>
-      <View style={{ flex: 1 }} />
+      <View style={{ flex: 1 }} pointerEvents="none" />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   kbToolbar: {
-    position: 'absolute', left: 0, right: 0, height: 44,
-    backgroundColor: '#D1D5DB',
-    borderTopWidth: 0.5, borderTopColor: '#A0A0A8',
+    position: 'absolute', left: 0, right: 0, height: KB_TOOLBAR_H,
+    borderTopWidth: 0.5,
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8,
     zIndex: 9999,
   },
   doneBtn: { paddingHorizontal: 8, paddingVertical: 6 },
-  doneBtnText: { color: '#007AFF', fontSize: 17, fontWeight: '600' },
+  doneBtnText: { fontSize: 17, fontWeight: '700' },
 });
 
-function ThemedNavigation() {
+function ThemedNavigation({ onAppReady }) {
   const { colors: C, isDark } = useTheme();
   const navigationRef = useRef(null);
   const [navReady, setNavReady] = useState(false);
@@ -249,7 +256,7 @@ function ThemedNavigation() {
     <>
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
       <NavigationContainer ref={navigationRef} theme={navTheme} onReady={() => setNavReady(true)}>
-        <AppNavigator />
+        <AppNavigator onAppReady={onAppReady} />
       </NavigationContainer>
       <NotificationRouter navigationRef={navigationRef} navReady={navReady} />
       <KeyboardToolbar />
@@ -257,14 +264,14 @@ function ThemedNavigation() {
   );
 }
 
-function MainApp() {
+function MainApp({ onAppReady }) {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
           <AuthProvider>
             <CartProvider>
-              <ThemedNavigation />
+              <ThemedNavigation onAppReady={onAppReady} />
             </CartProvider>
           </AuthProvider>
         </ThemeProvider>
@@ -275,6 +282,8 @@ function MainApp() {
 
 export default function App() {
   const [splashDone, setSplashDone] = useState(false);
+  const [appReady, setAppReady] = useState(false);
+  const onAppReady = useCallback(() => setAppReady(true), []);
   const [fontTimeout, setFontTimeout] = useState(false);
   const [fontsLoaded, fontError] = useFonts({
     Tajawal_400Regular, Tajawal_500Medium, Tajawal_700Bold, Tajawal_800ExtraBold, Tajawal_900Black,
@@ -295,20 +304,23 @@ export default function App() {
     return () => clearTimeout(t);
   }, [fontsReady, hideNative]);
 
+  // احتياط: لو الجلسة علقت لأي سبب ما تضل شاشة البداية للأبد
+  useEffect(() => { const t = setTimeout(() => setAppReady(true), 6000); return () => clearTimeout(t); }, []);
+
   if (!fontsReady) return null; // الشاشة الأصلية ما زالت ظاهرة
   if (fontsLoaded) applyGlobalFont(); // قبل أول رسم لشاشة البداية حتى يظهر نصها بخط Tajawal
 
-  if (!splashDone) {
-    return (
-      <ErrorBoundary>
-        <SplashScreen onReady={hideNative} onFinish={() => setSplashDone(true)} />
-      </ErrorBoundary>
-    );
-  }
-
+  // التطبيق يتركّب فوراً تحت شاشة البداية (تحميل الجلسة والبيانات بالتوازي مع الحركة)
   return (
     <ErrorBoundary>
-      <MainApp />
+      <View style={{ flex: 1 }}>
+        <MainApp onAppReady={onAppReady} />
+        {!splashDone && (
+          <View style={StyleSheet.absoluteFill}>
+            <SplashScreen onReady={hideNative} canFinish={appReady} onFinish={() => setSplashDone(true)} />
+          </View>
+        )}
+      </View>
     </ErrorBoundary>
   );
 }

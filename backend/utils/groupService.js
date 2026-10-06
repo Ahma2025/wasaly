@@ -59,7 +59,7 @@ async function saveMultiConfig(patch) {
   }
   if (b.extra_stop_fee !== undefined) {
     const v = Number(b.extra_stop_fee);
-    if (!Number.isFinite(v) || v < 0 || v > 100) throw new HttpError(400, 'رسوم المحطة الإضافية يجب أن تكون بين 0 و 100 ₪');
+    if (!Number.isFinite(v) || v < 0 || v > 100) throw new HttpError(400, 'رسوم المطعم الإضافي يجب أن تكون بين 0 و 100 ₪');
     next.extra_stop_fee = round2(v);
   }
   await pool.query(
@@ -87,7 +87,7 @@ async function priceGroup(db, userId, body, opts = {}) {
   const orderType = b.order_type === undefined || b.order_type === null || b.order_type === '' ? 'delivery' : String(b.order_type);
   if (orderType !== 'delivery') addErr('pickup_not_allowed', 'الطلب المجمّع متاح للتوصيل فقط (لا يمكن الاستلام من المطاعم)');
   const pm = b.payment_method === undefined || b.payment_method === null || b.payment_method === '' ? 'cash' : String(b.payment_method);
-  if (pm !== 'cash') addErr('card_not_allowed', 'الدفع بالبطاقة غير متاح للطلب المجمّع حالياً — اختر الدفع نقداً عند الاستلام (ويمكنك استخدام رصيد المحفظة)');
+  if (pm !== 'cash') addErr('card_not_allowed', 'الدفع بالبطاقة غير متاح للطلب المجمّع حالياً — اختر كاش عند الاستلام (ويمكنك استخدام رصيد محفظة وصلّي)');
 
   const rawCarts = Array.isArray(b.carts) ? b.carts : (Array.isArray(b.restaurants) ? b.restaurants : []);
   const n = rawCarts.length;
@@ -222,7 +222,7 @@ function groupQuoteView(p) {
 // ═══════════════════════════════════════════════════════════════
 //  🛒 الإنشاء — معاملة واحدة: قفل المستخدم + تسعير + مجموعة + أبناء + نقاط/محفظة/كوبون ذرّية
 // ═══════════════════════════════════════════════════════════════
-async function createGroup(io, userId, body) {
+async function createGroup(io, userId, body, { clientRef = null } = {}) {
   const { group, children } = await S.withTransaction(async (client) => {
     const { rows: ur } = await client.query('SELECT id, wallet_balance, loyalty_points FROM users WHERE id=$1 FOR UPDATE', [userId]);
     const p = await priceGroup(client, userId, body, { userRow: ur[0] || {} });
@@ -235,14 +235,14 @@ async function createGroup(io, userId, body) {
       `INSERT INTO order_groups (group_number, customer_id, status, subtotal, base_fee, delivery_fee, extra_stops_fee, extra_stop_unit, driver_fee,
          free_delivery, discount, coupon_code, coupon_discount, first_order_discount, points_value, points_redeemed, wallet_used, tip, total,
          loyalty_points_earned, payment_method, payment_status, delivery_address, delivery_lat, delivery_lng, address_id, distance_km, notes,
-         stops_total, picked_count)
-       VALUES ('', $1, 'pending', $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'cash',$19,$20,$21,$22,$23,$24,$25,$26,0)
+         stops_total, picked_count, client_ref)
+       VALUES ('', $1, 'pending', $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'cash',$19,$20,$21,$22,$23,$24,$25,$26,0,$27)
        RETURNING id`,
       [userId, p.subtotal, p.base_fee, p.delivery_fee, p.extra_stops_fee, p.extra_stop_unit, p.driver_fee,
        p.free_delivery, p.discount, useCoupon ? p.coupon.code : null, useCoupon ? p.coupon_discount : 0, p.first_order_discount,
        p.points_value, p.points_redeemed, p.wallet_used, p.tip, p.total, p.points_earned, paymentStatus,
        String(p.delivery_address || '').slice(0, 500), p.point.deliveryLat, p.point.deliveryLng, p.point.addressRow ? p.point.addressRow.id : null,
-       p.distance_km, String(b.notes || '').slice(0, 1000), p.carts.length]);
+       p.distance_km, String(b.notes || '').slice(0, 1000), p.carts.length, clientRef]);
     const groupId = gr[0].id;
     const { rows: gn } = await client.query(
       `UPDATE order_groups SET group_number = 'WSG' || LPAD(id::text, 6, '0') WHERE id=$1 RETURNING *`, [groupId]);
@@ -411,6 +411,8 @@ function offerPayload(g, stops, expiresAt, { updated = false } = {}) {
     driver_fee: round2(num(g.driver_fee)), tip: round2(num(g.tip)), driver_earning: round2(num(g.driver_fee) + num(g.tip)),
     cash_to_collect: cashToCollect(g), payment_method: g.payment_method,
     offer_seconds: offerSeconds, expires_at: expiresAt,
+    // D-01/D-02: معرّف فريد لكل عرض + وقت السيرفر
+    offer_id: `g${g.id}|${expiresAt}`, server_now: new Date().toISOString(),
     ...(updated ? { updated: true } : {}),
   };
 }
@@ -444,12 +446,16 @@ async function dispatchGroup(io, groupId, excludeDriverId = null) {
        WHERE id=$2 AND driver_id IS NULL AND driver_assigned_at IS NULL AND status='confirmed' RETURNING *`, [driverId, groupId]);
     if (!off[0]) return null;
 
-    const expiresAt = new Date(Date.now() + S.OFFER_SECONDS * 1000).toISOString();
-    const payload = offerPayload(off[0], stops, expiresAt);
+    const expiresAt = new Date(off[0].driver_offer_expires_at || Date.now() + S.OFFER_SECONDS * 1000).toISOString();
+    // D-18: ترتيب المحطات في العرض = أقرب جار من موقع هذا السائق (نفس خوارزمية القبول) — لا يتغيّر الترتيب بعد القبول
+    let offerStops = stops;
+    // (بدون حفظ: ترتيب الإنشاء يبقى مرجع اختيار السائق التالي إن رُفض العرض)
+    try { const r = await recomputeRoute(groupId, driverId, pool, { persist: false }); if (r && r.length) offerStops = r; } catch (e) { console.error('offer route:', e.message); }
+    const payload = offerPayload(off[0], offerStops, expiresAt);
     notifyUser(io, driverId, 'new_order_request', payload);
-    S.pushTo(driverId, '🛵 طلب مجمّع جديد!', `${stops.length} مطاعم — سائق واحد. اقبل الآن!`,
+    S.pushTo(driverId, '🛵 طلب مجمّع جديد!', `${S.arCount(offerStops.length, S.AR.restaurants)} — سائق واحد. اقبل الآن!`,
       { type: 'new_order_request', is_group: 'true', group_id: String(g.id), order_id: String(payload.order_id || ''),
-        offer_seconds: String(S.OFFER_SECONDS), expires_at: expiresAt }, 'com.wasaly.driver');
+        offer_seconds: String(S.OFFER_SECONDS), expires_at: expiresAt, offer_id: payload.offer_id }, 'com.wasaly.driver');
 
     clearTimer(offerTimers, key);
     const t = setTimeout(async () => {
@@ -484,7 +490,7 @@ async function recoverGroupDispatch(io) {
 }
 
 // ─── مسار الاستلام: أقرب جار من موقع السائق عبر المحطات غير المستلمة ───
-async function recomputeRoute(groupId, driverId, db = pool) {
+async function recomputeRoute(groupId, driverId, db = pool, { persist = true } = {}) {
   const stops = await loadStops(groupId, db);
   if (!stops.length) return stops;
   let start = driverId ? await driverLoc.getLocation(driverId) : null;
@@ -509,6 +515,7 @@ async function recomputeRoute(groupId, driverId, db = pool) {
     }
   } else ordered.push(...rest); // بلا موقع للسائق → نُبقي الترتيب الحالي
   ordered.forEach((s, i) => { s.sequence = i + 1; });
+  if (!persist) return ordered;
   await db.query(
     `UPDATE orders o SET stop_sequence = v.seq FROM (SELECT unnest($1::int[]) AS id, unnest($2::int[]) AS seq) v WHERE o.id = v.id`,
     [ordered.map(s => s.order_id), ordered.map(s => s.sequence)]);
@@ -547,7 +554,7 @@ async function acceptGroup(io, groupId, driverId) {
     notifyUser(io, out.g.customer_id, 'driver_assigned', { order_id: firstId, group_id: out.g.id, driver_id: driverId });
     const { rows: di } = await pool.query('SELECT name FROM users WHERE id=$1', [driverId]);
     await notify(io, out.g.customer_id, '🛵 السائق في طريقه',
-      `${di[0]?.name || 'السائق'} سيجمع طلبك من ${stops.length} مطاعم ثم يوصله إليك`, 'driver_assigned', { group_id: String(out.g.id), order_id: String(firstId || '') });
+      `${di[0]?.name || 'السائق'} سيجمع طلبك من ${S.arCount(stops.length, S.AR.restaurants)} ثم يوصله إليك`, 'driver_assigned', { group_id: String(out.g.id), order_id: String(firstId || '') });
   } catch (e) { console.error('group accept notify (non-fatal):', e.message); }
   return { group_id: out.g.id, stops: stops.map(stopView) };
 }
@@ -683,8 +690,8 @@ async function refundGroupBenefits(client, groupId) {
 }
 
 async function releaseGroupCoupon(client, g) {
-  const { rowCount } = await client.query('DELETE FROM coupon_usage WHERE group_id=$1', [g.id]);
-  if (rowCount > 0) await client.query('UPDATE coupons SET usage_count = GREATEST(0, COALESCE(usage_count,0) - 1) WHERE LOWER(code)=LOWER($1)', [g.coupon_code]);
+  const { rows: cu } = await client.query('DELETE FROM coupon_usage WHERE group_id=$1 RETURNING coupon_id', [g.id]);
+  for (const u of cu) await client.query('UPDATE coupons SET usage_count = GREATEST(0, COALESCE(usage_count,0) - 1) WHERE id=$1', [u.coupon_id]);
 }
 
 /**
@@ -729,7 +736,7 @@ async function afterGroupCancelled(io, g, kids, by, reason) {
   for (const k of kids) {
     await S.emitOrderStatus(io, k, 'cancelled');
     const owner = parties.children.find(c => c.id === k.id)?.owner_id;
-    emitTo(io, [owner, g.driver_id], 'order_cancelled', { order_id: k.id, by, group_id: g.id });
+    emitTo(io, [owner, g.driver_id], 'order_cancelled', { order_id: k.id, order_number: k.order_number, by, group_id: g.id, reason: reason || null });
   }
   await emitGroupStatus(io, g, parties);
   emitTo(io, [g.customer_id, g.driver_id, ...parties.allOwners], 'group_cancelled', { group_id: g.id, group_number: g.group_number, by, reason: reason || null });
@@ -838,6 +845,12 @@ async function onChildCancelled(io, child, by) {
         [g.customer_id, refundPoints, `استرجاع نقاط فرق طلب مجمّع #${g.group_number}`]);
     }
     const picked = remaining.filter(r => r.picked_up_at).length;
+    // 🔢 X-05: إعادة ترقيم المحطات الباقية 1..n (لا "مطعم 3 من 2" بعد انسحاب مطعم قبل قبول السائق)
+    await client.query(
+      `UPDATE orders o SET stop_sequence = v.rn FROM (
+         SELECT id, ROW_NUMBER() OVER (ORDER BY stop_sequence NULLS LAST, id) AS rn
+         FROM orders WHERE group_id=$1 AND status <> 'cancelled') v
+       WHERE o.id = v.id AND o.stop_sequence IS DISTINCT FROM v.rn`, [groupId]);
     const { rows: ug } = await client.query(
       `UPDATE order_groups SET subtotal=$2, base_fee=$3, delivery_fee=$4, extra_stops_fee=$5, driver_fee=$6, free_delivery=$7,
               discount=$8, coupon_code=$9, coupon_discount=$10, first_order_discount=$11, points_value=$12, points_redeemed=$13,
@@ -879,7 +892,8 @@ async function onChildCancelled(io, child, by) {
   if (g.status === 'confirmed' && g.driver_id && !g.driver_assigned_at && g.driver_offer_expires_at) {
     const exp = new Date(g.driver_offer_expires_at);
     if (exp.getTime() > Date.now()) {
-      const stops = await loadStops(g.id);
+      let stops = await loadStops(g.id);
+      try { const r = await recomputeRoute(g.id, g.driver_id, pool, { persist: false }); if (r && r.length) stops = r; } catch { /* ignore */ }
       notifyUser(io, g.driver_id, 'new_order_request', offerPayload(g, stops, exp.toISOString(), { updated: true }));
     }
   }
@@ -934,9 +948,12 @@ async function loadGroupView(groupId, viewer) {
   const { rows: kids } = await pool.query(
     `SELECT o.id, o.order_number, o.restaurant_id, o.status, o.stop_sequence, o.subtotal, o.total, o.notes,
             o.restaurant_accepted_at, o.picked_up_at, o.delivered_at, o.cancelled_at, o.cancel_reason, o.created_at,
+            o.rating_restaurant, o.rating_driver, (rv.id IS NOT NULL) AS is_rated,
             r.name_ar AS restaurant_name, r.logo AS restaurant_logo, r.lat AS restaurant_lat, r.lng AS restaurant_lng,
-            r.phone AS restaurant_phone, r.address AS restaurant_address, r.owner_id AS restaurant_owner_id
+            r.phone AS restaurant_phone, r.address AS restaurant_address, r.owner_id AS restaurant_owner_id,
+            COALESCE(r.store_type, 'restaurant') AS store_type
      FROM orders o LEFT JOIN restaurants r ON r.id=o.restaurant_id
+     LEFT JOIN reviews rv ON rv.order_id = o.id
      WHERE o.group_id=$1 ORDER BY (o.status='cancelled'), o.stop_sequence NULLS LAST, o.id`, [groupId]);
 
   const uid = String(viewer.id);
@@ -965,6 +982,11 @@ async function loadGroupView(groupId, viewer) {
     stop_sequence: k.stop_sequence, subtotal: round2(num(k.subtotal)), notes: k.notes,
     restaurant_accepted_at: k.restaurant_accepted_at, picked_up_at: k.picked_up_at, delivered_at: k.delivered_at,
     cancelled_at: k.cancelled_at, cancel_reason: k.cancel_reason,
+    // A-24: انسحب هذا المطعم بنفسه (أُلغي قبل/بدون إلغاء المجموعة) ≠ أُلغي مع إلغاء المجموعة كاملة
+    withdrawn: k.status === 'cancelled' && (g.status !== 'cancelled' || g.cancelled_by === 'restaurant' || !g.cancelled_at || !k.cancelled_at
+      || Math.abs(new Date(k.cancelled_at) - new Date(g.cancelled_at)) >= 5000),
+    // C-13/C-21: حالة التقييم + نوع المتجر (نصوص شاشة التقييم)
+    store_type: k.store_type, rating_restaurant: k.rating_restaurant, rating_driver: k.rating_driver, is_rated: !!k.is_rated,
     items: items.filter(i => i.order_id === k.id),
   });
 
@@ -993,6 +1015,8 @@ async function loadGroupView(groupId, viewer) {
     vehicle_type: g.driver_assigned_at ? g.vehicle_type : null, vehicle_plate: g.driver_assigned_at ? g.vehicle_plate : null,
     cash_to_collect: cashToCollect(g),
     driver_earning: round2(num(g.driver_fee) + num(g.tip)),
+    // C-13: السائق يُقيَّم مرة واحدة لكل طلب مجمّع
+    driver_rated: kids.some(k => k.rating_driver !== null && k.rating_driver !== undefined),
     orders: kids.map(childView),
     stops: kids.filter(k => k.status !== 'cancelled').map(k => ({
       order_id: k.id, order_number: k.order_number, restaurant_id: k.restaurant_id, name: k.restaurant_name,
@@ -1007,6 +1031,17 @@ async function loadGroupView(groupId, viewer) {
     out.is_offer = true;
     out.offer_seconds = Math.max(0, Math.round((exp.getTime() - Date.now()) / 1000));
     out.expires_at = exp.toISOString();
+    out.offer_id = `g${g.id}|${out.expires_at}`;
+    out.server_now = new Date().toISOString();
+    // D-18: نفس ترتيب العرض (أقرب جار من موقع السائق) بدل ترتيب الإنشاء
+    try {
+      const r = await recomputeRoute(g.id, g.driver_id, pool, { persist: false });
+      const seq = new Map((r || []).map(s => [String(s.order_id), s.sequence]));
+      if (seq.size) {
+        out.stops = out.stops.map(s => ({ ...s, sequence: seq.get(String(s.order_id)) ?? s.sequence }))
+          .sort((a, b) => (a.sequence ?? 99) - (b.sequence ?? 99));
+      }
+    } catch { /* ignore */ }
   }
   if (!isAdmin && !isDriver) { delete out.driver_offer_expires_at; delete out.driver_earning; }
   if (isDriver && !isAdmin) { delete out.cashback_given; delete out.points_redeemed; delete out.benefits_refunded; delete out.referral_processed; delete out.points_credited; }

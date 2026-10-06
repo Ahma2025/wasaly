@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Animated, Dimensions, StyleSheet, StatusBar, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,7 +7,11 @@ import { isReducedMotion } from '../utils/motion';
 const { width } = Dimensions.get('window');
 
 // شاشة البداية: شعار يرتد + موجتان متّسعتان + اسم يصعد + شريط تقدّم بلمعة
-export default function SplashScreen({ onFinish, onReady }) {
+/*
+  شاشة البداية فوق التطبيق (App يركّب التطبيق تحتها فوراً):
+  تنتهي لما تخلص الحركة + canFinish (الجلسة جاهزة) — بدل مدة ثابتة ثم بدء التحميل
+*/
+export default function SplashScreen({ onFinish, onReady, canFinish = true }) {
   const bar = useRef(new Animated.Value(0)).current;
   const fade = useRef(new Animated.Value(0)).current;
   const logo = useRef(new Animated.Value(0)).current;
@@ -15,12 +19,22 @@ export default function SplashScreen({ onFinish, onReady }) {
   const ring = useRef(new Animated.Value(0)).current;
   const orbs = useRef(new Animated.Value(0)).current;
   const exit = useRef(new Animated.Value(1)).current;
+  const [animDone, setAnimDone] = useState(false);
+  const exiting = useRef(false);
+
+  // خروج ناعم بعد ما تجهز الحركة والتطبيق
+  useEffect(() => {
+    if (!animDone || !canFinish || exiting.current) return;
+    exiting.current = true;
+    if (isReducedMotion()) { onFinish && onFinish(); return; }
+    Animated.timing(exit, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => onFinish && onFinish());
+  }, [animDone, canFinish]);
 
   useEffect(() => {
     const reduce = isReducedMotion();
     if (reduce) {
       fade.setValue(1); logo.setValue(1); word.setValue(1); bar.setValue(1);
-      const t = setTimeout(() => onFinish && onFinish(), 500);
+      const t = setTimeout(() => setAnimDone(true), 300);
       return () => clearTimeout(t);
     }
     Animated.parallel([
@@ -36,15 +50,14 @@ export default function SplashScreen({ onFinish, onReady }) {
     ]));
     loop.start();
 
-    Animated.timing(bar, { toValue: 1, duration: 1000, delay: 200, easing: Easing.inOut(Easing.cubic), useNativeDriver: true })
-      .start(() => {
-        Animated.timing(exit, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => onFinish && onFinish());
-      });
+    Animated.timing(bar, { toValue: 1, duration: 800, delay: 120, easing: Easing.inOut(Easing.cubic), useNativeDriver: true })
+      .start(() => setAnimDone(true));
     return () => loop.stop();
   }, []);
 
   const trackW = width * 0.5;
-  const barX = bar.interpolate({ inputRange: [0, 1], outputRange: [-trackW, 0] });
+  // RTL: الشريط يعبّي من اليمين لليسار
+  const barX = bar.interpolate({ inputRange: [0, 1], outputRange: [trackW, 0] });
   const ringScale = ring.interpolate({ inputRange: [0, 1], outputRange: [1, 2.3] });
   const ringOpacity = ring.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] });
   const logoScale = logo.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] });
@@ -74,7 +87,7 @@ export default function SplashScreen({ onFinish, onReady }) {
 
         <View style={[styles.barTrack, { width: trackW }]}>
           <Animated.View style={{ width: trackW, height: '100%', transform: [{ translateX: barX }] }}>
-            <LinearGradient colors={['rgba(255,255,255,0.7)', '#FFFFFF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.barFill} />
+            <LinearGradient colors={['#FFFFFF', 'rgba(255,255,255,0.7)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.barFill} />
           </Animated.View>
         </View>
       </Animated.View>

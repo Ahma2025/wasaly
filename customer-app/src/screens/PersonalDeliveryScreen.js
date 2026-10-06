@@ -7,7 +7,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import api from '../utils/api';
+import api, { isNetworkError, NETWORK_MESSAGE } from '../utils/api';
+import { KB_TOOLBAR_H } from '../config';
 import { useTheme } from '../context/ThemeContext';
 import GradientHeader from '../components/GradientHeader';
 import MapPicker from '../components/MapPicker';
@@ -49,12 +50,15 @@ export default function PersonalDeliveryScreen({ navigation }) {
   const [submitting, setSubmitting] = useState(false);
   const mapRef = useRef(null);
   const centerRef = useRef(null);
+  const idemRef = useRef({ sig: null, key: null });
 
-  useEffect(() => {
+  const loadConfig = useCallback(() => {
+    setCfg(null);
     api.get('/orders/personal/config')
       .then(d => setCfg(d?.data || { enabled: false }))
-      .catch(() => setCfg({ enabled: false, error: true }));
+      .catch((e) => setCfg({ enabled: false, error: true, message: isNetworkError(e) ? NETWORK_MESSAGE : (e?.message || '') }));
   }, []);
+  useEffect(() => { loadConfig(); }, [loadConfig]);
 
   const onCenterChange = useCallback((c, byUser) => {
     centerRef.current = c;
@@ -96,22 +100,25 @@ export default function PersonalDeliveryScreen({ navigation }) {
     if (p) mapRef.current?.setView(p.lat, p.lng, 16);
   };
 
-  // تسعير فوري عند توفر النقطتين
+  // تسعير فوري عند توفر النقطتين — السعر حسب المسافة فقط (عدد الركاب/حجم الطرد ما بيغيّروه)
+  const [quoteNonce, setQuoteNonce] = useState(0);
+  const extrasRef = useRef({});
+  extrasRef.current = { service_type: serviceType, passengers, parcel_size: parcelSize };
   useEffect(() => {
-    if (!pickup || !dropoff) { setQuote(null); setQuoteErr(''); return; }
+    if (!pickup || !dropoff) { setQuote(null); setQuoteErr(''); setQuoting(false); return; }
     let alive = true;
     setQuoting(true);
     const t = setTimeout(() => {
       api.post('/orders/personal/quote', {
         pickup_lat: pickup.lat, pickup_lng: pickup.lng,
         dropoff_lat: dropoff.lat, dropoff_lng: dropoff.lng,
-        service_type: serviceType, passengers, parcel_size: parcelSize,
+        ...extrasRef.current,
       }).then(d => { if (alive) { setQuote(d?.data || null); setQuoteErr(''); } })
-        .catch(e => { if (alive) { setQuote(null); setQuoteErr(e?.message || 'تعذّر حساب السعر'); } })
+        .catch(e => { if (alive) { setQuote(null); setQuoteErr(isNetworkError(e) ? NETWORK_MESSAGE : (e?.message || 'تعذّر حساب السعر')); } })
         .finally(() => { if (alive) setQuoting(false); });
     }, 500);
     return () => { alive = false; clearTimeout(t); };
-  }, [pickup, dropoff, serviceType, passengers, parcelSize]);
+  }, [pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, quoteNonce]);
 
   const submit = async () => {
     if (!pickup) { switchMode('pickup'); return Alert.alert('تنبيه', 'حدّد نقطة الاستلام على الخريطة'); }
@@ -119,14 +126,20 @@ export default function PersonalDeliveryScreen({ navigation }) {
     if (serviceType === 'parcel' && normalizePhone(recipientPhone).length < 9) return Alert.alert('تنبيه', 'أدخل رقم هاتف المستلِم بشكل صحيح');
     setSubmitting(true);
     try {
-      const d = await api.post('/orders/personal', {
+      const body = {
         service_type: serviceType,
         pickup_lat: pickup.lat, pickup_lng: pickup.lng, pickup_address: pickupAddr.trim(),
         dropoff_lat: dropoff.lat, dropoff_lng: dropoff.lng, delivery_address: dropAddr.trim(),
         recipient_name: recipientName.trim(), recipient_phone: normalizePhone(recipientPhone),
         parcel_desc: parcelDesc.trim(), parcel_size: parcelSize,
         passengers, notes: notes.trim(), payment_method: 'cash',
-      });
+      };
+      // نفس المفتاح لإعادة نفس الطلب (انقطع الرد؟ السيرفر بيرجّع نفس الطلب بدل طلب مكرر)
+      const sig = JSON.stringify(body);
+      if (idemRef.current.sig !== sig) idemRef.current = { sig, key: `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}` };
+      const key = idemRef.current.key;
+      const d = await api.post('/orders/personal', { ...body, client_ref: key }, { headers: { 'Idempotency-Key': key } });
+      idemRef.current = { sig: null, key: null };
       const order = d?.data;
       Alert.alert('✅ تم إرسال الطلب', 'عم نبحث عن سائق قريب منك...', [
         { text: 'تتبّع الطلب', onPress: () => navigation.replace('OrderTracking', { orderId: order?.id, fromCheckout: true }) },
@@ -155,8 +168,13 @@ export default function PersonalDeliveryScreen({ navigation }) {
         <GradientHeader title="طلب شخصي" />
         <EmptyState emoji={cfg.error ? '📡' : '🛵'} icon={cfg.error ? 'cloud-offline-outline' : 'time-outline'} tone={cfg.error ? 'error' : undefined}
           title={cfg.error ? 'تعذّر الاتصال' : 'الخدمة غير متاحة حالياً'}
-          subtitle={cfg.error ? 'تأكد من الإنترنت وحاول مرة ثانية' : 'خدمة التوصيل الشخصي متوقفة مؤقتاً، رجّع بعد شوي'}
-          ctaLabel="رجوع" onCta={() => navigation.goBack()} />
+          subtitle={cfg.error ? (cfg.message || 'تأكد من الإنترنت وحاول مرة ثانية') : 'خدمة التوصيل الشخصي متوقفة مؤقتاً، رجّع بعد شوي'}
+          ctaLabel={cfg.error ? 'إعادة المحاولة' : 'رجوع'} onCta={cfg.error ? loadConfig : () => navigation.goBack()} />
+        {cfg.error && (
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ alignSelf: 'center', marginBottom: insets.bottom + 30, padding: 8 }} accessibilityRole="button">
+            <Text style={{ color: C.gray, fontWeight: '700', fontSize: 14 }}>رجوع</Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   }
@@ -179,7 +197,7 @@ export default function PersonalDeliveryScreen({ navigation }) {
   );
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? KB_TOOLBAR_H : 0}>
       <GradientHeader title="طلب شخصي" subtitle="وصّل طرد أو اطلب سائق يوصّلك" />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40, gap: 16 }} keyboardShouldPersistTaps="handled" scrollEnabled={scrollEnabled}>
 
@@ -246,7 +264,7 @@ export default function PersonalDeliveryScreen({ navigation }) {
             </View>
             <TextInput style={styles.input} placeholder="اسم المستلِم" placeholderTextColor={C.faint}
               value={recipientName} onChangeText={setRecipientName} textAlign="right" maxLength={60} />
-            <TextInput style={styles.input} placeholder="رقم هاتف المستلِم *" placeholderTextColor={C.faint}
+            <TextInput style={styles.input} placeholder="رقم جوال المستلِم *" placeholderTextColor={C.faint}
               value={recipientPhone} onChangeText={setRecipientPhone} keyboardType="phone-pad" textAlign="right" maxLength={15} />
           </View>
         ) : (
@@ -281,12 +299,18 @@ export default function PersonalDeliveryScreen({ navigation }) {
               <View style={{ alignItems: 'center', gap: 6 }}>
                 <Ionicons name={quoteErr ? 'alert-circle-outline' : 'map-outline'} size={26} color={quoteErr ? C.red : C.faint} />
                 <Text style={[styles.fareSub, quoteErr && { color: C.red }]}>{quoteErr || 'حدّد نقطتي الاستلام والتسليم لعرض السعر'}</Text>
+                {!!quoteErr && pickup && dropoff && (
+                  <TouchableOpacity onPress={() => setQuoteNonce(n => n + 1)} accessibilityRole="button" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Text style={{ color: C.primary, fontWeight: '800', fontSize: 13 }}>حاول مجدداً</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </View>
         )}
 
-        <GradientButton title={`اطلب الآن${quote ? ` · ${quote.fare} ₪` : ''}`} onPress={submit} loading={submitting} disabled={!quote}
+        {/* السعر القديم ما بينعرض والزر معطّل وهو عم يحسب السعر الجديد */}
+        <GradientButton title={quoting ? 'جاري حساب السعر…' : `اطلب الآن${quote ? ` · ${quote.fare} ₪` : ''}`} onPress={submit} loading={submitting} disabled={!quote || quoting}
           icon={<Ionicons name="flash" size={18} color="#FFF" />} height={58} textStyle={{ fontSize: 17 }} />
       </ScrollView>
     </KeyboardAvoidingView>

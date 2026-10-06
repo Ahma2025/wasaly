@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, Platform, I18nManager } from 'react-native';
+import React, { useRef, useEffect, useState } from 'react';
+import { View, Text, Pressable, StyleSheet, Animated, Platform, I18nManager, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,6 +7,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useCart } from '../context/CartContext';
 import { useBump } from './Anim';
 import { SPRING, haptic, isReducedMotion } from '../utils/motion';
+import { plural } from '../utils/plural';
 
 export const TAB_BAR_HEIGHT = 68;
 const BASE_GAP = Platform.OS === 'ios' ? 6 : 12;
@@ -47,7 +48,7 @@ function TabButton({ focused, label, onPress, onLongPress, colors: C, badge }) {
   const [on, off] = ICONS[label] || ['ellipse', 'ellipse-outline'];
   const scale = v.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.04] });
   const translateY = v.interpolate({ inputRange: [0, 1], outputRange: [0, 0] });
-  const a11y = badge ? `${label}، ${badge} صنف` : label;
+  const a11y = badge ? `${label}، ${plural(badge, 'item')}` : label;
 
   return (
     <Pressable style={styles.item} onPress={() => { haptic.select(); onPress(); }} onLongPress={onLongPress}
@@ -70,10 +71,28 @@ function TabButton({ focused, label, onPress, onLongPress, colors: C, badge }) {
   );
 }
 
-export default function FloatingTabBar({ state, navigation }) {
+// إظهار/إخفاء الشريط مع الكيبورد (tabBarHideOnKeyboard ما بيشتغل مع tabBar مخصّص)
+export function useKeyboardVisible() {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const showEv = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEv = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const a = Keyboard.addListener(showEv, () => setShown(true));
+    const b = Keyboard.addListener(hideEv, () => setShown(false));
+    return () => { a.remove(); b.remove(); };
+  }, []);
+  return shown;
+}
+
+export default function FloatingTabBar({ state, navigation, descriptors }) {
   const { colors: C, isDark } = useTheme();
   const { count } = useCart();
   const insets = useSafeAreaInsets();
+  const kb = useKeyboardVisible();
+  const focusedOpts = descriptors?.[state.routes[state.index]?.key]?.options || {};
+  const hideOnKb = focusedOpts.tabBarHideOnKeyboard !== false;
+
+  if (kb && hideOnKb) return null;
 
   return (
     <View accessibilityRole="tablist"

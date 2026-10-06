@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, ScrollView, StyleSheet, Image, RefreshControl, Dimensions } from 'react-native';
+import { View, Text, ScrollView, FlatList, StyleSheet, Image, RefreshControl, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Location from 'expo-location';
+import { quietLocation } from '../utils/location';
+import { plural } from '../utils/plural';
+import RtlHScroll from '../components/RtlHScroll';
 import { FadeIn, Press } from '../components/Anim';
 import { HeroDecor } from '../components/GradientHeader';
 import { haptic, stagger } from '../utils/motion';
@@ -31,19 +33,7 @@ const typeOf = (r) => {
   return 'supermarket';
 };
 
-// موقع الزبون بدون طلب إذن (فقط لو مسموح مسبقاً) — لحساب المسافة ورسوم التوصيل الصحيحة
-async function quietLocation() {
-  try {
-    const perm = await Location.getForegroundPermissionsAsync();
-    if (perm.status !== 'granted') return null;
-    const last = await Location.getLastKnownPositionAsync({ maxAge: 10 * 60 * 1000 });
-    const loc = last || await Promise.race([
-      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-      new Promise(res => setTimeout(() => res(null), 2500)), // لا نؤخّر التحميل أكثر من ذلك
-    ]);
-    return loc ? { lat: loc.coords.latitude, lng: loc.coords.longitude } : null;
-  } catch { return null; }
-}
+// موقع الزبون بدون طلب إذن (utils/location → quietLocation) — لحساب المسافة ورسوم التوصيل الصحيحة
 const locQs = (loc) => (loc ? `&lat=${loc.lat.toFixed(5)}&lng=${loc.lng.toFixed(5)}` : '');
 
 /* أيقونة القسم: Ionicons إن وُجدت وإلا الإيموجي */
@@ -52,9 +42,13 @@ function TypeGlyph({ t, size, color }) {
   return <Text style={{ fontSize: size - 2 }}>{t.emoji}</Text>;
 }
 
-function StoreCard({ r, t, onPress }) {
+// ستايلات الكرت مشتركة بين كل الكروت (مش نسخة لكل كرت)
+const scCache = new WeakMap();
+const scFor = (C) => { let v = scCache.get(C); if (!v) { v = makeSc(C); scCache.set(C, v); } return v; };
+
+const StoreCard = React.memo(function StoreCard({ r, t, onPress }) {
   const { colors: C } = useTheme();
-  const sc = React.useMemo(() => makeSc(C), [C]);
+  const sc = scFor(C);
   return (
     <Press style={sc.wrap} onPress={onPress} scaleTo={0.96} haptic={false} accessibilityRole="button" accessibilityLabel={`${r.name_ar}، ${t.name}${r.is_open ? '' : '، مغلق'}`}>
       <View style={sc.imgBox}>
@@ -81,12 +75,13 @@ function StoreCard({ r, t, onPress }) {
       </View>
     </Press>
   );
-}
+});
 
 /* زر قسم كبير (أيقونة بمربع ملوّن + عدد) — المؤشر النشط مرسوم داخل الزر نفسه (إطار + تعبئة) */
 function TypeTile({ t, on, count, onPress, C }) {
   return (
-    <Press onPress={onPress} scaleTo={0.92} haptic={false} accessibilityRole="tab" accessibilityLabel={`${t.name}${count ? `، ${count}` : ''}`}
+    <Press onPress={onPress} scaleTo={0.92} haptic={false} accessibilityRole="tab" accessibilityState={{ selected: !!on }}
+      accessibilityLabel={`${t.name}${count ? `، ${plural(count, 'store')}` : ''}`}
       style={[ts.tile, { backgroundColor: C.card, borderColor: on ? t.color : C.border }, on && { shadowColor: t.color, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 6 }]}>
       <View style={[ts.iconBox, { backgroundColor: on ? t.color : t.color + '1A' }]}>
         <TypeGlyph t={t} size={22} color={on ? '#FFF' : t.color} />
@@ -135,7 +130,12 @@ export default function MarketScreen() {
   // اختيار قسم من الرئيسية («تسوّق حسب القسم») — t يضمن إعادة الاختيار لنفس القسم
   useEffect(() => {
     const k = route.params?.storeType;
-    if (k) { setSelected(k); scrollRef.current?.scrollTo?.({ y: 0, animated: false }); }
+    if (k) {
+      setSelected(k);
+      const r = scrollRef.current;
+      if (r?.scrollToOffset) r.scrollToOffset({ offset: 0, animated: false });
+      else r?.scrollTo?.({ y: 0, animated: false });
+    }
   }, [route.params?.storeType, route.params?.t]);
 
   // متاجر القسم المختار من الخادم (?store_type=<key>) — نعرض المحلي فوراً ثم نحدّث
@@ -209,25 +209,67 @@ export default function MarketScreen() {
           </View>
           <Text style={s.headerSub}>سوبرماركت · صيدليات · موبايلات · حيوانات أليفة والمزيد — كلها بضغطة</Text>
           <View style={s.headerStats}>
-            <View style={s.statPill}><Ionicons name="storefront-outline" size={13} color="#FFF" /><Text style={s.statTxt}>{stores.length} متجر</Text></View>
-            <View style={s.statPill}><Ionicons name="grid-outline" size={12} color="#FFF" /><Text style={s.statTxt}>{rail.length} قسم</Text></View>
-            <View style={s.statPill}><Ionicons name="radio-button-on" size={11} color="#B6FFD0" /><Text style={s.statTxt}>{stores.filter(x => x.is_open).length} مفتوح الآن</Text></View>
+            <View style={s.statPill}><Ionicons name="storefront-outline" size={13} color="#FFF" /><Text style={s.statTxt}>{plural(stores.length, 'store')}</Text></View>
+            <View style={s.statPill}><Ionicons name="grid-outline" size={12} color="#FFF" /><Text style={s.statTxt}>{plural(rail.length, 'section')}</Text></View>
+            <View style={s.statPill}><Ionicons name="radio-button-on" size={11} color="#B6FFD0" /><Text style={s.statTxt}>مفتوح الآن: {stores.filter(x => x.is_open).length}</Text></View>
           </View>
         </FadeIn>
       </LinearGradient>
 
+      {(() => {
+        const railItems = [ALL, ...rail];
+        const activeIdx = Math.max(0, railItems.findIndex(t => t.key === selected));
+        const refresh = <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load().finally(() => setRefreshing(false)); }} tintColor={C.primary} colors={[C.primary]} progressBackgroundColor={C.card} />;
+        // شريط الأقسام: يبدأ من اليمين، والقسم المختار (مثلاً جاي من الرئيسية) يظهر بالنص
+        const typesRail = (
+          <RtlHScroll activeIndex={activeIdx} contentContainerStyle={s.typesRow} accessibilityRole="tablist">
+            {railItems.map((t, i) => (
+              <FadeIn key={t.key} delay={stagger(i, 40)} from={10}>
+                <TypeTile t={t} C={C} on={selected === t.key} count={t.key === 'all' ? allTotal : t.n}
+                  onPress={() => pick(t.key)} />
+              </FadeIn>
+            ))}
+          </RtlHScroll>
+        );
+        const listMode = !loading && displayList.length > 0 && !(selected === 'all' && sections.length > 1);
+        // قائمة قسم واحد: FlatList بعمودين (يرسم الظاهر فقط بدل 100 كرت مرة وحدة)
+        if (listMode) {
+          return (
+            <FlatList
+              key={`list-${selected}`}
+              ref={scrollRef}
+              data={displayList}
+              keyExtractor={(r) => String(r.id)}
+              numColumns={2}
+              columnWrapperStyle={s.gridRow}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: tabInset + 24 }}
+              refreshControl={refresh}
+              initialNumToRender={8}
+              windowSize={7}
+              ListHeaderComponent={(
+                <>
+                  {typesRail}
+                  <View style={s.listHead}>
+                    <Text style={s.listTitle}>{selected === 'all' ? 'كل المتاجر' : `${selectedType.emoji} ${selectedType.name}`}</Text>
+                    <View style={[s.listCount, { backgroundColor: C.tint }]}><Text style={{ color: C.primary, fontWeight: '800', fontSize: 12 }}>{displayList.length}</Text></View>
+                  </View>
+                </>
+              )}
+              renderItem={({ item: r, index: i }) => (
+                <FadeIn index={i} from={18} style={{ marginBottom: 14 }}>
+                  <StoreCard r={r} t={metaOf(r)} onPress={() => open(r)} />
+                </FadeIn>
+              )}
+            />
+          );
+        }
+        return (
       <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: tabInset + 24 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load().finally(() => setRefreshing(false)); }} tintColor={C.primary} colors={[C.primary]} progressBackgroundColor={C.card} />}>
+        refreshControl={refresh}>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.typesRow} accessibilityRole="tablist">
-          {[ALL, ...rail].map((t, i) => (
-            <FadeIn key={t.key} delay={stagger(i, 40)} from={10}>
-              <TypeTile t={t} C={C} on={selected === t.key} count={t.key === 'all' ? allTotal : t.n}
-                onPress={() => pick(t.key)} />
-            </FadeIn>
-          ))}
-        </ScrollView>
+        {typesRail}
 
         {loading ? (
           <GridSkeleton count={6} />
@@ -241,7 +283,7 @@ export default function MarketScreen() {
               <EmptyState emoji={selectedType.emoji || '🔎'} title={`ما في ${selectedType.name} حالياً`} subtitle="جرّب قسم ثاني أو شوف كل المتاجر" ctaLabel="عرض الكل" onCta={() => setSelected('all')} />
             )}
           </View>
-        ) : selected === 'all' && sections.length > 1 ? (
+        ) : (
           sections.map(({ t, list }, si) => (
             <View key={t.key} style={{ marginTop: si ? 18 : 4 }}>
               <View style={s.secHead}>
@@ -250,7 +292,8 @@ export default function MarketScreen() {
                 <View style={[s.listCount, { backgroundColor: t.color + '1A' }]}><Text style={{ color: t.color, fontWeight: '800', fontSize: 12 }}>{list.length}</Text></View>
                 <View style={{ flex: 1 }} />
                 {list.length > SECTION_PREVIEW && (
-                  <Press onPress={() => pick(t.key)} haptic={false} scaleTo={0.94} style={s.seeAll} accessibilityRole="button" accessibilityLabel={`عرض كل ${t.name}`}>
+                  <Press onPress={() => pick(t.key)} haptic={false} scaleTo={0.94} style={s.seeAll} accessibilityRole="button" accessibilityLabel={`عرض كل ${t.name}`}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
                     <Text style={[s.seeAllTxt, { color: t.color }]}>عرض الكل</Text>
                     <Ionicons name="chevron-back" size={14} color={t.color} />
                   </Press>
@@ -265,22 +308,10 @@ export default function MarketScreen() {
               </View>
             </View>
           ))
-        ) : (
-          <>
-            <View style={s.listHead}>
-              <Text style={s.listTitle}>{selected === 'all' ? 'كل المتاجر' : `${selectedType.emoji} ${selectedType.name}`}</Text>
-              <View style={[s.listCount, { backgroundColor: C.tint }]}><Text style={{ color: C.primary, fontWeight: '800', fontSize: 12 }}>{displayList.length}</Text></View>
-            </View>
-            <View style={s.grid} key={selected}>
-              {displayList.map((r, i) => (
-                <FadeIn key={r.id} delay={stagger(i)} from={18}>
-                  <StoreCard r={r} t={metaOf(r)} onPress={() => open(r)} />
-                </FadeIn>
-              ))}
-            </View>
-          </>
         )}
       </ScrollView>
+        );
+      })()}
     </View>
   );
 }
@@ -314,7 +345,7 @@ const makeS = (C) => StyleSheet.create({
   headerStats: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   statPill: { flexDirection: 'row-reverse', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
   statTxt: { color: '#FFF', fontSize: 12, fontWeight: '800' },
-  typesRow: { flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 10, paddingTop: 16, paddingBottom: 10 },
+  typesRow: { paddingHorizontal: 16, gap: 10, paddingTop: 16, paddingBottom: 10 },
   listHead: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, paddingHorizontal: 16, marginTop: 8, marginBottom: 12 },
   secHead: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, paddingHorizontal: 16, marginBottom: 12 },
   secIcon: { width: 32, height: 32, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
@@ -323,4 +354,5 @@ const makeS = (C) => StyleSheet.create({
   listTitle: { fontSize: 18, fontWeight: '900', color: C.text, textAlign: 'right', flexShrink: 1 },
   listCount: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 2 },
   grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16 },
+  gridRow: { flexDirection: 'row-reverse', gap: 14, paddingHorizontal: 16 },
 });

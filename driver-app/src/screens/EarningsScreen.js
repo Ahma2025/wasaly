@@ -9,9 +9,11 @@ import { useTabBarOffset } from '../components/FloatingTabBar';
 import { COLORS, GRADIENTS, SHADOW, RTL, RADIUS } from '../theme';
 import { FadeIn, PopIn, Skeleton, Press, CountUp, AnimatedBar, EmptyState, haptic, isReducedMotion } from '../components/Anim';
 import { readCache, writeCache } from '../utils/cache';
-import { money, num, fmtDay } from '../utils/format';
+import { money, num, fmtDay, hebronToday, shiftYmd } from '../utils/format';
+import { arCount, arNoun } from '../utils/plural';
 
-const PERIODS = [{ id: 'today', label: 'اليوم' }, { id: 'week', label: 'الأسبوع' }, { id: 'month', label: 'الشهر' }];
+// D-34: "الأسبوع" في السيرفر = آخر ٧ أيام متتالية (وليس الأسبوع الحالي) — التسمية تطابق الحساب
+const PERIODS = [{ id: 'today', label: 'اليوم' }, { id: 'week', label: 'آخر 7 أيام' }, { id: 'month', label: 'الشهر' }];
 const CHART_H = 120;
 const CHART_DAYS = 14;
 
@@ -59,10 +61,18 @@ function Bar({ pct, index, selected, isMax, onPress, label }) {
   );
 }
 
+// D-09: ١٤ يوماً متتالية بتوقيت فلسطين — الأيام بلا توصيلات تظهر صفراً (العنوان ثابت وصحيح)
 function DailyChart({ daily }) {
-  const days = useMemo(() => [...daily].filter(d => d && d.date)
-    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
-    .slice(-CHART_DAYS), [daily]);
+  const days = useMemo(() => {
+    const byDate = new Map();
+    daily.forEach(d => { if (d && d.date) byDate.set(String(d.date).slice(0, 10), d); });
+    const today = hebronToday();
+    return Array.from({ length: CHART_DAYS }, (_, i) => {
+      const date = shiftYmd(today, i - (CHART_DAYS - 1));
+      const d = byDate.get(date);
+      return { date, earnings: d ? num(d.earnings) : 0, count: d ? (parseInt(d.count, 10) || 0) : 0 };
+    });
+  }, [daily]);
   const [sel, setSel] = useState(null);
   useEffect(() => { setSel(days.length ? days.length - 1 : null); }, [days]);
   if (days.length === 0) return null;
@@ -73,13 +83,13 @@ function DailyChart({ daily }) {
     <View style={[styles.chartCard, SHADOW.soft]}>
       <View style={[RTL.row, { justifyContent: 'space-between', marginBottom: 12 }]}>
         <View>
-          <Text style={[styles.chartTitle, RTL.text]}>آخر {days.length} يوم</Text>
+          <Text style={[styles.chartTitle, RTL.text]}>آخر {arCount(CHART_DAYS, 'day')}</Text>
           <Text style={[styles.chartSub, RTL.text]}>{s ? fmtDay(s.date) : ''}</Text>
         </View>
         {s && (
           <View style={styles.chartValPill}>
             <Text style={styles.chartVal}>{money(s.earnings)}</Text>
-            <Text style={styles.chartValSub}>{parseInt(s.count, 10) || 0} توصيلة</Text>
+            <Text style={styles.chartValSub}>{s.count > 0 ? arCount(s.count, 'delivery') : 'لا توصيلات'}</Text>
           </View>
         )}
       </View>
@@ -152,8 +162,13 @@ export default function EarningsScreen() {
 
   const onRefresh = async () => { setRefreshing(true); await fetchEarnings(period); setRefreshing(false); };
 
+  const retry = () => { setLoading(true); fetchEarnings(period); };
   const showSkeleton = loading && !data;
-  const daily = Array.isArray(data?.daily) ? data.daily : [];
+  // D-10: فشل التحميل بلا بيانات محفوظة → رسالة خطأ واضحة بدل 0.00₪ ورصيد صفر
+  const failed = hasError && !data && !loading;
+  const allDaily = Array.isArray(data?.daily) ? data.daily : [];
+  // السيرفر الجديد يملأ الأيام بلا توصيل بأصفار — السجل يعرض أيام العمل فقط، والرسم يبني ١٤ يوماً متصلة بنفسه
+  const daily = allDaily.filter(d => (parseInt(d?.count, 10) || 0) > 0 || num(d?.earnings) > 0);
   const maxDay = Math.max(1, ...daily.map(d => num(d.earnings)));
   const earnings = num(data?.stats?.earnings);
   const deliveries = parseInt(data?.stats?.deliveries, 10) || 0;
@@ -169,12 +184,12 @@ export default function EarningsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />}>
         <Segmented value={period} onChange={setPeriod} />
 
-        {hasError && (
+        {hasError && !failed && (
           <FadeIn>
             <View style={styles.errorBox}>
               <Ionicons name="cloud-offline-outline" size={20} color={COLORS.red} />
-              <Text style={[styles.errorText, RTL.text]}>تعذّر تحميل الأرباح</Text>
-              <Press style={styles.retryBtn} onPress={() => fetchEarnings(period)} accessibilityLabel="إعادة المحاولة">
+              <Text style={[styles.errorText, RTL.text]}>تعذّر التحديث — تعرض آخر أرقام محفوظة</Text>
+              <Press style={styles.retryBtn} onPress={retry} accessibilityLabel="إعادة المحاولة">
                 <Ionicons name="refresh" size={14} color="#FFF" />
                 <Text style={styles.retryBtnText}>إعادة</Text>
               </Press>
@@ -182,6 +197,11 @@ export default function EarningsScreen() {
           </FadeIn>
         )}
 
+        {failed ? (
+          <EmptyState icon="cloud-offline-outline" tone="red" title="تعذّر تحميل الأرباح"
+            text="تحقّق من الاتصال بالإنترنت ثم أعد المحاولة — أرباحك ورصيدك محفوظان ولم يتغيّرا"
+            actionLabel="إعادة المحاولة" actionIcon="refresh" onAction={retry} />
+        ) : (<>
         <FadeIn key={period}>
           <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.summaryCard}>
             <View style={styles.summaryGlow} />
@@ -202,7 +222,7 @@ export default function EarningsScreen() {
                 <View style={[RTL.row, styles.summaryStats]}>
                   <View style={styles.summaryStat}>
                     <CountUp value={deliveries} style={styles.summaryStatVal} />
-                    <Text style={styles.summaryStatLabel}>توصيلة</Text>
+                    <Text style={styles.summaryStatLabel}>{arNoun(deliveries, 'delivery')}</Text>
                   </View>
                   <View style={styles.summarySep} />
                   <View style={styles.summaryStat}>
@@ -222,7 +242,7 @@ export default function EarningsScreen() {
                 <Ionicons name="wallet" size={22} color={COLORS.amber} />
               </LinearGradient>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.walletLabel, RTL.text]}>رصيد المحفظة</Text>
+                <Text style={[styles.walletLabel, RTL.text]}>رصيد محفظة وصلّي</Text>
                 {showSkeleton ? <Skeleton width={100} height={22} style={{ marginTop: 4, alignSelf: 'flex-end' }} />
                   : <CountUp value={num(data?.wallet_balance)} format={money} style={[styles.walletAmount, RTL.text]} />}
               </View>
@@ -245,7 +265,7 @@ export default function EarningsScreen() {
           <FadeIn delay={140}><DailyChart daily={daily} /></FadeIn>
         ) : null}
 
-        <Text style={[styles.sectionTitle, RTL.text]}>سجل آخر ٣٠ يوماً</Text>
+        <Text style={[styles.sectionTitle, RTL.text]}>سجل آخر 30 يوماً</Text>
         {showSkeleton ? (
           [0, 1, 2].map(i => <Skeleton key={i} height={64} radius={16} style={{ marginBottom: 8 }} />)
         ) : daily.length === 0 ? (
@@ -262,11 +282,12 @@ export default function EarningsScreen() {
                 <View style={{ marginTop: 8 }}>
                   <AnimatedBar pct={Math.max(0.05, num(day.earnings) / maxDay)} colors={['#FF8A00', '#FF5E3A']} height={6} delay={Math.min(i, 8) * 45} />
                 </View>
-                <Text style={[styles.dayCount, RTL.text]}>{parseInt(day.count, 10) || 0} توصيلة</Text>
+                <Text style={[styles.dayCount, RTL.text]}>{arCount(parseInt(day.count, 10) || 0, 'delivery')}</Text>
               </View>
             </View>
           </FadeIn>
         ))}
+        </>)}
       </ScrollView>
     </View>
   );

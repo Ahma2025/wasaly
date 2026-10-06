@@ -9,7 +9,8 @@ import StatusBadge from '../components/StatusBadge';
 import { useTabBarOffset } from '../components/FloatingTabBar';
 import { FadeIn, SkeletonCard, Press, LoadingDots, EmptyState } from '../components/Anim';
 import { COLORS, SHADOW, RTL, RADIUS } from '../theme';
-import { money, orderTitle, orderIcon, orderNo, isPersonal, fmtDate, driverFee, tipOf, isAccepted, statusInfo, num } from '../utils/format';
+import { money, orderTitle, orderIcon, orderNo, isPersonal, fmtDate, driverFee, tipOf, isAccepted, statusInfo, num, GROUP_CHIP } from '../utils/format';
+import { arCount } from '../utils/plural';
 
 // 🧺 أبناء الطلب المجمّع يصلون منفصلين — نعرضهم توصيلة واحدة بأجرها (المال على "الابن الحامل" فقط)
 const earnOf = (o) => (o.driver_earning != null ? num(o.driver_earning) : driverFee(o) + tipOf(o));
@@ -30,12 +31,19 @@ function mergeGroups(list) {
   rows.forEach((row) => {
     const kids = row.children.slice().sort((a, b) => (a.stop_sequence || 99) - (b.stop_sequence || 99));
     const live = kids.filter(k => k.status !== 'cancelled');
-    row.status = !live.length ? 'cancelled'
-      : live.every(k => k.status === 'delivered') ? 'delivered'
-        : live.every(k => ['on_the_way', 'delivered'].includes(k.status)) ? 'on_the_way' : 'preparing';
-    row.earned = kids.reduce((sum, k) => sum + earnOf(k), 0);
+    // D-35: مجمّع ما زال يُجمع = "تجمع الطلبات" (picking_up) لا "قيد التحضير" — group_status من السيرفر إن وُجد
+    const gs = kids.find(k => k.group_status)?.group_status;
+    row.status = gs && ['picking_up', 'on_the_way', 'delivered', 'cancelled'].includes(gs) ? gs
+      : !live.length ? 'cancelled'
+        : live.every(k => k.status === 'delivered') ? 'delivered'
+          : live.every(k => ['on_the_way', 'delivered'].includes(k.status)) ? 'on_the_way' : 'picking_up';
+    // D-24: أرقام على مستوى المجموعة من السيرفر (لا تتأثر بانقسام المجموعة بين صفحتين)، وإلا نجمع الأبناء المحمّلين
+    const gEarn = kids.find(k => k.group_driver_earning != null)?.group_driver_earning;
+    row.earned = gEarn != null ? num(gEarn) : kids.reduce((sum, k) => sum + earnOf(k), 0);
     row.names = (live.length ? live : kids).map(k => k.restaurant_name).filter(Boolean);
-    row.stops = (live.length ? live : kids).length;
+    const gk = kids.find(k => k.group_stops_count != null || k.group_stops_total != null);
+    const gStops = parseInt(gk ? (gk.group_stops_count ?? gk.group_stops_total) : NaN, 10);
+    row.stops = Number.isFinite(gStops) && gStops > 0 ? gStops : (live.length ? live : kids).length;
     row.customer_name = kids[0].customer_name;
     row.delivery_address = kids[0].delivery_address;
     row.created_at = kids.reduce((m, k) => (!m || (k.created_at && k.created_at < m) ? k.created_at : m), null);
@@ -69,22 +77,33 @@ export default function OrdersHistoryScreen() {
   const busyRef = useRef(false);
   const cacheLoaded = useRef(false);
 
-  const fetchPage = useCallback(async (page) => {
+  // merge=true (عند العودة للتبويب): نحدّث الصفحة الأولى ونُبقي الصفحات المحمّلة بعدها (D-28)
+  const fetchPage = useCallback(async (page, { merge = false } = {}) => {
     if (busyRef.current) return;
     busyRef.current = true;
     if (page > 1) setLoadingMore(true);
+    let more = false;
+    let tailGroup = false;
     try {
       const r = await api.get(`/drivers/orders?page=${page}&limit=${LIMIT}`);
       const list = Array.isArray(r?.data) ? r.data : [];
       setError(false);
+      const keepPages = merge && page === 1 && pageRef.current > 1;
       setOrders(prev => {
-        if (page === 1) return list;
+        if (page === 1 && !keepPages) return list;
+        if (page === 1) {
+          const fresh = new Set(list.map(o => String(o.id)));
+          return [...list, ...prev.filter(o => !fresh.has(String(o.id)))];
+        }
         const ids = new Set(prev.map(o => String(o.id)));
         return [...prev, ...list.filter(o => !ids.has(String(o.id)))];
       });
       if (page === 1) writeCache('driver_orders', list);
-      pageRef.current = page;
-      setHasMore(list.length >= LIMIT);
+      if (!keepPages) pageRef.current = page;
+      more = list.length >= LIMIT;
+      if (!keepPages) setHasMore(more);
+      // D-24: الصفحة انتهت بابن طلب مجمّع → غالباً بقية أبنائه في الصفحة التالية؛ نحمّلها فوراً حتى لا يظهر بأجر/محطات ناقصة
+      tailGroup = more && !keepPages && !!list[list.length - 1]?.group_id;
     } catch {
       if (page === 1) setError(true);
     } finally {
@@ -92,9 +111,10 @@ export default function OrdersHistoryScreen() {
       setLoading(false);
       setLoadingMore(false);
     }
+    if (tailGroup) fetchPage(page + 1);
   }, []);
 
-  // تحديث كل مرة يُفتح التبويب
+  // تحديث كل مرة يُفتح التبويب — بلا فقدان الصفحات المحمّلة وموضع التمرير
   useFocusEffect(useCallback(() => {
     (async () => {
       if (!cacheLoaded.current) {
@@ -102,7 +122,7 @@ export default function OrdersHistoryScreen() {
         const cached = await readCache('driver_orders');
         if (Array.isArray(cached) && cached.length) { setOrders(cached); setLoading(false); }
       }
-      fetchPage(1);
+      fetchPage(1, { merge: true });
     })();
   }, [fetchPage]));
 
@@ -115,6 +135,8 @@ export default function OrdersHistoryScreen() {
     FILTERS.forEach(f => { c[f.id] = rows.filter(f.test).length; });
     return c;
   }, [rows]);
+  // D-28: العدّادات دقيقة فقط بعد تحميل كل السجل (وإلا تُخفى بدل عرض أرقام ناقصة)
+  const showCounts = !hasMore && !loading;
   const activeFilter = FILTERS.find(f => f.id === filter) || FILTERS[0];
   const shown = useMemo(() => rows.filter(activeFilter.test), [rows, activeFilter]);
 
@@ -126,16 +148,16 @@ export default function OrdersHistoryScreen() {
         <Press disabled={!o.inProgress} scaleTo={o.inProgress ? 0.97 : 1} hapticStyle={o.inProgress ? 'light' : null}
           onPress={() => navigation.navigate('Delivery', { groupId: o.group_id })}
           style={[styles.card, o.inProgress && styles.cardActive]}
-          accessibilityLabel={`طلب مجمّع من ${o.stops} مطاعم، ${s.label}، ${money(o.earned)}`}>
+          accessibilityLabel={`طلب مجمّع من ${arCount(o.stops, 'restaurant')}، ${s.label}، ${money(o.earned)}`}>
           <View style={[styles.stripe, { backgroundColor: s.color }]} />
           <View style={styles.cardTop}>
-            <View style={[styles.iconBox, { backgroundColor: COLORS.sec }]}>
-              <Ionicons name="layers-outline" size={21} color={COLORS.primary} />
+            <View style={[styles.iconBox, { backgroundColor: GROUP_CHIP.bg }]}>
+              <Ionicons name={GROUP_CHIP.icon} size={21} color={GROUP_CHIP.color} />
             </View>
             <View style={{ flex: 1 }}>
               <View style={[RTL.row, { gap: 6 }]}>
                 <Text style={[styles.title, RTL.text, { flexShrink: 1 }]} numberOfLines={1}>طلب مجمّع</Text>
-                <View style={styles.groupChip}><Text style={styles.groupChipText}>{o.stops} مطاعم</Text></View>
+                <View style={styles.groupChip}><Text style={styles.groupChipText}>{arCount(o.stops, 'restaurant')}</Text></View>
               </View>
               <Text style={[styles.sub, RTL.text]} numberOfLines={1}>{o.names.join(' • ') || '—'}{o.customer_name ? ` · ${o.customer_name}` : ''}</Text>
             </View>
@@ -225,10 +247,10 @@ export default function OrdersHistoryScreen() {
         return (
           <View key={f.id} style={{ transform: [{ scaleX: -1 }] }}>
           <Press onPress={() => setFilter(f.id)} hapticStyle="select" style={[styles.chip, on && styles.chipOn]}
-            accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={`${f.label} (${counts[f.id] || 0})`}>
+            accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={showCounts ? `${f.label} (${counts[f.id] || 0})` : f.label}>
             <Ionicons name={f.icon} size={15} color={on ? '#FFF' : COLORS.sub} />
             <Text style={[styles.chipText, on && { color: '#FFF' }]}>{f.label}</Text>
-            {counts[f.id] > 0 && (
+            {showCounts && counts[f.id] > 0 && (
               <View style={[styles.chipCount, on && { backgroundColor: 'rgba(255,255,255,0.25)' }]}>
                 <Text style={[styles.chipCountText, on && { color: '#FFF' }]}>{counts[f.id]}</Text>
               </View>
@@ -291,6 +313,6 @@ const styles = StyleSheet.create({
   time: { fontSize: 11.5, color: COLORS.gray, fontWeight: '500' },
   followChip: { flexDirection: 'row-reverse', alignItems: 'center', gap: 2, backgroundColor: COLORS.primary, borderRadius: RADIUS.pill, paddingHorizontal: 12, height: 30 },
   followText: { fontSize: 12.5, color: '#FFF', fontWeight: '800' },
-  groupChip: { backgroundColor: COLORS.sec, borderRadius: RADIUS.pill, paddingHorizontal: 8, paddingVertical: 2 },
-  groupChipText: { fontSize: 11, fontWeight: '900', color: COLORS.primary },
+  groupChip: { backgroundColor: GROUP_CHIP.bg, borderRadius: RADIUS.pill, paddingHorizontal: 8, paddingVertical: 2 },
+  groupChipText: { fontSize: 11, fontWeight: '900', color: GROUP_CHIP.fg },
 });

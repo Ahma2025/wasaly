@@ -25,9 +25,11 @@ body { direction: rtl; background: var(--bg); color: var(--ink); }
 /* انتقالات ناعمة — transform/opacity/colors فقط (بدون all لتفادي layout thrash) */
 button, a, input, select, textarea, [role="button"] {
   transition: background-color .18s var(--ease), color .18s var(--ease), border-color .18s var(--ease),
-              box-shadow .2s var(--ease), transform .18s var(--ease), opacity .18s var(--ease), filter .18s var(--ease);
+              box-shadow .2s var(--ease), transform .18s var(--ease), scale .18s var(--ease), opacity .18s var(--ease), filter .18s var(--ease);
 }
-button:not(:disabled):active, [role="button"]:active { transform: scale(.97); }
+/* خاصية scale المستقلة (لا transform) حتى لا تلغي -translate-y-1/2 للأزرار المتموضعة داخل الحقول — A-44 */
+button:not(:disabled):active, [role="button"]:active { scale: .97; }
+@supports not (scale: 1) { button:not(:disabled):active, [role="button"]:active { transform: scale(.97); } }
 
 /* حلقة تركيز موحّدة */
 :focus-visible { outline: none; box-shadow: 0 0 0 2px #fff, 0 0 0 4.5px rgba(255,107,0,.6); border-radius: 12px; }

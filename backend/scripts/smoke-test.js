@@ -31,11 +31,11 @@ const RUN = crypto.randomBytes(3).toString('hex').toUpperCase(); // أكواد �
 const C_FIXED = 'S10' + RUN, C_FREE = 'FD' + RUN;
 
 const GROUP_TOKENS = new Set(); // سائقون "بتطبيق جديد" يرسلون X-Wasaly-Features: groups
-async function call(method, path, { token, body } = {}) {
+async function call(method, path, { token, body, headers } = {}) {
   const res = await fetch(API + path, {
     method,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(token && GROUP_TOKENS.has(token) ? { 'X-Wasaly-Features': 'groups' } : {}) },
+      ...(token && GROUP_TOKENS.has(token) ? { 'X-Wasaly-Features': 'groups' } : {}), ...(headers || {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   let data = null;
@@ -556,6 +556,11 @@ async function waitEvent(sock, ev, pred = () => true, ms = 4000) {
   });
 
   // ═══════════════════════════════════════════════════════════════
+  //  🛠️ إصلاحات التدقيق 2026-10-06 (AUDIT-FIX-BACKEND.md)
+  // ═══════════════════════════════════════════════════════════════
+  if (process.env.SMOKE_SKIP_AUDIT !== '1') await auditFixSuite(S);
+
+  // ═══════════════════════════════════════════════════════════════
   //  🧺 الطلب المجمّع (عدة مطاعم — سائق واحد)
   // ═══════════════════════════════════════════════════════════════
   if (process.env.SMOKE_SKIP_MULTI !== '1') await multiRestaurantSuite(S);
@@ -568,6 +573,312 @@ async function waitEvent(sock, ev, pred = () => true, ms = 4000) {
   if (failed.length) { for (const f of failed) console.log(`   - ${f.name}: ${f.err}`); process.exit(1); }
   process.exit(0);
 })().catch((e) => { console.error('fatal:', e); process.exit(1); });
+
+// ═══════════════════════════════════════════════════════════════
+//  🛠️ إصلاحات التدقيق 2026-10-06 — كل خطوة تذكر رقم البند (D:\wasaly-study\AUDIT-FIX-BACKEND.md)
+// ═══════════════════════════════════════════════════════════════
+function signHS256(payload, secret) {
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const head = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64(payload)}`;
+  return `${head}.${crypto.createHmac('sha256', secret).update(head).digest('base64url')}`;
+}
+const toArabicDigits = (s) => String(s).replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[d]);
+
+async function auditFixSuite(S) {
+  console.log('\n  🛠️ audit-fix suite');
+  const R_LAT = 31.9000, R_LNG = 35.2000;
+  const meUser = async (tok) => expectStatus(await call('GET', '/auth/me', { token: tok }), 200).user;
+  const profile = async (tok) => expectStatus(await call('GET', '/users/profile', { token: tok }), 200).data;
+  const drvMe = async (tok) => expectStatus(await call('GET', '/drivers/me', { token: tok }), 200).data;
+  S.cust2Id = (await meUser(S.cust2)).id;
+  S.d2Id = (await meUser(S.d2)).id;
+
+  await step('X-01: missing/garbage token → 401 with code (real auth failures only)', async () => {
+    const a = expectStatus(await call('GET', '/auth/me'), 401);
+    assert(a.code === 'NO_TOKEN', `code ${a.code}`);
+    const b = expectStatus(await call('GET', '/auth/me', { token: 'garbage.token.value' }), 401);
+    assert(b.code === 'TOKEN_INVALID', `code ${b.code}`);
+  });
+  if (process.env.SMOKE_JWT_SECRET) await step('X-01: valid token but user lookup throws (DB error) → 503 TEMPORARY_UNAVAILABLE, not 401', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const t = signHS256({ id: 'not-a-number', role: 'customer', iat: now, exp: now + 600 }, process.env.SMOKE_JWT_SECRET);
+    const r = expectStatus(await call('GET', '/orders/my', { token: t }), 503);
+    assert(r.code === 'TEMPORARY_UNAVAILABLE' && r.retry === true, `503 body ${JSON.stringify(r)}`);
+  });
+
+  await step('C-22: +970 / 00972 / 9-digit / Arabic-digit formats → one canonical account (05XXXXXXXX); login with any format', async () => {
+    const local = '059' + String(rnd() % 10000000).padStart(7, '0');
+    const intl = `+970 ${local.slice(1, 3)} ${local.slice(3, 6)} ${local.slice(6)}`;
+    const pw = pass();
+    const r = expectStatus(await call('POST', '/auth/register', { body: { name: 'رقم دولي', phone: intl, password: pw } }), 201);
+    assert(r.user.phone === local, `stored ${r.user.phone} != ${local}`);
+    expectStatus(await call('POST', '/auth/register', { body: { name: 'x', phone: local, password: pass() } }), 409);
+    expectStatus(await call('POST', '/auth/register', { body: { name: 'x', phone: '00972' + local.slice(1), password: pass() } }), 409);
+    for (const f of ['00970' + local.slice(1), local.slice(1), toArabicDigits(local), '+972-' + local.slice(1)]) {
+      const l = expectStatus(await call('POST', '/auth/login-password', { body: { phone: f, password: pw } }), 200, `login ${f}`);
+      assert(l.user.phone === local, 'login user');
+    }
+    const bad = expectStatus(await call('POST', '/auth/register', { body: { name: 'x', phone: '12345', password: pass() } }), 400);
+    assert(bad.field === 'phone', 'field phone');
+  });
+  await step('C-29: invalid referral code → 400 {field:"referral"} (no silent swallow, no account created)', async () => {
+    const p = phone();
+    const r = expectStatus(await call('POST', '/auth/register', { body: { name: 'x', phone: p, password: pass(), referred_by: 'NOPE' + RUN } }), 400);
+    assert(r.field === 'referral' && /الدعوة/.test(r.message), `referral ${JSON.stringify(r)}`);
+    expectStatus(await call('POST', '/auth/register', { body: { name: 'x', phone: p, password: pass() } }), 201);
+  });
+  await step('C-07: GET /restaurants/:id has per-user is_favorite (outside shared cache)', async () => {
+    const a = expectStatus(await call('GET', `/restaurants/${S.restA}`, { token: S.cust }), 200).data;
+    const b = expectStatus(await call('GET', `/restaurants/${S.restA}`, { token: S.cust2 }), 200).data;
+    const c = expectStatus(await call('GET', `/restaurants/${S.restA}`), 200).data;
+    assert(a.is_favorite === true && b.is_favorite === false && c.is_favorite === null, `fav ${a.is_favorite}/${b.is_favorite}/${c.is_favorite}`);
+  });
+  await step('C-08 + A-25: search returns is_open/store_type/delivery_time_max; admin toggle with explicit value is idempotent', async () => {
+    for (let i = 0; i < 2; i++) {
+      const t = expectStatus(await call('PATCH', `/admin/restaurants/${S.restB}/toggle`, { token: S.admin, body: { field: 'is_open', value: false } }), 200);
+      assert(t.value === false, 'explicit false');
+    }
+    const s = expectStatus(await call('GET', `/search?q=${encodeURIComponent('مطعم ب')}`), 200).data;
+    const rb = s.restaurants.find(r => r.id === S.restB);
+    assert(rb && rb.is_open === false && rb.store_type === 'restaurant' && 'delivery_time_max' in rb, `search ${JSON.stringify(rb)}`);
+    const t = expectStatus(await call('PATCH', `/admin/restaurants/${S.restB}/toggle`, { token: S.admin, body: { field: 'is_open', value: true } }), 200);
+    assert(t.value === true, 'restore open');
+    const s2 = expectStatus(await call('GET', `/search?q=${encodeURIComponent('كلاسيك')}`), 200).data;
+    assert(s2.items.some(i => i.id === S.item1 && i.restaurant_is_open === true && i.store_type), 'item search fields');
+  });
+  await step('R-07: restaurant settings with empty min_order save as 0 (not rejected)', async () => {
+    const u = expectStatus(await call('PUT', `/restaurants/${S.restA}`, { token: S.owner, body: { min_order: '', delivery_time_max: 40 } }), 200).data;
+    assert(Number(u.min_order) === 0, `min_order ${u.min_order}`);
+    expectStatus(await call('PUT', `/restaurants/${S.restA}`, { token: S.owner, body: { min_order: 'abc' } }), 400);
+    expectStatus(await call('PUT', `/restaurants/${S.restA}`, { token: S.owner, body: { min_order: 10 } }), 200);
+  });
+  await step('A-20: a deleted coupon code can be created again (old one archived); active duplicate → 409', async () => {
+    const c = expectStatus(await call('POST', '/coupons', { token: S.admin, body: { code: C_FREE, type: 'free_delivery' } }), 201).data;
+    assert(c.code === C_FREE && c.is_active === true, 'recreated');
+    const d = expectStatus(await call('POST', '/coupons', { token: S.admin, body: { code: C_FREE.toLowerCase(), type: 'fixed', value: 3 } }), 409);
+    assert(d.code === 'COUPON_EXISTS', 'dup code');
+    expectStatus(await call('DELETE', `/coupons/${c.id}`, { token: S.admin }), 200);
+  });
+  await step('A-22: admin PUT /admin/restaurants/:id accepts commission_rate (validated)', async () => {
+    expectStatus(await call('PUT', `/admin/restaurants/${S.restB}`, { token: S.admin, body: { commission_rate: 150 } }), 400);
+    expectStatus(await call('PUT', `/admin/restaurants/${S.restB}`, { token: S.admin, body: { commission_rate: 12 } }), 200);
+    const a = expectStatus(await call('GET', '/admin/accounting', { token: S.admin }), 200);
+    assert(a.restaurants.find(r => r.id === S.restB).commission_rate === 12, 'commission not saved');
+    expectStatus(await call('PUT', `/admin/restaurants/${S.restB}`, { token: S.admin, body: { commission_rate: 15 } }), 200);
+  });
+  await step('A-03: zones API exposes the real out-of-zone rule (max zone price); calculate agrees; partial PUT keeps fields; invalid range → 400', async () => {
+    const z = expectStatus(await call('GET', '/delivery-zones'), 200);
+    const max = Math.max(...z.data.map(x => Number(x.price)));
+    assert(z.pricing && z.pricing.fallback_rule === 'max_zone' && close(z.pricing.fallback_price, max), `pricing ${JSON.stringify(z.pricing)}`);
+    const far = expectStatus(await call('GET', `/delivery-zones/calculate?lat1=${R_LAT}&lng1=${R_LNG}&lat2=${-R_LAT}&lng2=${R_LNG - 180}`), 200).data;
+    assert(far.out_of_zones === true && close(far.fee, max), `far fee ${far.fee} vs ${max}`);
+    const t = expectStatus(await call('POST', '/delivery-zones', { token: S.admin, body: { name: 'tmp-' + RUN, min_km: 7000, max_km: 8000, price: 1 } }), 201).data;
+    const u = expectStatus(await call('PUT', `/delivery-zones/${t.id}`, { token: S.admin, body: { name: 'tmp2-' + RUN } }), 200).data;
+    assert(Number(u.min_km) === 7000 && Number(u.max_km) === 8000 && Number(u.price) === 1, `partial put wiped fields ${JSON.stringify(u)}`);
+    expectStatus(await call('PUT', `/delivery-zones/${t.id}`, { token: S.admin, body: { min_km: 9000 } }), 400);
+    expectStatus(await call('DELETE', `/delivery-zones/${t.id}`, { token: S.admin }), 200);
+  });
+  await step('A-02: admin PUT /drivers/:id saves vehicle; PATCH alias; unknown → 404', async () => {
+    const r = expectStatus(await call('PUT', `/drivers/${S.d2Id}`, { token: S.admin, body: { vehicle_type: 'سيارة', vehicle_plate: '12-345-67' } }), 200).data;
+    assert(r.vehicle_type === 'سيارة' && r.vehicle_plate === '12-345-67', 'vehicle not saved');
+    expectStatus(await call('PATCH', `/drivers/${S.d2Id}`, { token: S.admin, body: { vehicle_plate: '99' } }), 200);
+    const l = expectStatus(await call('GET', '/drivers', { token: S.admin }), 200).data.find(d => d.user_id === S.d2Id);
+    assert(l.vehicle_type === 'سيارة' && l.vehicle_plate === '99', 'driver list');
+    expectStatus(await call('PUT', '/drivers/999999999', { token: S.admin, body: { vehicle_type: 'x' } }), 404);
+    expectStatus(await call('PUT', `/drivers/${S.d2Id}`, { token: S.cust, body: { vehicle_type: 'x' } }), 403);
+  });
+
+  await step('X-03 + A-04 + A-05: offered (not accepted) driver hidden from customer/restaurant/admin lists; admin sees offered_driver; search by phone/store/id', async () => {
+    const o = expectStatus(await call('POST', '/orders', { token: S.cust2, body: { restaurant_id: S.restA, address_id: S.addr2, items: [{ id: S.item2, quantity: 1 }] } }), 201).data;
+    S.offerOrder = o.id;
+    expectStatus(await call('PATCH', `/orders/${o.id}/confirm`, { token: S.owner }), 200);
+    const me = await drvMe(S.d1);
+    assert(me.active_order && me.active_order.id === o.id && me.active_order.is_offer && me.active_order.offer_id, 'offer not given to d1 (or no offer_id)');
+    const c = expectStatus(await call('GET', `/orders/${o.id}`, { token: S.cust2 }), 200).data;
+    assert(c.driver_id === null && c.driver_name === null && c.driver_offer_pending === true, `customer sees offered driver ${JSON.stringify({ id: c.driver_id, n: c.driver_name })}`);
+    const my = expectStatus(await call('GET', '/orders/my', { token: S.cust2 }), 200).data.find(x => x.id === o.id);
+    assert(my && my.driver_id === null && my.driver_offer_pending === true, '/orders/my');
+    const dv = expectStatus(await call('GET', `/orders/${o.id}`, { token: S.d1 }), 200).data;
+    assert(String(dv.driver_id) === String(S.d1Id) && dv.offer_seconds > 0, 'offered driver keeps own view');
+    const cust2Phone = S.cust2Phone;
+    const byPhone = expectStatus(await call('GET', `/admin/orders?search=${encodeURIComponent(cust2Phone)}`, { token: S.admin }), 200);
+    const row = byPhone.data.find(x => x.id === o.id);
+    assert(row && row.customer_phone === cust2Phone && row.driver_id === null && String(row.offered_driver_id) === String(S.d1Id) && row.driver_offer_pending === true, `admin row ${JSON.stringify(row || null).slice(0, 300)}`);
+    assert(Number(byPhone.total) >= 1 && 'total_amount' in byPhone, 'filtered total');
+    const intl = '+970' + cust2Phone.slice(1);
+    assert(expectStatus(await call('GET', `/admin/orders?search=${encodeURIComponent(intl)}`, { token: S.admin }), 200).data.some(x => x.id === o.id), 'search +970 phone');
+    assert(expectStatus(await call('GET', `/admin/orders?search=${encodeURIComponent('مطعم الاختبار')}&limit=200`, { token: S.admin }), 200).data.some(x => x.id === o.id), 'search store name');
+    assert(expectStatus(await call('GET', `/admin/orders?search=${o.id}`, { token: S.admin }), 200).data.some(x => x.id === o.id), 'search numeric id');
+    const live = expectStatus(await call('GET', '/admin/live-ops', { token: S.admin }), 200);
+    const lo = live.orders.find(x => x.id === o.id);
+    assert(lo && lo.driver_offer_pending === true && lo.driver_name === null && live.counts && live.counts.offer_pending >= 1, `live-ops ${JSON.stringify(lo || null).slice(0, 200)}`);
+    const ro = expectStatus(await call('GET', `/restaurants/${S.restA}/orders?status=confirmed`, { token: S.owner }), 200).data.find(x => x.id === o.id);
+    assert(ro && ro.driver_id === null && ro.driver_offer_pending === true, 'restaurant list');
+    const ov = expectStatus(await call('GET', `/orders/${o.id}`, { token: S.owner }), 200).data;
+    assert(Array.isArray(ov.allowed_statuses) && ov.allowed_statuses.includes('preparing') && ov.allowed_statuses.includes('cancelled') && !ov.allowed_statuses.includes('on_the_way'), `allowed ${ov.allowed_statuses}`);
+  });
+  await step('D-08/A-08 + R-01: assigned driver cannot go offline / logout / be deleted (409); admin cancel with cancel_reason persists', async () => {
+    expectStatus(await call('POST', `/orders/${S.offerOrder}/accept`, { token: S.d1 }), 200);
+    const c = expectStatus(await call('GET', `/orders/${S.offerOrder}`, { token: S.cust2 }), 200).data;
+    assert(c.driver_name && c.driver_offer_pending === false && String(c.driver_id) === String(S.d1Id), 'assigned driver visible after accept');
+    assert(expectStatus(await call('PATCH', '/drivers/status', { token: S.d1, body: { is_online: false } }), 409).code === 'ACTIVE_DELIVERY', 'offline allowed');
+    assert(expectStatus(await call('POST', '/auth/logout', { token: S.d1 }), 409).code === 'ACTIVE_DELIVERY', 'logout allowed');
+    assert(expectStatus(await call('DELETE', `/drivers/${S.d1Id}`, { token: S.admin }), 409).code === 'ACTIVE_DELIVERY', 'delete allowed');
+    expectStatus(await call('PATCH', `/orders/${S.offerOrder}/status`, { token: S.admin, body: { status: 'cancelled', cancel_reason: 'اختبار إلغاء' } }), 200);
+    const after = expectStatus(await call('GET', `/orders/${S.offerOrder}`, { token: S.cust2 }), 200).data;
+    assert(after.status === 'cancelled' && after.cancel_reason === 'اختبار إلغاء', `reason ${after.cancel_reason}`);
+    assert((await drvMe(S.d1)).is_busy === false, 'd1 still busy');
+  });
+  await step('R-01 + R-12: restaurant cancel via {cancel_reason} (installed portal) is saved; order_cancelled carries order_number', async () => {
+    const o = expectStatus(await call('POST', '/orders', { token: S.cust2, body: { restaurant_id: S.restA, order_type: 'pickup', items: [{ id: S.item2, quantity: 1 }] } }), 201).data;
+    if (ioClient) S.sOwner.events.length = 0;
+    expectStatus(await call('PATCH', `/orders/${o.id}/status`, { token: S.owner, body: { status: 'cancelled', cancel_reason: 'نفدت الكمية' } }), 200);
+    const g = expectStatus(await call('GET', `/orders/${o.id}`, { token: S.cust2 }), 200).data;
+    assert(g.cancel_reason === 'نفدت الكمية', `cancel_reason ${g.cancel_reason}`);
+    if (ioClient) {
+      const p = await waitEvent(S.sOwner, 'order_cancelled', (x) => x.order_id === o.id);
+      assert(p.order_number === o.order_number && p.reason === 'نفدت الكمية', `payload ${JSON.stringify(p)}`);
+    }
+  });
+  await step('C-05 + X-10: personal order after accept → "السائق بالطريق للاستلام"; pickup delivered → "تم الاستلام"', async () => {
+    const o = expectStatus(await call('POST', '/orders/personal', { token: S.cust, body: {
+      service_type: 'ride', pickup_lat: R_LAT, pickup_lng: R_LNG, dropoff_lat: R_LAT + 0.02, dropoff_lng: R_LNG } }), 200).data;
+    let g = expectStatus(await call('GET', `/orders/${o.id}`, { token: S.cust }), 200).data;
+    assert(g.status_label === 'نبحث عن سائق', `before accept ${g.status_label}`);
+    const lo = expectStatus(await call('GET', '/admin/live-ops', { token: S.admin }), 200).orders.find(x => x.id === o.id);
+    assert(lo && close(lo.pickup_lat, R_LAT, 1e-6) && close(lo.pickup_lng, R_LNG, 1e-6) && lo.service_type === 'ride' && 'stops_total' in lo, `A-01 live-ops personal ${JSON.stringify(lo || null).slice(0, 200)}`);
+    await sleep(300);
+    expectStatus(await call('POST', `/orders/${o.id}/accept`, { token: S.d1 }), 200);
+    g = expectStatus(await call('GET', `/orders/${o.id}`, { token: S.cust }), 200).data;
+    assert(g.status === 'preparing' && g.status_label === 'السائق بالطريق للاستلام', `personal label ${g.status}/${g.status_label}`);
+    expectStatus(await call('PATCH', `/orders/${o.id}/status`, { token: S.d1, body: { status: 'on_the_way' } }), 200);
+    expectStatus(await call('PATCH', `/orders/${o.id}/status`, { token: S.d1, body: { status: 'delivered' } }), 200);
+    const p = expectStatus(await call('POST', '/orders', { token: S.cust2, body: { restaurant_id: S.restA, order_type: 'pickup', items: [{ id: S.item2, quantity: 1 }] } }), 201).data;
+    expectStatus(await call('PATCH', `/orders/${p.id}/status`, { token: S.owner, body: { status: 'confirmed' } }), 200);
+    expectStatus(await call('PATCH', `/orders/${p.id}/status`, { token: S.owner, body: { status: 'delivered' } }), 200);
+    g = expectStatus(await call('GET', `/orders/${p.id}`, { token: S.cust2 }), 200).data;
+    assert(g.status_label === 'تم الاستلام', `pickup label ${g.status_label}`);
+  });
+  await step('C-06: same Idempotency-Key / client_ref → same order; wallet debited once (sequential + parallel race)', async () => {
+    const before = Number((await profile(S.cust)).wallet_balance);
+    const b = { restaurant_id: S.restA, address_id: S.addr, items: [{ id: S.item2, quantity: 1 }], use_wallet: true };
+    const k1 = `smoke-${RUN}-${rnd()}`;
+    const r1 = expectStatus(await call('POST', '/orders', { token: S.cust, body: b, headers: { 'Idempotency-Key': k1 } }), 201).data;
+    const r2 = expectStatus(await call('POST', '/orders', { token: S.cust, body: b, headers: { 'Idempotency-Key': k1 } }), 200);
+    assert(r2.idempotent_replay === true && r2.data.id === r1.id, 'replay returned another order');
+    let p = await profile(S.cust);
+    assert(close(Number(p.wallet_balance), before - Number(r1.wallet_used)), `wallet debited twice? ${p.wallet_balance}`);
+    expectStatus(await call('PATCH', `/orders/${r1.id}/cancel`, { token: S.cust }), 200);
+    const k2 = `smoke-${RUN}-${rnd()}`;
+    const [a, c] = await Promise.all([1, 2].map(() => call('POST', '/orders', { token: S.cust, body: { ...b, use_wallet: false }, headers: { 'Idempotency-Key': k2 } })));
+    assert([a.status, c.status].sort().join() === '200,201' && a.data.data.id === c.data.data.id, `parallel ${a.status}/${c.status}`);
+    expectStatus(await call('PATCH', `/orders/${a.data.data.id}/cancel`, { token: S.cust }), 200);
+    const k3 = `smoke-${RUN}-${rnd()}`;
+    const x = expectStatus(await call('POST', '/orders', { token: S.cust, body: { ...b, use_wallet: false, client_ref: k3 } }), 201).data;
+    const y = expectStatus(await call('POST', '/orders', { token: S.cust, body: { ...b, use_wallet: false, client_ref: k3 } }), 200).data;
+    assert(x.id === y.id, 'client_ref body');
+    expectStatus(await call('PATCH', `/orders/${x.id}/cancel`, { token: S.cust }), 200);
+    p = await profile(S.cust);
+    assert(close(Number(p.wallet_balance), before), `wallet after cancels ${p.wallet_balance} vs ${before}`);
+    const pk = `smoke-${RUN}-${rnd()}`;
+    const pb = { service_type: 'parcel', pickup_lat: R_LAT, pickup_lng: R_LNG, dropoff_lat: R_LAT + 0.01, dropoff_lng: R_LNG };
+    const p1 = expectStatus(await call('POST', '/orders/personal', { token: S.cust, body: pb, headers: { 'Idempotency-Key': pk } }), 200);
+    const p2 = expectStatus(await call('POST', '/orders/personal', { token: S.cust, body: pb, headers: { 'Idempotency-Key': pk } }), 200);
+    assert(p2.idempotent_replay === true && p2.data.id === p1.data.id, 'personal replay');
+    expectStatus(await call('PATCH', `/orders/${p1.data.id}/status`, { token: S.admin, body: { status: 'cancelled' } }), 200);
+  });
+  await step('C-02/C-03: unpaid card order hidden + "بانتظار إتمام الدفع" → POST /payments/lahza/abandon releases it as cash to the restaurant; init on a cash order → 409 NOT_CARD', async () => {
+    const o = expectStatus(await call('POST', '/orders', { token: S.cust2, body: { restaurant_id: S.restA, order_type: 'pickup', payment_method: 'card', items: [{ id: S.item2, quantity: 1 }] } }), 201).data;
+    if (o.payment_method === 'card') {
+      let g = expectStatus(await call('GET', `/orders/${o.id}`, { token: S.cust2 }), 200).data;
+      assert(g.awaiting_payment === true && g.status_label === 'بانتظار إتمام الدفع', `awaiting ${g.awaiting_payment} ${g.status_label}`);
+      let l = expectStatus(await call('GET', `/restaurants/${S.restA}/orders?status=pending`, { token: S.owner }), 200).data;
+      assert(!l.some(x => x.id === o.id), 'unpaid card order visible to restaurant');
+      expectStatus(await call('POST', '/payments/lahza/abandon', { token: S.cust, body: { order_id: o.id } }), 404);
+      const r = expectStatus(await call('POST', '/payments/lahza/abandon', { token: S.cust2, body: { order_id: o.id } }), 200);
+      assert(r.released === true && r.paid === false && r.payment_method === 'cash', `abandon ${JSON.stringify(r)}`);
+      l = expectStatus(await call('GET', `/restaurants/${S.restA}/orders?status=pending`, { token: S.owner }), 200).data;
+      assert(l.some(x => x.id === o.id), 'released order not visible to restaurant');
+      g = expectStatus(await call('GET', `/orders/${o.id}`, { token: S.cust2 }), 200).data;
+      assert(g.awaiting_payment === false && g.payment_method === 'cash' && g.status_label === 'بانتظار المطعم', 'after release');
+    }
+    const i = expectStatus(await call('POST', '/payments/lahza/init', { token: S.cust2, body: { order_id: o.id } }), 409);
+    assert(i.code === 'NOT_CARD' && i.payment_method === 'cash', `init ${JSON.stringify(i)}`);
+    const again = expectStatus(await call('POST', '/payments/lahza/abandon', { token: S.cust2, body: { order_id: o.id } }), 200);
+    assert(again.released === true && again.already === true, 'abandon idempotent');
+    expectStatus(await call('PATCH', `/orders/${o.id}/status`, { token: S.owner, body: { status: 'cancelled' } }), 200);
+  });
+  await step('A-07 + X-01: deactivated account → token 401 USER_INACTIVE; re-create same phone → 409 INACTIVE_ACCOUNT {user_id}; reactivate → login works', async () => {
+    const ph = phone(), pw = pass();
+    const u = expectStatus(await call('POST', '/admin/users', { token: S.admin, body: { name: 'معطّل', phone: ph, password: pw } }), 201).data;
+    const tok = expectStatus(await call('POST', '/auth/login-password', { body: { phone: ph, password: pw } }), 200).token;
+    expectStatus(await call('DELETE', `/admin/users/${u.id}`, { token: S.admin }), 200);
+    assert(expectStatus(await call('GET', '/auth/me', { token: tok }), 401).code === 'USER_INACTIVE', 'inactive code');
+    const dup = expectStatus(await call('POST', '/admin/users', { token: S.admin, body: { name: 'x', phone: ph, password: pass() } }), 409);
+    assert(dup.code === 'INACTIVE_ACCOUNT' && dup.user_id === u.id, `dup ${JSON.stringify(dup)}`);
+    const inact = expectStatus(await call('GET', `/admin/users?status=inactive&search=${ph}`, { token: S.admin }), 200).data;
+    assert(inact.some(x => x.id === u.id), 'inactive filter');
+    expectStatus(await call('PATCH', `/admin/users/${u.id}/reactivate`, { token: S.admin }), 200);
+    expectStatus(await call('POST', '/auth/login-password', { body: { phone: ph, password: pw } }), 200);
+  });
+  await step('D-26/R-30: reviews endpoints return summary over ALL reviews (avg, count, 1..5 distribution)', async () => {
+    const r = expectStatus(await call('GET', `/reviews/restaurant/${S.restA}`), 200);
+    assert(r.summary && r.summary.count >= 1 && r.distribution['5'] >= 1 && r.avg_rating > 0, `summary ${JSON.stringify(r.summary)}`);
+    const d = expectStatus(await call('GET', '/reviews/driver/me', { token: S.d1 }), 200);
+    assert(d.distribution && d.count >= 1 && d.distribution['1'] >= 1, `driver summary ${JSON.stringify(d.distribution)}`);
+  });
+  await step('A-18/A-19/A-21: dashboard 7 zero-filled days; analytics 6 months + MTD comparison + ranked by money; driver-stats 7 days ascending', async () => {
+    const dsh = expectStatus(await call('GET', '/admin/dashboard', { token: S.admin }), 200).data;
+    const w = dsh.weeklyRevenue;
+    assert(w.length === 7 && w.every((x, i) => i === 0 || x.date > w[i - 1].date) && typeof dsh.weeklyDailyAverage === 'number', `weekly ${JSON.stringify(w)}`);
+    const an = expectStatus(await call('GET', '/admin/analytics', { token: S.admin }), 200).data;
+    assert(an.monthlyRevenue.length === 6 && an.monthComparison && typeof an.monthComparison.current_mtd === 'number', 'analytics months');
+    const tr = an.topRestaurants;
+    assert(tr.length && 'id' in tr[0] && 'is_active' in tr[0] && tr.every((x, i) => i === 0 || Number(x.revenue) <= Number(tr[i - 1].revenue)), 'ranked by revenue');
+    const ds = expectStatus(await call('GET', `/admin/driver-stats/${S.d1Id}`, { token: S.admin }), 200).data;
+    assert(ds.weekly.length === 7 && ds.weekly.every((x, i) => i === 0 || x.date > ds.weekly[i - 1].date), 'driver weekly');
+  });
+  await step('D-09/D-24/R-20: driver earnings 31 continuous days; history has display_status; restaurant stats delivered-only today figures', async () => {
+    const e = expectStatus(await call('GET', '/drivers/earnings?period=week', { token: S.d1 }), 200).data;
+    assert(e.daily.length === 31 && e.daily.every((x, i) => i === 0 || x.date < e.daily[i - 1].date) && e.period_label === 'آخر 7 أيام', `daily ${e.daily.length}`);
+    const h = expectStatus(await call('GET', '/drivers/orders', { token: S.d1 }), 200).data;
+    assert(h.length && h.every(x => x.display_status), 'display_status');
+    const st = expectStatus(await call('GET', `/restaurants/${S.restA}/stats`, { token: S.owner }), 200).data;
+    assert('today_delivered_revenue' in st && 'today_delivered_orders' in st, 'stats delivered fields');
+  });
+  await step('C-27: in-app notifications keep the message body', async () => {
+    const n = expectStatus(await call('GET', '/notifications', { token: S.cust }), 200).data;
+    assert(n.some(x => x.body_ar && x.body_ar.length > 3), 'no notification body stored');
+  });
+  await step('D-07: /auth/refresh issues a working token; /auth/device-logout is token-less and always 200', async () => {
+    const r = expectStatus(await call('POST', '/auth/refresh', { token: S.cust2 }), 200);
+    assert(r.token && r.token !== S.cust2, 'no new token');
+    expectStatus(await call('GET', '/auth/me', { token: r.token }), 200);
+    expectStatus(await call('POST', '/auth/device-logout', { body: { fcm_token: 'nonexistent-token-' + RUN + '-xxxxxxxx' } }), 200);
+    expectStatus(await call('POST', '/auth/device-logout', { body: {} }), 200);
+  });
+  await step('C-15: shared cart lock blocks adds (409) until unlock; close with order reports excluded items', async () => {
+    const g = expectStatus(await call('POST', '/group-orders', { token: S.cust, body: { restaurant_id: S.restA } }), 201).data;
+    expectStatus(await call('POST', `/group-orders/${g.id}/items`, { token: S.cust2, body: { menu_item_id: S.item2, quantity: 1, code: g.code } }), 201);
+    expectStatus(await call('POST', `/group-orders/${g.id}/lock`, { token: S.cust2 }), 403);
+    expectStatus(await call('POST', `/group-orders/${g.id}/lock`, { token: S.cust }), 200);
+    assert(expectStatus(await call('GET', `/group-orders/${g.code}`, { token: S.cust2 }), 200).data.is_locked === true, 'is_locked');
+    assert(expectStatus(await call('POST', `/group-orders/${g.id}/items`, { token: S.cust2, body: { menu_item_id: S.item2, quantity: 1 } }), 409).code === 'GROUP_LOCKED', 'add while locked');
+    expectStatus(await call('POST', `/group-orders/${g.id}/unlock`, { token: S.cust }), 200);
+    expectStatus(await call('POST', `/group-orders/${g.id}/items`, { token: S.cust2, body: { menu_item_id: S.item2, quantity: 1 } }), 201);
+    const o = expectStatus(await call('POST', '/orders', { token: S.cust, body: { restaurant_id: S.restA, order_type: 'pickup', items: [{ id: S.item2, quantity: 1 }] } }), 201).data;
+    const c = expectStatus(await call('POST', `/group-orders/${g.id}/close`, { token: S.cust, body: { status: 'ordered', order_id: o.id } }), 200);
+    assert(c.excluded.length === 1 && String(c.excluded[0].user_id) === String(S.cust2Id), `excluded ${JSON.stringify(c.excluded)}`);
+    expectStatus(await call('PATCH', `/orders/${o.id}/cancel`, { token: S.cust }), 200);
+  });
+  await step('R-17: web push subscribe upserts per endpoint (several browsers kept); C-61 wallet pagination', async () => {
+    for (const ep of ['https://push.example/a-' + RUN, 'https://push.example/b-' + RUN, 'https://push.example/a-' + RUN]) {
+      expectStatus(await call('POST', '/webpush/subscribe', { token: S.owner, body: { restaurant_id: S.restA, subscription: { endpoint: ep, keys: {} } } }), 200);
+    }
+    const tx = expectStatus(await call('GET', '/wallet/transactions?limit=1', { token: S.cust }), 200).data;
+    assert(tx.length === 1, 'limit');
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  🧺 سيناريو الطلب المجمّع — مطاعم M1/M2/M3 متقاربة (≤3 كم) + MF بعيد، سائقان D3/D4، زبون CA بكود دعوة
@@ -724,6 +1035,19 @@ async function multiRestaurantSuite(S) {
     const o = l.find(x => x.id === S.kA[M.M1.id]);
     assert(o && o.is_group === true && o.group_id === S.gA && /^WSG/.test(o.group_number) && o.group_stops_count === 3 && close(o.total, 20), `dash ${JSON.stringify(o)}`);
   });
+  await step('X-06: carrier child (holds group tip/driver_fee) shows tip 0 / total = own items to its restaurant; admin keeps accounting values', async () => {
+    const carrierId = Math.min(...Object.values(S.kA));
+    const carrierRest = Object.keys(S.kA).find(k => S.kA[k] === carrierId);
+    const mk = Object.keys(M).find(k => String(M[k].id) === String(carrierRest));
+    const v = expectStatus(await call('GET', `/orders/${carrierId}`, { token: M[mk].token }), 200).data;
+    assert(close(v.tip, 0) && close(v.driver_fee, 0) && close(v.total, v.subtotal) && v.group_payment_note, `owner carrier view ${JSON.stringify({ tip: v.tip, df: v.driver_fee, t: v.total })}`);
+    const l = expectStatus(await call('GET', `/restaurants/${M[mk].id}/orders?status=pending`, { token: M[mk].token }), 200).data.find(x => x.id === carrierId);
+    assert(l && close(l.tip, 0) && close(l.driver_fee, 0), 'owner list carrier');
+    const ao = expectStatus(await call('GET', `/admin/orders?group_id=${S.gA}`, { token: S.admin }), 200).data;
+    assert(close(ao.reduce((s, o) => s + Number(o.tip), 0), 4), 'admin tip total');
+    const cv = expectStatus(await call('GET', `/orders/${carrierId}`, { token: S.ca }), 200).data;
+    assert(close(cv.tip, 4), 'customer view keeps tip');
+  });
   await step('A child-level guards: customer cannot cancel a child; owner limited group view; stranger 403', async () => {
     expectStatus(await call('PATCH', `/orders/${S.kA[M.M1.id]}/cancel`, { token: S.ca }), 400);
     const v = expectStatus(await call('GET', `/orders/groups/${S.gA}`, { token: M.M1.token }), 200).data;
@@ -762,6 +1086,14 @@ async function multiRestaurantSuite(S) {
     const ok = await waitFor(async () => { const m = await drvMe(S.d4); return m.active_group && m.active_group.id === S.gA && m.active_group.is_offer; });
     assert(ok, 'D4 not offered after reject');
     expectStatus(await call('POST', `/orders/groups/${S.gA}/accept`, { token: S.d3 }), 400);
+  });
+  await step('D-18: offer stop order = nearest-neighbour from the offered driver (D4 near M1 → M1 first), same in /drivers/me; offer_id present', async () => {
+    const g = (await drvMe(S.d4)).active_group;
+    assert(g && g.is_offer && g.offer_id && g.stops[0].restaurant_id === M.M1.id && g.stops[0].sequence === 1, `D4 offer stops ${JSON.stringify(g && g.stops.map(s => s.name))}`);
+    if (ioClient) {
+      const p = await waitEvent(S.sD4, 'new_order_request', (x) => x.group_id === S.gA);
+      assert(p.stops[0].restaurant_id === M.M1.id && p.order_id === p.stops[0].order_id && p.offer_id && p.server_now, `socket offer order ${JSON.stringify(p.stops.map(s => s.name))}`);
+    }
   });
   await step('A timeout: D4 ignores the 45s offer → expires → re-dispatched back to D3 (≈57s)', async () => {
     const ok = await waitFor(async () => { const m = await drvMe(S.d3); return m.active_group && m.active_group.id === S.gA && m.active_group.is_offer; }, 80000, 2000);
@@ -874,6 +1206,17 @@ async function multiRestaurantSuite(S) {
   await step('A rating a grouped child works (per restaurant)', async () => {
     expectStatus(await call('POST', `/orders/${S.kA[M.M1.id]}/rate`, { token: S.ca, body: { restaurant_rating: 5, driver_rating: 5 } }), 200);
   });
+  await step('C-13: group driver rated once — 2nd child keeps restaurant rating but ignores driver rating; group view driver_rated/is_rated; repeat → already + message', async () => {
+    const r = expectStatus(await call('POST', `/orders/${S.kA[M.M2.id]}/rate`, { token: S.ca, body: { restaurant_rating: 4, driver_rating: 1 } }), 200);
+    assert(r.driver_rating_ignored === true, `second driver rating counted ${JSON.stringify(r)}`);
+    const again = expectStatus(await call('POST', `/orders/${S.kA[M.M2.id]}/rate`, { token: S.ca, body: { restaurant_rating: 1 } }), 200);
+    assert(again.already === true && again.message, 'already');
+    const g = expectStatus(await call('GET', `/orders/groups/${S.gA}`, { token: S.ca }), 200).data;
+    const c2 = g.orders.find(o => o.restaurant_id === M.M2.id);
+    assert(g.driver_rated === true && c2.is_rated === true && c2.rating_restaurant === 4 && c2.rating_driver === null && c2.store_type === 'restaurant', `group view ${JSON.stringify(c2).slice(0, 200)}`);
+    const d3 = expectStatus(await call('GET', '/drivers', { token: S.admin }), 200).data.find(d => d.user_id === S.d3Id);
+    assert(close(d3.rating, 5), `driver rating diluted ${d3.rating}`);
+  });
   // ─── B: مطعم يعتذر → إعادة حساب + استرجاع جزئي ───
   const bodyB = () => ({ address_id: S.addrB, coupon_code: C_MULTI, redeem_points: 39, use_wallet: true, tip: 0,
     carts: [cart('M1', 0, 2), cart('M2'), cart('M3', 1)] });
@@ -905,6 +1248,15 @@ async function multiRestaurantSuite(S) {
     S.bExpires = (await drvMe(offered)).active_group.expires_at;
     const q = expectStatus(await call('POST', '/orders/multi/quote', { token: S.ca, body: { ...bodyB(), redeem_points: 0, use_wallet: false } }), 200).data;
     assert(!q.coupon_error && close(q.coupon_discount, 10), `coupon usage not released: ${q.coupon_error}`);
+  });
+  await step('X-05 + A-24: after M1 (stop 1) withdrew before any driver accepted, remaining stops renumbered 1..2; M1 marked withdrawn', async () => {
+    const g = expectStatus(await call('GET', `/orders/groups/${S.gB}`, { token: S.ca }), 200).data;
+    const live = g.orders.filter(o => o.status !== 'cancelled').map(o => o.stop_sequence).sort();
+    assert(live.join() === '1,2' && g.stops_total === 2, `stop_sequence ${live} (stops_total ${g.stops_total})`);
+    const m1 = g.orders.find(o => o.restaurant_id === M.M1.id);
+    assert(m1.status === 'cancelled' && m1.withdrawn === true && g.orders.filter(o => o.status !== 'cancelled').every(o => o.withdrawn === false), 'withdrawn flags');
+    const v = expectStatus(await call('GET', `/orders/${S.kB[M.M3.id]}`, { token: M.M3.token }), 200).data;
+    assert(v.stop_sequence <= v.group_stops_count, `restaurant sees stop ${v.stop_sequence} of ${v.group_stops_count}`);
   });
   if (ioClient) await step('B socket: group_updated (restaurant_cancelled, totals) + customer push "مطعم X اعتذر، كمّلنا طلبك من باقي المطاعم"', async () => {
     const p = await waitEvent(S.sCA, 'group_updated', (x) => x.group_id === S.gB && x.reason === 'restaurant_cancelled');
@@ -958,12 +1310,13 @@ async function multiRestaurantSuite(S) {
     assert(close(p.wallet_balance, 4.95) && Number(p.loyalty_points) === 3, `after C cancel wallet ${p.wallet_balance} pts ${p.loyalty_points}`);
     const g = expectStatus(await call('GET', `/orders/groups/${S.gC}`, { token: S.ca }), 200).data;
     assert(g.status === 'cancelled' && g.orders.every(o => o.status === 'cancelled'), 'C children');
+    assert(g.orders.every(o => o.withdrawn === false), 'A-24: children cancelled with the whole group must not be "withdrawn"');
     expectStatus(await call('PATCH', `/orders/groups/${S.gC}/cancel`, { token: S.ca }), 400);
   });
   if (ioClient) await step('C socket: owners got order_cancelled {by: customer, group_id}; customer group_cancelled', async () => {
     for (const [k, s] of [['M1', S.sO1], ['M2', S.sO2]]) {
       const p = await waitEvent(s, 'order_cancelled', (x) => x.order_id === S.kC[M[k].id]);
-      assert(p.by === 'customer' && p.group_id === S.gC, `${k} order_cancelled`);
+      assert(p.by === 'customer' && p.group_id === S.gC && /^WSL/.test(p.order_number || ''), `${k} order_cancelled ${JSON.stringify(p)}`);
     }
     await waitEvent(S.sCA, 'group_cancelled', (x) => x.group_id === S.gC && x.by === 'customer');
   });
@@ -976,6 +1329,7 @@ async function multiRestaurantSuite(S) {
     expectStatus(await call('PATCH', `/orders/${k[M.M2.id]}/status`, { token: M.M2.token, body: { status: 'cancelled' } }), 200);
     g = expectStatus(await call('GET', `/orders/groups/${d.id}`, { token: S.ca }), 200).data;
     assert(g.status === 'cancelled', `D2 ${g.status}`);
+    assert(g.orders.every(o => o.withdrawn === true), 'A-24: every restaurant withdrew');
     const p = await profile(S.ca);
     assert(close(p.wallet_balance, 4.95) && Number(p.loyalty_points) === 3, 'D balances untouched');
   });

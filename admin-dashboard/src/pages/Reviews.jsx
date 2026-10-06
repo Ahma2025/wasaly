@@ -4,7 +4,8 @@ import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { fmtDateTime } from '../utils/format';
 import { FiStar } from 'react-icons/fi';
-import { PageHeader, Segmented, EmptyState, ListSkeleton, StatTile, LoadMore, Avatar } from '../components/ui';
+import { PageHeader, Segmented, EmptyState, ListSkeleton, StatTile, LoadMore, Avatar, Modal } from '../components/ui';
+import { arCount } from '../utils/plural';
 
 const PAGE = 30;
 const Stars = ({ n }) => n ? (
@@ -19,6 +20,7 @@ export default function Reviews() {
   const [loading, setLoading] = useState(!cached);
   const [filter, setFilter] = useState('all');
   const [visible, setVisible] = useState(PAGE);
+  const [lightbox, setLightbox] = useState(null); // { imgs, i } — A-48
 
   useEffect(() => {
     api.get('/reviews/all')
@@ -35,11 +37,11 @@ export default function Reviews() {
 
   return (
     <div className="page">
-      <PageHeader icon={<FiStar />} title="التقييمات والملاحظات" subtitle={`آخر ${reviews.length} تقييم`} />
+      <PageHeader icon={<FiStar />} title="التقييمات والملاحظات" subtitle={reviews.length ? `آخر ${arCount(reviews.length, 'review')}` : 'تقييمات الزبائن'} />
 
       <div className="grid grid-cols-2 gap-3 lg:gap-4 lg:max-w-2xl">
-        <StatTile label="متوسط تقييم المتاجر" value={`${avg('restaurant_rating')} ★`} tone="orange" hint={`من آخر ${reviews.length} تقييم`} />
-        <StatTile label="متوسط تقييم السائقين" value={`${avg('driver_rating')} ★`} tone="violet" hint={`من آخر ${reviews.length} تقييم`} />
+        <StatTile label="متوسط تقييم المتاجر" value={`${avg('restaurant_rating')} ★`} tone="orange" hint={reviews.length ? `من آخر ${arCount(reviews.length, 'review')}` : undefined} />
+        <StatTile label="متوسط تقييم السائقين" value={`${avg('driver_rating')} ★`} tone="violet" hint={reviews.length ? `من آخر ${arCount(reviews.length, 'review')}` : undefined} />
       </div>
 
       <Segmented value={filter} onChange={(v) => { setFilter(v); setVisible(PAGE); }} options={[['all', 'الكل'], ['restaurant', '🏪 المتاجر'], ['driver', '🛵 السائقين']]} />
@@ -64,8 +66,11 @@ export default function Reviews() {
                 {r.comment && <p className="text-[13.5px] text-ink mt-3 leading-relaxed whitespace-pre-wrap break-words relative pr-4 border-r-2 border-orange-200">{r.comment}</p>}
                 {parseImgs(r.images).length > 0 && (
                   <div className="flex gap-2 mt-2 overflow-x-auto no-scrollbar">
-                    {parseImgs(r.images).map((src, i) => (
-                      <img key={i} src={String(src)} className="w-16 h-16 rounded-xl object-cover flex-shrink-0 ring-1 ring-surface-line" alt="" loading="lazy" />
+                    {parseImgs(r.images).map((src, i, all) => (
+                      <button key={i} type="button" onClick={() => setLightbox({ imgs: all.map(String), i })} aria-label={`عرض الصورة ${i + 1}`}
+                        className="flex-shrink-0 rounded-xl overflow-hidden ring-1 ring-surface-line hover:ring-brand-300">
+                        <img src={String(src)} className="w-20 h-20 object-cover" alt="" loading="lazy" />
+                      </button>
                     ))}
                   </div>
                 )}
@@ -74,6 +79,28 @@ export default function Reviews() {
           </div>
         )}
       <LoadMore shown={Math.min(visible, shown.length)} total={shown.length} onMore={() => setVisible(v => v + PAGE)} />
+
+      <Modal open={!!lightbox} onClose={() => setLightbox(null)} size="xl" title="صورة التقييم"
+        subtitle={lightbox && lightbox.imgs.length > 1 ? `${lightbox.i + 1} من ${lightbox.imgs.length}` : undefined}>
+        {lightbox && (
+          <div className="space-y-3">
+            <a href={lightbox.imgs[lightbox.i]} target="_blank" rel="noopener noreferrer" className="block rounded-2xl overflow-hidden bg-surface-sunken">
+              <img src={lightbox.imgs[lightbox.i]} alt="" className="w-full max-h-[70vh] object-contain" />
+            </a>
+            {lightbox.imgs.length > 1 && (
+              <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                {lightbox.imgs.map((src, i) => (
+                  <button key={i} type="button" onClick={() => setLightbox(l => ({ ...l, i }))} aria-pressed={i === lightbox.i}
+                    className={`flex-shrink-0 rounded-xl overflow-hidden ring-2 ${i === lightbox.i ? 'ring-brand-500' : 'ring-transparent'}`}>
+                    <img src={src} alt="" className="w-16 h-16 object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-ink-3 font-medium text-center">اضغط الصورة لفتحها بحجمها الكامل في نافذة جديدة</p>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

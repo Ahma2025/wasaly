@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, I18nManager } from 'react-native';
+import React, { useRef, useEffect, useState } from 'react';
+import { View, Text, Pressable, StyleSheet, Animated, I18nManager, Keyboard, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -43,8 +43,24 @@ function TabButton({ focused, label, onPress, onLongPress }) {
   );
 }
 
-export default function FloatingTabBar({ state, navigation }) {
+// D-30: الشريط العائم يختفي أثناء ظهور الكيبورد (tabBarHideOnKeyboard لا يطبّق على شريط مخصّص)
+function useKeyboardVisible() {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const showEv = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEv = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const a = Keyboard.addListener(showEv, () => setVisible(true));
+    const b = Keyboard.addListener(hideEv, () => setVisible(false));
+    return () => { a.remove(); b.remove(); };
+  }, []);
+  return visible;
+}
+
+export default function FloatingTabBar({ state, navigation, descriptors }) {
   const { bottom } = useTabBarOffset();
+  const kb = useKeyboardVisible();
+  const focusedOptions = descriptors?.[state.routes[state.index]?.key]?.options || {};
+  if (kb && focusedOptions.tabBarHideOnKeyboard !== false) return null;
   return (
     <View style={[styles.wrap, { bottom, flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse' }, SHADOW.card]} accessibilityRole="tablist">
       {state.routes.map((route, i) => {

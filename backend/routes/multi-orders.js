@@ -6,7 +6,7 @@ const router = require('express').Router();
 const pool = require('../config/database');
 const { auth, driverOnly } = require('../middleware/auth');
 const G = require('../utils/groupService');
-const { HttpError, isIntId } = require('../utils/orderService');
+const { HttpError, isIntId, clientRefFrom } = require('../utils/orderService');
 const { serverError, clampInt, strParam } = require('../utils/http');
 
 const sendError = (res, e, tag) => {
@@ -35,7 +35,24 @@ router.post('/multi/quote', auth, async (req, res) => {
 // إنشاء طلب مجمّع
 router.post('/multi', auth, async (req, res) => {
   try {
-    const { group } = await G.createGroup(req.io, req.user.id, req.body || {});
+    // C-06: نفس Idempotency-Key/client_ref → نفس الطلب المجمّع (لا خصم/إشعار مكرّر)
+    const clientRef = clientRefFrom(req);
+    const findReplay = async () => {
+      if (!clientRef) return null;
+      const { rows } = await pool.query('SELECT id FROM order_groups WHERE customer_id=$1 AND client_ref=$2 ORDER BY id LIMIT 1', [req.user.id, clientRef]);
+      return rows[0] ? G.loadGroupView(rows[0].id, req.user) : null;
+    };
+    const replay = await findReplay();
+    if (replay) return res.status(200).json({ success: true, data: replay, idempotent_replay: true });
+    let group;
+    try { ({ group } = await G.createGroup(req.io, req.user.id, req.body || {}, { clientRef })); }
+    catch (e) {
+      if (clientRef && e && e.code === '23505' && /client_ref/.test(String(e.constraint || e.detail || ''))) {
+        const dup = await findReplay();
+        if (dup) return res.status(200).json({ success: true, data: dup, idempotent_replay: true });
+      }
+      throw e;
+    }
     const view = await G.loadGroupView(group.id, req.user);
     res.status(201).json({ success: true, data: { ...view, coupon_error: group.coupon_error || undefined } });
   } catch (e) { sendError(res, e, 'POST /orders/multi'); }

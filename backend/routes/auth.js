@@ -3,6 +3,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
 const { auth } = require('../middleware/auth');
+const { canonicalPhone, isMobile, phoneCandidates } = require('../utils/phone');
+const { maybeRefreshToken } = require('../utils/jwtKey');
 
 
 const generateToken = (user) =>
@@ -12,10 +14,18 @@ const generateToken = (user) =>
 const { tooMany: _tooMany, recordFail: _recordFail, clearFail: _clearFail, acquireOnce, denyToken } = require('../utils/security');
 const WIN10 = 10 * 60 * 1000;
 
+// أول مستخدم تطابق كلمة مروره (عادةً صف واحد؛ حتى 3 عند وجود حسابات قديمة بصيغ رقم مختلفة)
+async function pickByPassword(rows, password) {
+  for (const u of rows || []) {
+    if (u && u.password_hash && await bcrypt.compare(String(password), u.password_hash)) return u;
+  }
+  return null;
+}
+
 // Send OTP
 router.post('/send-otp', async (req, res) => {
   try {
-    const { phone } = req.body;
+    const phone = req.body.phone ? canonicalPhone(req.body.phone) : ''; // C-22
     if (!phone) return res.status(400).json({ success: false, message: 'Phone required' });
 
     // Rate limiting: رمز واحد لكل رقم كل 60 ثانية (قفل ذرّي مشترك) + حد لكل IP
@@ -53,7 +63,8 @@ router.post('/send-otp', async (req, res) => {
 // Verify OTP & Login/Register
 router.post('/verify-otp', async (req, res) => {
   try {
-    const { phone, code, name } = req.body;
+    const { code, name } = req.body;
+    const phone = canonicalPhone(req.body.phone); // C-22
 
     const otpKey = 'otp:' + phone;
     if (await _tooMany(otpKey, 6, WIN10)) {
@@ -101,13 +112,23 @@ router.post('/register', async (req, res) => {
     // تطبيع + تحقّق صارم من الحقول (يمنع إنشاء حساب ناقص)
     name = (name || '').trim();
     city = (city || '').trim();
-    if (phone) phone = phone.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
+    // C-22: رقم موحّد 05XXXXXXXX (00970/+970/972/5XXXXXXXX → 05…) — نفس الشخص لا يفتح حسابين
+    phone = canonicalPhone(phone);
     if (!name) return res.status(400).json({ success: false, message: 'الرجاء إدخال الاسم', field: 'name' });
-    if (!phone || phone.length < 9) return res.status(400).json({ success: false, message: 'رقم هاتف غير صحيح', field: 'phone' });
+    if (!isMobile(phone)) return res.status(400).json({ success: false, message: 'رقم الجوال غير صحيح — اكتبه بالشكل 05XXXXXXXX', field: 'phone' });
     if (!password || String(password).length < 6) return res.status(400).json({ success: false, message: 'كلمة المرور 6 أحرف على الأقل', field: 'password' });
 
-    const existing = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
+    const existing = await pool.query('SELECT id FROM users WHERE phone = ANY($1::text[])', [phoneCandidates(req.body.phone)]);
     if (existing.rows[0]) return res.status(409).json({ success: false, message: 'رقم الهاتف مسجل مسبقاً', code: 'PHONE_EXISTS' });
+
+    // 🎁 C-29: كود دعوة غلط → خطأ واضح بدل البلع الصامت (الزبون كان ينتظر هدية لن تصل)
+    let referrerId = null;
+    const refCode = String(referred_by || '').trim();
+    if (refCode) {
+      const { rows: refRows } = await pool.query('SELECT id FROM users WHERE UPPER(referral_code)=UPPER($1) AND is_active=true', [refCode]);
+      if (!refRows[0]) return res.status(400).json({ success: false, field: 'referral', code: 'INVALID_REFERRAL', message: 'كود الدعوة غير صحيح' });
+      referrerId = refRows[0].id;
+    }
 
     const hash = await bcrypt.hash(password, 12);
     const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -124,12 +145,9 @@ router.post('/register', async (req, res) => {
     const user = rows[0];
 
     // 🎁 الدعوة: نخزّن الداعي فقط — المكافأة (10₪ لكل طرف + حركة محفظة) تُصرف عند *تسليم* أول طلب للمدعو
-    if (referred_by) {
+    if (referrerId && String(referrerId) !== String(user.id)) {
       try {
-        const { rows: refRows } = await pool.query('SELECT id FROM users WHERE UPPER(referral_code)=UPPER($1) AND is_active=true', [String(referred_by).trim()]);
-        if (refRows[0] && String(refRows[0].id) !== String(user.id)) {
-          await pool.query('UPDATE users SET referred_by=$1 WHERE id=$2 AND referred_by IS NULL', [refRows[0].id, user.id]);
-        }
+        await pool.query('UPDATE users SET referred_by=$1 WHERE id=$2 AND referred_by IS NULL', [referrerId, user.id]);
       } catch (e) { console.error('referral store error:', e.message); }
     }
     res.status(201).json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
@@ -142,9 +160,10 @@ router.post('/register', async (req, res) => {
 // Login with phone/password (for customer & driver apps)
 router.post('/login-password', async (req, res) => {
   try {
-    let { phone, password, role } = req.body;
-    // Normalize phone: remove all non-digit chars, convert Arabic-Indic numerals
-    if (phone) phone = phone.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
+    let { password } = req.body;
+    const rawPhone = req.body.phone;
+    // C-22: رقم موحّد (أرقام عربية، +970/00970/972، 5XXXXXXXX) + بحث بالرقم الخام للحسابات القديمة غير الموحّدة
+    const phone = canonicalPhone(rawPhone);
     if (!phone || !password) return res.status(400).json({ success: false, message: 'أدخل رقم الهاتف وكلمة المرور' });
     const pwKey = 'pw:' + phone;
     const ipKey = 'ip:' + (req.ip || 'unknown');
@@ -152,11 +171,11 @@ router.post('/login-password', async (req, res) => {
       return res.status(429).json({ success: false, message: 'محاولات كثيرة، انتظر 10 دقائق ثم حاول مجدداً' });
     }
     // Match by phone only — role check removed so any account can login to any app
-    const { rows } = await pool.query('SELECT * FROM users WHERE phone=$1 AND is_active=true', [phone]);
-    const user = rows[0];
-    if (!user || !user.password_hash) { await _recordFail(pwKey, WIN10); await _recordFail(ipKey, WIN10); return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' }); }
-    const valid = await bcrypt.compare(String(password), user.password_hash);
-    if (!valid) { await _recordFail(pwKey, WIN10); await _recordFail(ipKey, WIN10); return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' }); }
+    const { rows } = await pool.query(
+      'SELECT * FROM users WHERE phone = ANY($1::text[]) AND is_active=true ORDER BY (phone = $2) DESC, id LIMIT 3', [phoneCandidates(rawPhone), phone]);
+    // حسابان قديمان لنفس الرقم بصيغتين (لم يُوحَّدا لتعارض) → الحساب الذي تطابق كلمة مروره
+    const user = await pickByPassword(rows, password);
+    if (!user) { await _recordFail(pwKey, WIN10); await _recordFail(ipKey, WIN10); return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' }); }
     if (user.is_blocked) return res.status(403).json({ success: false, message: 'الحساب محظور' });
     await _clearFail(pwKey);
     res.json({ success: true, token: generateToken(user), user: sanitizeUser(user) });
@@ -171,7 +190,10 @@ router.post('/login', async (req, res) => {
   try {
     const { email, phone, password } = req.body;
     let identifier = String(email || phone || '').trim();
-    if (!email && identifier) identifier = identifier.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
+    // لا "@" → رقم جوال (موحّد) — حتى لو أُرسل في حقل email
+    const isPhoneId = identifier && !identifier.includes('@');
+    const ids = isPhoneId ? phoneCandidates(identifier) : [identifier];
+    if (isPhoneId) identifier = canonicalPhone(identifier);
     if (!identifier || !password) return res.status(400).json({ success: false, message: 'أدخل بيانات الدخول' });
     // نفس حماية /login-password ضد التخمين (كان /login بلا أي حد)
     const pwKey = 'pw:' + identifier.toLowerCase();
@@ -179,12 +201,11 @@ router.post('/login', async (req, res) => {
     if (await _tooMany(pwKey, 8, WIN10) || await _tooMany(ipKey, 30, WIN10)) {
       return res.status(429).json({ success: false, message: 'محاولات كثيرة، انتظر 10 دقائق ثم حاول مجدداً' });
     }
-    const { rows } = await pool.query('SELECT * FROM users WHERE (email=$1 OR phone=$1) AND is_active=true', [identifier]);
-    const user = rows[0];
-    if (!user || !user.password_hash) { await _recordFail(pwKey, WIN10); await _recordFail(ipKey, WIN10); return res.status(401).json({ success: false, message: 'Invalid credentials' }); }
+    const { rows } = await pool.query(
+      'SELECT * FROM users WHERE (email = ANY($1::text[]) OR phone = ANY($1::text[])) AND is_active=true ORDER BY (phone = $2) DESC, id LIMIT 3', [ids, identifier]);
+    const user = await pickByPassword(rows, password);
+    if (!user) { await _recordFail(pwKey, WIN10); await _recordFail(ipKey, WIN10); return res.status(401).json({ success: false, message: 'Invalid credentials' }); }
 
-    const valid = await bcrypt.compare(String(password), user.password_hash);
-    if (!valid) { await _recordFail(pwKey, WIN10); await _recordFail(ipKey, WIN10); return res.status(401).json({ success: false, message: 'Invalid credentials' }); }
     if (user.is_blocked) return res.status(403).json({ success: false, message: 'Account blocked' });
     await _clearFail(pwKey);
 
@@ -204,12 +225,16 @@ router.post('/social', (req, res) => {
 router.post('/admin/create-user', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'غير مصرح' });
-    const { name, phone, password, role, city, vehicle_type, vehicle_plate } = req.body;
+    const { name, password, role, city, vehicle_type, vehicle_plate } = req.body;
+    const phone = canonicalPhone(req.body.phone); // C-22
     if (!name || !phone || !password || !role) return res.status(400).json({ success: false, message: 'أدخل جميع البيانات' });
     if (String(password).length < 6) return res.status(400).json({ success: false, message: 'كلمة المرور 6 أحرف على الأقل' });
     if (!['customer', 'driver', 'restaurant_owner', 'restaurant', 'admin'].includes(role)) return res.status(400).json({ success: false, message: 'دور غير صحيح' });
-    const existing = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
-    if (existing.rows[0]) return res.status(400).json({ success: false, message: 'رقم الهاتف مسجل مسبقاً' });
+    const existing = await pool.query('SELECT id, is_active FROM users WHERE phone=$1', [phone]);
+    if (existing.rows[0]) {
+      if (existing.rows[0].is_active === false) return res.status(409).json({ success: false, code: 'INACTIVE_ACCOUNT', user_id: existing.rows[0].id, message: 'هذا الرقم لحساب معطّل — أعد تفعيله بدل إنشاء حساب جديد' });
+      return res.status(400).json({ success: false, code: 'PHONE_EXISTS', message: 'رقم الهاتف مسجل مسبقاً' });
+    }
     const hash = await bcrypt.hash(String(password), 12);
     const referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     const { rows } = await pool.query(
@@ -230,7 +255,39 @@ router.post('/admin/create-user', auth, async (req, res) => {
 
 // Get current user
 router.get('/me', auth, (req, res) => {
-  res.json({ success: true, user: sanitizeUser(req.user) });
+  // D-07: تجديد منزلق (التطبيقات الجديدة تخزّن refreshed_token إن وُجد؛ القديمة تتجاهله)
+  const refreshed = maybeRefreshToken(req.user, req.tokenDecoded);
+  res.json({ success: true, user: sanitizeUser(req.user), ...(refreshed ? { refreshed_token: refreshed } : {}) });
+});
+
+// D-07: تجديد صريح للتوكن (قبل انتهاء الـ 30 يوماً) — نفس المستخدم/الدور
+router.post('/refresh', auth, (req, res) => {
+  res.json({ success: true, token: maybeRefreshToken(req.user, req.tokenDecoded, { force: true }), user: sanitizeUser(req.user) });
+});
+
+// D-07: خروج جهاز بلا توكن (التوكن انتهى/أُبطل): يمسح FCM هذا الجهاز، والسائق بلا توصيلة نشطة يصبح offline
+// لا يكشف شيئاً ولا يرجع بيانات — نفس الرد دائماً
+router.post('/device-logout', async (req, res) => {
+  try {
+    const t = String((req.body || {}).fcm_token || '').trim();
+    const ipKey = 'devlogout-ip:' + (req.ip || 'unknown');
+    if (await _tooMany(ipKey, 30, WIN10)) return res.status(429).json({ success: false, message: 'طلبات كثيرة، انتظر قليلاً' });
+    await _recordFail(ipKey, WIN10);
+    if (t.length >= 20) {
+      const { rows } = await pool.query('UPDATE users SET fcm_token=NULL WHERE fcm_token=$1 RETURNING id, role', [t]);
+      const { hasActiveAssignment, releaseDriverOffers } = require('../utils/driverPresence');
+      for (const u of rows) {
+        if (u.role === 'driver' && !(await hasActiveAssignment(u.id))) {
+          await pool.query('UPDATE drivers SET is_online=false WHERE user_id=$1', [u.id]);
+          await releaseDriverOffers(req.io, u.id);
+        }
+      }
+    }
+    res.json({ success: true });
+  } catch (e) {
+    console.error('device-logout:', e.message);
+    res.json({ success: true });
+  }
 });
 
 // Update FCM token
@@ -243,6 +300,15 @@ router.put('/fcm', auth, async (req, res) => {
 
 // Logout
 router.post('/logout', auth, async (req, res) => {
+  if (req.user.role === 'driver') {
+    const { hasActiveAssignment, releaseDriverOffers } = require('../utils/driverPresence');
+    // D-08: سائق عليه توصيلة → لا خروج (يبقى يستقبل إشعاراتها)
+    if (await hasActiveAssignment(req.user.id)) {
+      return res.status(409).json({ success: false, code: 'ACTIVE_DELIVERY', message: 'لا يمكنك تسجيل الخروج وعندك طلب قيد التوصيل — سلّمه أولاً' });
+    }
+    await pool.query('UPDATE drivers SET is_online=false WHERE user_id=$1', [req.user.id]);
+    await releaseDriverOffers(req.io, req.user.id);
+  }
   await pool.query('UPDATE users SET fcm_token=NULL WHERE id=$1', [req.user.id]);
   // 🔒 التوكن الحالي يُحظر حتى انتهاء صلاحيته (Redis مشترك؛ بدون Redis: هذه النسخة فقط)
   await denyToken(req.token, req.tokenDecoded);

@@ -214,6 +214,37 @@ const MIGRATIONS = [
   // سائقون بتطبيق يدعم الطلب المجمّع (X-Wasaly-Features: groups) — التوزيع المجمّع لهم فقط
   `ALTER TABLE drivers ADD COLUMN IF NOT EXISTS supports_groups BOOLEAN DEFAULT false`,
   `INSERT INTO app_settings(key, value) VALUES ('multi_restaurant', '{"enabled":true,"max_restaurants":3,"max_distance_km":3,"extra_stop_fee":3}') ON CONFLICT (key) DO NOTHING`,
+
+  // ═══ جولة إصلاح التدقيق 2026-10-06 (AUDIT-FIX-BACKEND.md) ═══
+  // C-06: منع الطلب المكرّر (Idempotency-Key / client_ref) — فريد لكل زبون
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_ref TEXT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uniq_orders_client_ref ON orders(customer_id, client_ref) WHERE client_ref IS NOT NULL`,
+  `ALTER TABLE order_groups ADD COLUMN IF NOT EXISTS client_ref TEXT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uniq_order_groups_client_ref ON order_groups(customer_id, client_ref) WHERE client_ref IS NOT NULL`,
+  // C-04: مراجع الدفع السابقة (لا تُكتب فوقها) — مفصولة بفواصل
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_ref_history TEXT`,
+  `CREATE INDEX IF NOT EXISTS idx_orders_late_card ON orders(created_at) WHERE payment_method='cash' AND payment_reference IS NOT NULL`,
+  // D-07: آخر نشاط للسائق (التوزيع يتجاهل الخامل طويلاً + إطفاء تلقائي) — مهلة سماح للمتصلين حالياً عند النشر
+  `ALTER TABLE drivers ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`,
+  `UPDATE drivers SET last_seen_at=NOW() WHERE last_seen_at IS NULL AND is_online=true`,
+  // C-22: توحيد أرقام الجوال القديمة على الشكل 05XXXXXXXX (00970/00972/970/972/5XXXXXXXX) — فقط حين لا يوجد تعارض
+  `WITH x AS (
+     SELECT id, phone, regexp_replace(phone, '[^0-9]', '', 'g') AS d FROM users
+     WHERE phone IS NOT NULL AND phone !~ '^deleted_'
+   ), c AS (
+     SELECT id, phone, CASE
+       WHEN d ~ '^00(970|972)5[0-9]{8}$' THEN '0' || substr(d, 6)
+       WHEN d ~ '^(970|972)5[0-9]{8}$' THEN '0' || substr(d, 4)
+       WHEN d ~ '^5[0-9]{8}$' THEN '0' || d
+       ELSE d END AS canon
+     FROM x
+   ), u AS (
+     SELECT c.id, c.canon FROM c
+     WHERE c.canon ~ '^05[0-9]{8}$' AND c.canon <> c.phone
+       AND NOT EXISTS (SELECT 1 FROM users o WHERE o.phone = c.canon AND o.id <> c.id)
+       AND (SELECT COUNT(*) FROM c c2 WHERE c2.canon = c.canon) = 1
+   )
+   UPDATE users SET phone = u.canon FROM u WHERE users.id = u.id`,
 ];
 
 async function runMigrations(pool) {

@@ -75,7 +75,8 @@ async function sendApns(tokens, title, body, data = {}, bundleId = 'com.wasaly.c
   note.sound        = 'default';
   note.alert        = { title, body };
   note.topic        = bundleId;
-  note.payload      = { data };
+  // C-23: expo-notifications على iOS يقرأ بيانات الإشعار من مفتاح `body` في حمولة APNs → فتح الطلب عند الضغط
+  note.payload      = { body: data, data };
   note.priority     = 10;
   note.pushType     = 'alert';
 
@@ -241,11 +242,12 @@ const sendFCM = async (tokens, title, body, data = {}, bundleId = 'com.wasaly.cu
 };
 
 // ─── Save notification to DB ───────────────────────────────────────────────
-const saveNotification = async (userId, title, type, data = {}) => {
+// C-27: body اختياري (نص الرسالة يظهر بقائمة الإشعارات — مثلاً أي مطعم اعتذر)؛ title/body القديمة تُملأ أيضاً للتوافق
+const saveNotification = async (userId, title, type, data = {}, body = '') => {
   try {
     await pool.query(
-      'INSERT INTO notifications (user_id, title_ar, body_ar, type, data) VALUES ($1,$2,$3,$4,$5)',
-      [userId, title, '', type, JSON.stringify(data)]
+      'INSERT INTO notifications (user_id, title, title_ar, body, body_ar, type, data) VALUES ($1,$2,$2,$3,$3,$4,$5)',
+      [userId, title, String(body || ''), type, JSON.stringify(data || {})]
     );
   } catch (e) { console.error('saveNotification error:', e.message); }
 };
@@ -282,7 +284,7 @@ function bundleForRole(role) {
 
 // ─── Full notify: save to DB + send push + emit socket ────────────────────
 const notify = async (io, userId, title, body, type, data = {}) => {
-  await saveNotification(userId, title, type, data);
+  await saveNotification(userId, title, type, data, body);
   const rows = await getUserTokensWithRole(userId);
   if (rows.length) {
     const bundleId = bundleForRole(rows[0].role);

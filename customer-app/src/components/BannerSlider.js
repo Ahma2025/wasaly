@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Image, Pressable, Animated } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Image, Pressable, Animated, AppState } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../context/ThemeContext';
@@ -12,7 +13,7 @@ const FALLBACK = [
   { id: 'f1', title: 'وصلّي — اطلب من مطاعم منطقتك', sub: 'تصفّح المطاعم المفتوحة الآن واطلب بضغطة', colors: ['#FF8A00', '#FF5E3A', '#F53B57'], icon: 'bicycle', action: { type: 'tab', screen: 'بحث' } },
   { id: 'f2', title: 'ماركت وصيدليات ومخابز', sub: 'احتياجات البيت بتوصلك لعندك', colors: ['#3BD17A', '#1DB954', '#0E7A3A'], icon: 'storefront', action: { type: 'tab', screen: 'ماركت' } },
   { id: 'f3', title: 'طلب شخصي — طرد أو راكب', sub: 'السعر حسب المسافة، والدفع كاش', colors: ['#5AAEFF', '#2E90FA', '#1849A9'], icon: 'cube', action: { type: 'screen', screen: 'PersonalDelivery' } },
-  { id: 'f4', title: 'اطلبوا سوا من نفس المطعم', sub: 'افتح مجموعة وكل واحد يضيف أكله', colors: ['#A78BFA', '#7C5CFA', '#4A2FB8'], icon: 'people', action: { type: 'screen', screen: 'GroupOrder' } },
+  { id: 'f4', title: 'اطلب مع أصحابك — سلة مشتركة', sub: 'افتح سلة مشتركة وكل واحد يضيف طلبه', colors: ['#A78BFA', '#7C5CFA', '#4A2FB8'], icon: 'people', action: { type: 'screen', screen: 'GroupOrder' } },
 ];
 
 // تحويل رابط البانر من السيرفر (link_type / link_value) لوجهة داخل التطبيق
@@ -31,36 +32,66 @@ export const bannerAction = (b) => {
 
 const CARD_W = W - 32;
 
+// إعلان ضمن فترة عرضه (starts_at / ends_at) — لو السيرفر ما فلترها
+const inWindow = (b, now) => {
+  const st = b.starts_at ? new Date(b.starts_at).getTime() : null;
+  const en = b.ends_at ? new Date(b.ends_at).getTime() : null;
+  if (st && !isNaN(st) && now < st) return false;
+  if (en && !isNaN(en) && now > en) return false;
+  return true;
+};
+
+/*
+  RTL: الشرائح بترتيب معكوس فيزيائياً (الأولى على اليمين)، والبداية من آخر إزاحة،
+  والتقدّم التلقائي يمشي من اليمين لليسار — مثل باقي التطبيق. يتوقف لما الشاشة مش ظاهرة أو التطبيق بالخلفية.
+*/
 export default function BannerSlider({ banners, onPressBanner }) {
   const { colors: C } = useTheme();
+  const focused = useIsFocused();
   const ref = useRef(null);
-  const [idx, setIdx] = useState(0);
+  const [idx, setIdx] = useState(0);          // ترتيب منطقي (0 = أول شريحة)
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const touching = useRef(false);
   const scrollX = useRef(new Animated.Value(0)).current;
 
-  const apiBanners = (banners || []).filter(b => b && b.image);
-  const hasApi = apiBanners.length > 0;
-  const items = hasApi ? apiBanners : FALLBACK;
+  const now = Date.now();
+  const apiBanners = (banners || []).filter(b => b && b.image && b.is_active !== false && inWindow(b, now));
+  // إعلانات الإدارة أولاً، وبعدها شرائح الميزات (ما بتختفي أول ما ينرفع إعلان واحد)
+  const items = apiBanners.length ? [...apiBanners, ...FALLBACK] : FALLBACK;
+  const n = items.length;
+  const physOf = (logical) => n - 1 - logical; // موقع الشريحة الفيزيائي
+  const itemsKey = items.map(x => x.id).join('|');
 
+  // البداية: أول شريحة منطقية = آخر إزاحة (يمين)
+  const goTo = (logical, animated) => ref.current?.scrollTo({ x: physOf(logical) * W, animated });
   useEffect(() => {
     setIdx(0);
-    ref.current?.scrollTo({ x: 0, animated: false });
-  }, [hasApi]);
+    const t = setTimeout(() => goTo(0, false), 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemsKey]);
 
   useEffect(() => {
-    if (items.length < 2) return;
+    const sub = AppState.addEventListener('change', (st) => setAppActive(st === 'active'));
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
+    if (n < 2 || !focused || !appActive) return undefined;
     const t = setInterval(() => {
       if (touching.current) return;
       setIdx(prev => {
-        const next = (prev + 1) % items.length;
-        ref.current?.scrollTo({ x: next * W, animated: true });
+        const next = (prev + 1) % n;
+        goTo(next, true);
         return next;
       });
     }, 4000);
     return () => clearInterval(t);
-  }, [items.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [n, focused, appActive]);
 
   const press = (item) => { const a = bannerAction(item); if (a && onPressBanner) { haptic.light(); onPressBanner(a); } };
+  const physical = [...items].reverse();
 
   return (
     <View style={s.wrap}>
@@ -70,11 +101,12 @@ export default function BannerSlider({ banners, onPressBanner }) {
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         scrollEventThrottle={16}
+        onContentSizeChange={() => { if (!touching.current) goTo(idx, false); }}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], { useNativeDriver: true })}
         onScrollBeginDrag={() => { touching.current = true; }}
-        onMomentumScrollEnd={e => { touching.current = false; setIdx(Math.round(e.nativeEvent.contentOffset.x / W)); }}
+        onMomentumScrollEnd={e => { touching.current = false; setIdx(Math.max(0, Math.min(n - 1, physOf(Math.round(e.nativeEvent.contentOffset.x / W))))); }}
       >
-        {items.map((item, i) => {
+        {physical.map((item, i) => {
           const tappable = !!bannerAction(item);
           const inputRange = [(i - 1) * W, i * W, (i + 1) * W];
           // بارالاكس: الخلفية تتحرك أبطأ من البطاقة + تكبير بسيط للبطاقة النشطة
@@ -121,16 +153,18 @@ export default function BannerSlider({ banners, onPressBanner }) {
         })}
       </Animated.ScrollView>
 
-      {items.length > 1 && (
+      {n > 1 && (
+        // النقاط بالترتيب المنطقي من اليمين لليسار (row-reverse)
         <View style={s.dots}>
           {items.map((_, i) => {
-            const inputRange = [(i - 1) * W, i * W, (i + 1) * W];
+            const p = physOf(i);
+            const inputRange = [(p - 1) * W, p * W, (p + 1) * W];
             const scaleX = scrollX.interpolate({ inputRange, outputRange: [1, 3.2, 1], extrapolate: 'clamp' });
             const opacity = scrollX.interpolate({ inputRange, outputRange: [0.35, 1, 0.35], extrapolate: 'clamp' });
             return (
-              <TouchableOpacity key={i} hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }} accessibilityLabel={`الشريحة ${i + 1}`}
+              <TouchableOpacity key={i} hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }} accessibilityLabel={`الشريحة ${i + 1} من ${n}`}
                 accessibilityState={{ selected: i === idx }}
-                onPress={() => { ref.current?.scrollTo({ x: i * W, animated: true }); setIdx(i); }} style={s.dotHit}>
+                onPress={() => { goTo(i, true); setIdx(i); }} style={s.dotHit}>
                 <Animated.View style={[s.dot, { backgroundColor: C.primary, opacity, transform: [{ scaleX }] }]} />
               </TouchableOpacity>
             );
@@ -155,7 +189,7 @@ const s = StyleSheet.create({
   cta: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, marginTop: 12, backgroundColor: '#FFF', borderRadius: 999, paddingLeft: 5, paddingRight: 14, paddingVertical: 5 },
   ctaTxt: { color: '#14142B', fontSize: 12.5, fontWeight: '800' },
   ctaArrow: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFF3EA', alignItems: 'center', justifyContent: 'center' },
-  dots: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 8, flexWrap: 'wrap', paddingHorizontal: 20 },
+  dots: { flexDirection: 'row-reverse', justifyContent: 'center', alignItems: 'center', marginTop: 8, flexWrap: 'wrap', paddingHorizontal: 20 },
   dotHit: { width: 22, height: 12, alignItems: 'center', justifyContent: 'center' },
   dot: { width: 6, height: 6, borderRadius: 3 },
 });

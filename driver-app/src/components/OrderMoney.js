@@ -5,7 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, GRADIENTS, RTL, RADIUS, SHADOW } from '../theme';
 import { Pulse, Press } from './Anim';
-import { money, cashToCollect, paymentLabel, driverFee, tipOf, num, parseItems, isPersonal } from '../utils/format';
+import { money, cashToCollect, paymentLabel, driverFee, tipOf, num, parseItems, isPersonal, TERMS } from '../utils/format';
+import { arCount } from '../utils/plural';
 
 // شارة "اقبض من الزبون" — ذهبية بنص داكن (تباين عالٍ يُقرأ بنظرة أثناء القيادة)
 export function CashBadge({ order, size = 'lg' }) {
@@ -64,14 +65,14 @@ export default function OrderMoney({ order, showItems = true, maxItems = 99, sho
         {total > 0 && <Row icon="receipt-outline" label="إجمالي الطلب" value={money(total)} strong />}
         <Row icon="card-outline" label="طريقة الدفع" value={paymentLabel(order.payment_method)} />
         <Row icon="bicycle" label="أجرك من التوصيل" value={money(driverFee(order))} color={COLORS.greenDeep} strong last={!(tip > 0)} />
-        {tip > 0 && <Row icon="heart" label="إكرامية من الزبون" value={`+${money(tip)}`} color={COLORS.primary} last />}
+        {tip > 0 && <Row icon="heart" label={TERMS.tip} value={`+${money(tip)}`} color={COLORS.primary} last />}
       </View>
 
       {showItems && !isPersonal(order) && items.length > 0 && (
         <View style={styles.box}>
           <View style={[RTL.row, { justifyContent: 'space-between', paddingTop: 10, paddingBottom: 6 }]}>
             <Text style={[styles.boxTitle, RTL.text]}>الأصناف</Text>
-            <View style={styles.countPill}><Text style={styles.countText}>{items.reduce((s, i) => s + i.qty, 0)} قطعة</Text></View>
+            <View style={styles.countPill}><Text style={styles.countText}>{arCount(items.reduce((s, i) => s + i.qty, 0), 'piece')}</Text></View>
           </View>
           {shown.map(it => (
             <View key={it.key} style={styles.item}>
@@ -89,8 +90,8 @@ export default function OrderMoney({ order, showItems = true, maxItems = 99, sho
             </View>
           ))}
           {hidden > 0 && (
-            <Press onPress={() => setExpanded(true)} style={styles.more} accessibilityLabel={`عرض ${hidden} أصناف أخرى`}>
-              <Text style={styles.moreText}>+{hidden} أصناف أخرى</Text>
+            <Press onPress={() => setExpanded(true)} style={styles.more} accessibilityLabel={`عرض كل الأصناف، ${arCount(hidden, 'item')} مخفية`}>
+              <Text style={styles.moreText}>عرض كل الأصناف (+{hidden})</Text>
               <Ionicons name="chevron-down" size={14} color={COLORS.primary} />
             </Press>
           )}

@@ -4,10 +4,23 @@ import { FiPlus, FiEdit2, FiTrash2, FiAlertTriangle, FiMapPin, FiInfo, FiNavigat
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { num } from '../utils/format';
+import { arCount } from '../utils/plural';
 import { PageHeader, EmptyState, ListSkeleton, Modal, Field, PrimaryBtn, useConfirm } from '../components/ui';
 
 const MAX_KM = 100;
-const FALLBACK_FEE = 5;
+const NO_ZONES_FEE = 5;
+/**
+ * سعر المسافات خارج المناطق كما يحسبه الخادم فعلاً (orderService.getZoneFee):
+ * لا مناطق إطلاقاً → 5₪، وإلا → سعر أغلى منطقة نشطة — A-03
+ */
+const fallbackFee = (zones) => {
+  const act = zones.filter(z => z.is_active == null || z.is_active === true || z.is_active === 't' || z.is_active === 1);
+  return act.length ? Math.max(...act.map(z => num(z.price))) : NO_ZONES_FEE;
+};
+const fallbackText = (zones) => {
+  const act = zones.filter(z => z.is_active == null || z.is_active === true || z.is_active === 't' || z.is_active === 1);
+  return act.length ? `بسعر أغلى منطقة (${num(fallbackFee(zones))}₪)` : `${NO_ZONES_FEE}₪`;
+};
 const EMPTY = { name: '', min_km: '', max_km: '', price: '' };
 const PRESETS = [
   { name: 'قريب (0 - 1 كم)', min_km: '0', max_km: '1', price: '' },
@@ -75,10 +88,11 @@ export default function DeliveryZones() {
     const err = validateZone(z);
     if (err) return toast.error(err);
     const body = { name: z.name.trim(), min_km: parseFloat(z.min_km), max_km: parseFloat(z.max_km), price: parseFloat(z.price) };
-    const after = analyze([...zones.filter(o => o.id !== z.id), { ...body, id: z.id ?? '_new' }]);
+    const afterZones = [...zones.filter(o => o.id !== z.id), { ...body, id: z.id ?? '_new' }];
+    const after = analyze(afterZones);
     const newGaps = after.issues.filter(i => i.type === 'gap').length > issues.filter(i => i.type === 'gap').length;
     if (newGaps) {
-      const ok = await confirm({ title: 'فجوة في المسافات', message: `سينتج عن هذا الحفظ فجوة:\n${after.issues.filter(i => i.type === 'gap').map(i => '• ' + i.text).join('\n')}\n\nالمسافات خارج المناطق تُسعَّر ${FALLBACK_FEE}₪ تلقائياً. متابعة؟`, confirmText: 'حفظ على أي حال', danger: false });
+      const ok = await confirm({ title: 'فجوة في المسافات', message: `سينتج عن هذا الحفظ فجوة:\n${after.issues.filter(i => i.type === 'gap').map(i => '• ' + i.text).join('\n')}\n\nالمسافات خارج المناطق تُسعَّر ${fallbackText(afterZones)} تلقائياً. متابعة؟`, confirmText: 'حفظ على أي حال', danger: false });
       if (!ok) return;
     }
     setSaving(true);
@@ -93,7 +107,7 @@ export default function DeliveryZones() {
   };
 
   const deleteZone = async (zone) => {
-    const ok = await confirm({ title: 'حذف المنطقة', message: `حذف «${zone.name}» (${num(zone.min_km)}–${num(zone.max_km)} كم)؟ المسافات داخلها ستُسعَّر ${FALLBACK_FEE}₪ ما لم تغطّها منطقة أخرى.`, confirmText: 'حذف' });
+    const ok = await confirm({ title: 'حذف المنطقة', message: `حذف «${zone.name}» (${num(zone.min_km)}–${num(zone.max_km)} كم)؟ المسافات داخلها ستُسعَّر ${fallbackText(zones.filter(x => x.id !== zone.id))} ما لم تغطّها منطقة أخرى.`, confirmText: 'حذف' });
     if (!ok) return;
     try { await api.delete(`/delivery-zones/${zone.id}`); toast.success('تم الحذف'); fetchZones(); }
     catch (e) { toast.error(e?.message || 'فشل الحذف'); }
@@ -104,7 +118,7 @@ export default function DeliveryZones() {
 
   return (
     <div className="page">
-      <PageHeader icon={<FiMapPin />} title="مناطق التوصيل" subtitle={`التسعير حسب المسافة · ${zones.length} منطقة`}
+      <PageHeader icon={<FiMapPin />} title="مناطق التوصيل" subtitle={`التسعير حسب المسافة · ${arCount(zones.length, 'zone', { zero: 'لا مناطق بعد' })}`}
         action={<PrimaryBtn onClick={() => setEditing({ ...EMPTY })}><FiPlus /> <span>منطقة<span className="hidden sm:inline"> جديدة</span></span></PrimaryBtn>} />
 
       {/* Visual km-bracket bar */}
@@ -113,10 +127,10 @@ export default function DeliveryZones() {
           <div className="flex items-end justify-between gap-3 mb-5">
             <div>
               <h2 className="panel-title">خريطة الشرائح</h2>
-              <p className="text-[11.5px] text-ink-3 font-medium mt-0.5">من 0 حتى {scaleMax} كم · الفجوات تُسعَّر {FALLBACK_FEE}₪</p>
+              <p className="text-[11.5px] text-ink-3 font-medium mt-0.5">من 0 حتى {scaleMax} كم · الفجوات تُسعَّر {fallbackText(zones)}</p>
             </div>
             <span className={`text-[11px] font-extrabold rounded-full px-2.5 py-1 ${issues.length ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'}`}>
-              {issues.length ? `${issues.length} تنبيه` : '✓ تغطية متصلة'}
+              {issues.length ? arCount(issues.length, 'alert') : '✓ تغطية متصلة'}
             </span>
           </div>
           <div dir="ltr">
@@ -152,7 +166,7 @@ export default function DeliveryZones() {
             <p className="text-sm text-sky-900 font-black">كيف يعمل التسعير؟</p>
             <p className="text-xs text-sky-800/80 leading-relaxed font-medium mt-1">
               كل منطقة تغطي مدى مسافات (من ≤ المسافة &lt; حتى) بسعر توصيل ثابت. أنشئ ما تحتاجه من مناطق بدون تداخل، حتى {MAX_KM} كم.
-              المسافات غير المغطّاة تُسعَّر <b>{FALLBACK_FEE}₪</b> تلقائياً.
+              المسافات غير المغطّاة تُسعَّر <b>{fallbackText(zones)}</b> تلقائياً — هكذا يحسبها الخادم فعلياً.
             </p>
           </div>
         </div>
@@ -163,7 +177,7 @@ export default function DeliveryZones() {
             <div className="space-y-1">
               <p className="text-sm text-amber-900 font-black">تنبيهات على المناطق</p>
               {issues.map((i, k) => (
-                <p key={k} className={`text-xs font-bold ${i.type === 'overlap' ? 'text-red-600' : 'text-amber-700'}`}>• {i.text}{i.type === 'gap' ? ` — تُسعَّر ${FALLBACK_FEE}₪` : ''}</p>
+                <p key={k} className={`text-xs font-bold ${i.type === 'overlap' ? 'text-red-600' : 'text-amber-700'}`}>• {i.text}{i.type === 'gap' ? ` — تُسعَّر ${fallbackText(zones)}` : ''}</p>
               ))}
             </div>
           </div>
@@ -171,7 +185,7 @@ export default function DeliveryZones() {
       </div>
 
       {loading && zones.length === 0 ? <ListSkeleton rows={4} grid />
-        : zones.length === 0 ? <EmptyState icon={<FiMapPin />} title="لا توجد مناطق توصيل" hint={`كل الطلبات تُسعَّر حالياً ${FALLBACK_FEE}₪ — أضف مناطق حسب المسافة`}
+        : zones.length === 0 ? <EmptyState icon={<FiMapPin />} title="لا توجد مناطق توصيل" hint={`كل الطلبات تُسعَّر حالياً ${NO_ZONES_FEE}₪ — أضف مناطق حسب المسافة`}
             action={<PrimaryBtn onClick={() => setEditing({ ...EMPTY })}><FiPlus /> إضافة منطقة</PrimaryBtn>} />
         : (
           <div className="grid gap-3 lg:gap-4 sm:grid-cols-2 xl:grid-cols-3 stagger">

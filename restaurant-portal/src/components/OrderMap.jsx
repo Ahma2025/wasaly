@@ -10,6 +10,7 @@ export default function OrderMap({ order }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const markersRef = useRef({});
+  const userMovedRef = useRef(false); // المستخدم حرّك/كبّر الخريطة بنفسه → لا نسحبها للسائق مع كل تحديث
   const [driverLoc, setDriverLoc] = useState(
     order?.driver_lat ? { lat: parseFloat(order.driver_lat), lng: parseFloat(order.driver_lng) } : null
   );
@@ -54,6 +55,14 @@ export default function OrderMap({ order }) {
     // داخل نافذة متحركة: أعد حساب الحجم عند تغيّر أبعاد الحاوية
     let ro = null;
     if (typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(() => map.invalidateSize()); ro.observe(mapContainerRef.current); }
+    // تفاعل المستخدم (سحب/تكبير يدوي) — أحداث يطلقها المستخدم فقط وليس panTo/fitBounds
+    userMovedRef.current = false;
+    const markUser = () => { userMovedRef.current = true; };
+    const el = mapContainerRef.current;
+    map.on('dragstart', markUser);
+    el.addEventListener('wheel', markUser, { passive: true });
+    el.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length > 1) markUser(); }, { passive: true });
+    el.addEventListener('dblclick', markUser);
 
     return () => { ro && ro.disconnect(); map.remove(); mapRef.current = null; markersRef.current = {}; };
   }, [order?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -83,7 +92,11 @@ export default function OrderMap({ order }) {
       markersRef.current.driver = L.marker([driverLoc.lat, driverLoc.lng], { icon: pinIcon('#8B5CF6', ICON_PATHS.bike, 38) })
         .addTo(map).bindPopup('<b>السائق</b>');
     }
-    map.panTo([driverLoc.lat, driverLoc.lng], { animate: true, duration: 0.8 });
+    // نتبع السائق فقط إن لم يحرّك المستخدم الخريطة، أو خرج السائق من الجزء الظاهر
+    const ll = L.latLng(driverLoc.lat, driverLoc.lng);
+    let outOfView = false;
+    try { outOfView = !map.getBounds().pad(-0.1).contains(ll); } catch {}
+    if (!userMovedRef.current || outOfView) map.panTo(ll, { animate: true, duration: 0.8 });
   }, [driverLoc]);
 
   if (!hasMap) {
@@ -103,7 +116,8 @@ export default function OrderMap({ order }) {
           <span className="w-2 h-2 rounded-full bg-white animate-ping" /> مباشر
         </div>
       )}
-      <div className="absolute bottom-2 right-2 glass-light rounded-xl px-3 py-2 text-[11px] font-bold shadow-soft z-[1000] flex flex-col gap-1 text-ink-2">
+      {/* مفتاح الخريطة أعلى اليمين حتى لا يغطي حقوق OpenStreetMap (أسفل اليمين) */}
+      <div className="absolute top-2 right-2 glass-light rounded-xl px-3 py-2 text-[11px] font-bold shadow-soft z-[1000] flex flex-col gap-1 text-ink-2 pointer-events-none">
         {restLat && <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-full bg-brand-500" /> المطعم</span>}
         {custLat && <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-full bg-sky-500" /> الزبون</span>}
         {driverLoc && <span className="flex items-center gap-1.5 text-violet-600"><i className="w-2.5 h-2.5 rounded-full bg-violet-500" /> السائق</span>}

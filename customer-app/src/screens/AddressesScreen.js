@@ -4,7 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import api from '../utils/api';
+import api, { isNetworkError, NETWORK_MESSAGE } from '../utils/api';
+import { plural } from '../utils/plural';
 import { readCache, writeCache } from '../utils/cache';
 import { useTheme } from '../context/ThemeContext';
 import GradientHeader from '../components/GradientHeader';
@@ -24,20 +25,25 @@ export default function AddressesScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [fromCache, setFromCache] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const d = await api.get('/users/addresses');
       const l = d.data || [];
       setList(l); writeCache('addresses', l);
-    } catch {}
+      setLoadError(''); setFromCache(false);
+    } catch (e) {
+      setLoadError(isNetworkError(e) ? NETWORK_MESSAGE : (e?.message || 'تعذّر تحميل العناوين'));
+    }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   useFocusEffect(useCallback(() => {
     (async () => {
       const cached = await readCache('addresses');
-      if (cached) { setList(cached); setLoading(false); }
+      if (cached) { setList(cached); setFromCache(true); setLoading(false); }
       load();
     })();
   }, [load]));
@@ -71,17 +77,23 @@ export default function AddressesScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <GradientHeader title="عناويني" subtitle={list.length ? `${list.length} عنوان محفوظ` : undefined}
-        right={<TouchableOpacity onPress={() => navigation.navigate('AddAddress')} accessibilityLabel="إضافة عنوان"><Ionicons name="add" size={24} color="#FFF" /></TouchableOpacity>} />
+      <GradientHeader title="عناويني" subtitle={list.length ? `محفوظ: ${plural(list.length, 'address')}` : undefined}
+        rightIcon="add" rightLabel="إضافة عنوان" onRight={() => navigation.navigate('AddAddress')} />
 
       {loading ? (
         <View style={{ padding: 16 }}>{[0, 1, 2].map(i => <CardRowSkeleton key={i} />)}</View>
+      ) : list.length === 0 && loadError ? (
+        <EmptyState emoji="📡" tone="error" title="تعذّر تحميل العناوين" subtitle={loadError}
+          ctaLabel="إعادة المحاولة" onCta={() => { setLoading(true); load(); }} />
       ) : list.length === 0 ? (
         <EmptyState emoji="📍" title="ما في عناوين محفوظة" subtitle="أضف عنوان البيت أو الشغل حتى نوصلك أسرع وبسعر توصيل دقيق"
           ctaLabel="إضافة عنوان" onCta={() => navigation.navigate('AddAddress', { makeDefault: true })} />
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 110 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={C.primary} colors={[C.primary]} progressBackgroundColor={C.card} />}>
+          {!!loadError && fromCache && (
+            <View style={styles.stale}><Ionicons name="cloud-offline-outline" size={15} color={C.text} /><Text style={styles.staleTxt}>آخر نسخة محفوظة — {loadError}</Text></View>
+          )}
           {list.map((a, i) => {
             const lbl = addressLabel(a);
             return (
@@ -149,6 +161,8 @@ const makeStyles = (C) => StyleSheet.create({
   action: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: C.inputBg },
   actionTxt: { fontSize: 12.5, fontWeight: '800', color: C.primary },
   fabWrap: { position: 'absolute', left: 16, right: 16 },
+  stale: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, borderRadius: 14, padding: 10, backgroundColor: C.warnBg, borderWidth: 1, borderColor: C.warnBorder },
+  staleTxt: { flex: 1, fontSize: 12.5, fontWeight: '700', color: C.text, textAlign: 'right' },
   fab: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 18, paddingVertical: 16, ...C.shadow.float },
   fabTxt: { color: '#FFF', fontWeight: '900', fontSize: 15.5 },
 });

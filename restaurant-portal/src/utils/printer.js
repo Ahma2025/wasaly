@@ -7,7 +7,7 @@
 //  يعتمد على: thermal-printer-cordova-plugin + إضافة أذونات محلية (PrinterPermissions)
 // ═══════════════════════════════════════════════════════════════
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import { orderNo, num, parseOptions, optionName, optionPrice, paymentLabel, isGroupOrder, groupLabel } from './format';
+import { orderNo, num, parseOptions, optionName, optionPrice, paymentLabel, isGroupOrder, groupLabel, fmtNumericDate, fmtTime } from './format';
 
 const PKEY = 'wasaly_printer';
 const AUTOKEY = 'wasaly_printer_autoprint';
@@ -214,7 +214,7 @@ export function renderTicketCanvas(order, restaurant, items = []) {
     text('سائق واحد يجمع من عدة مطاعم — جهّز الطلب في وقته', { size: 20, align: 'center' });
   }
   const d = new Date(order.created_at || Date.now());
-  text(`${d.toLocaleDateString('ar-EG')}  ${d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`, { size: 22, align: 'center' });
+  text(`${fmtNumericDate(d)}  ${fmtTime(d)}`, { size: 22, align: 'center' });
   hr();
 
   text(`الزبون: ${order.customer_name || '—'}`, { size: 24, bold: true });
@@ -238,21 +238,28 @@ export function renderTicketCanvas(order, restaurant, items = []) {
 
   const subtotal = order.subtotal != null ? num(order.subtotal)
     : (items || []).reduce((s, it) => s + (num(it.subtotal) || num(it.price) * (parseInt(it.quantity) || 1)), 0);
-  text('المجموع الفرعي', { size: 23, price: subtotal.toFixed(2), gapAfter: 2 });
-  if (isDelivery && !isGroupOrder(order)) text('رسوم التوصيل', { size: 23, price: num(order.delivery_fee).toFixed(2), gapAfter: 2 });
-  const discounts = [
-    ['الخصم', order.discount],
-    ['خصم الكوبون', order.coupon_discount],
-    ['خصم الطلب الأول', order.first_order_discount],
-    ['نقاط الولاء', order.points_value],
-    ['من المحفظة', order.wallet_used],
-  ];
-  discounts.forEach(([l, v]) => { if (num(v) > 0) text(l, { size: 23, price: `-${num(v).toFixed(2)}`, gapAfter: 2 }); });
-  if (num(order.tip) > 0) text('إكرامية السائق', { size: 23, price: num(order.tip).toFixed(2), gapAfter: 2 });
-  hr(true);
-  text('الإجمالي', { size: 32, bold: true, price: `${num(order.total).toFixed(2)} ₪` });
   const paid = order.payment_status === 'paid';
-  text(`الدفع: ${paymentLabel(order.payment_method)}${paid ? ' (مدفوع)' : ''}`, { size: 22, bold: true });
+  if (isGroupOrder(order)) {
+    // طلب مجمّع: الإيصال لأصناف هذا المطعم فقط — الرسوم والإكرامية والتحصيل على مستوى المجمّع
+    hr(true);
+    text('قيمة أصناف هذا المطعم', { size: 28, bold: true, price: `${(order.total != null ? num(order.total) : subtotal).toFixed(2)} ₪` });
+    text(paid ? 'الدفع على الطلب المجمّع (مدفوع)' : 'الدفع على الطلب المجمّع (يحصّله السائق)', { size: 22, bold: true });
+  } else {
+    text('المجموع الفرعي', { size: 23, price: subtotal.toFixed(2), gapAfter: 2 });
+    if (isDelivery) text('رسوم التوصيل', { size: 23, price: num(order.delivery_fee).toFixed(2), gapAfter: 2 });
+    const discounts = [
+      ['الخصم', order.discount],
+      ['خصم الكوبون', order.coupon_discount],
+      ['خصم الطلب الأول', order.first_order_discount],
+      ['نقاط الولاء', order.points_value],
+      ['من محفظة وصلّي', order.wallet_used],
+    ];
+    discounts.forEach(([l, v]) => { if (num(v) > 0) text(l, { size: 23, price: `-${num(v).toFixed(2)}`, gapAfter: 2 }); });
+    if (num(order.tip) > 0) text('إكرامية السائق', { size: 23, price: num(order.tip).toFixed(2), gapAfter: 2 });
+    hr(true);
+    text('الإجمالي', { size: 32, bold: true, price: `${num(order.total).toFixed(2)} ₪` });
+    text(`الدفع: ${paymentLabel(order.payment_method)}${paid ? ' (مدفوع)' : ''}`, { size: 22, bold: true });
+  }
   hr();
   text('وصلّي — شكراً لكم', { size: 20, align: 'center' });
   gap(16);
@@ -319,8 +326,21 @@ function sliceCanvas(c) {
   return out;
 }
 
+// ─── طابور الطباعة: مهمة واحدة على الماكنة في كل مرة ───
+// (طلبان يصلان معًا كانا يتداخلان على نفس الاتصال فتتخربط الإيصالات أو تفشل)
+let printQueue = Promise.resolve();
+function enqueue(job) {
+  const run = printQueue.then(job, job);
+  printQueue = run.catch(() => {});
+  return run;
+}
+
 // ─── طباعة canvas على الماكنة ───
-export async function printCanvas(canvas, printer) {
+export function printCanvas(canvas, printer) {
+  return enqueue(() => printCanvasNow(canvas, printer));
+}
+
+async function printCanvasNow(canvas, printer) {
   if (!TP()) throw printerError('الطباعة غير متاحة — افتح التطبيق على جهاز الأندرويد');
   const p = printer || getSavedPrinter();
   if (!p) throw printerError('لم يتم ربط أي ماكنة — اربطها من الإعدادات');
@@ -359,6 +379,43 @@ export async function printImageBase64(base64, printer) {
 export async function printOrder(order, restaurant, items) {
   try { await document.fonts?.ready; } catch {}
   return printCanvas(renderTicketCanvas(order, restaurant, items || order.items || []));
+}
+
+// ─── طباعة من المتصفح (بدون ماكنة مربوطة): نفس الإيصال كصورة عبر نافذة الطباعة ───
+export const canBrowserPrint = () => !Capacitor.isNativePlatform() && typeof window !== 'undefined' && typeof window.print === 'function';
+
+export async function browserPrintOrder(order, restaurant, items) {
+  try { await document.fonts?.ready; } catch {}
+  const canvas = renderTicketCanvas(order, restaurant, items || order.items || []);
+  const src = canvas.toDataURL('image/png');
+  const widthMM = PAPERS[getPaperSize()].widthMM;
+  return new Promise((resolve, reject) => {
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('aria-hidden', 'true');
+    Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0', visibility: 'hidden' });
+    document.body.appendChild(iframe);
+    const cleanup = () => setTimeout(() => { try { iframe.remove(); } catch {} }, 1000);
+    const doc = iframe.contentWindow?.document;
+    if (!doc) { cleanup(); reject(printerError('تعذّر فتح نافذة الطباعة')); return; }
+    doc.open();
+    doc.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>طلب #${String(orderNo(order)).replace(/[<>&"]/g, '')}</title>
+      <style>@page{size:${widthMM + 8}mm auto;margin:4mm}html,body{margin:0;padding:0;background:#fff}img{display:block;width:${widthMM}mm;height:auto;margin:0 auto}</style>
+      </head><body><img alt="" /></body></html>`);
+    doc.close();
+    const img = doc.querySelector('img');
+    img.onload = () => {
+      try {
+        const w = iframe.contentWindow;
+        w.focus();
+        w.onafterprint = cleanup;
+        w.print();
+        resolve(true);
+      } catch (e) { reject(printerError(e)); }
+      finally { setTimeout(cleanup, 60000); }
+    };
+    img.onerror = () => { cleanup(); reject(printerError('تعذّر تجهيز الإيصال')); };
+    img.src = src;
+  });
 }
 
 // ─── طباعة تجريبية ───

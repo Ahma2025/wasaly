@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FiPlus, FiEdit2, FiEye, FiEyeOff, FiStar, FiShoppingBag, FiPhone, FiMapPin, FiUser, FiAlertOctagon } from 'react-icons/fi';
+import { FiPlus, FiEdit2, FiEye, FiEyeOff, FiStar, FiShoppingBag, FiPhone, FiMapPin, FiUser, FiFilter, FiX } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { STORE_TYPES, normalizePhone, truthy, num } from '../utils/format';
-import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, Button, Switch, useConfirm } from '../components/ui';
+import { arCount } from '../utils/plural';
+import { duplicatePhoneMessage } from '../utils/accounts';
+import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, Button, Switch, Spinner, useConfirm } from '../components/ui';
 
 const FETCH_LIMIT = 1000;
 const PAGE = 30;
@@ -77,6 +79,7 @@ export default function Restaurants() {
   const [form, setForm] = useState(EMPTY_NEW);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [busyKey, setBusyKey] = useState(null); // `${id}:${field}` أثناء التبديل — A-25
 
   useEffect(() => { fetchRestaurants(); }, []);
   useEffect(() => { if (params.get('new') === '1') { setShowNew(true); const p = new URLSearchParams(params); p.delete('new'); setParams(p, { replace: true }); } }, [params]);
@@ -132,7 +135,7 @@ export default function Restaurants() {
       try {
         const u = await api.get('/admin/users', { params: { search: phone, limit: 5 } });
         const hit = (u.data || []).find(x => normalizePhone(x.phone) === phone);
-        if (hit) { setSaving(false); return toast.error(`رقم الهاتف مسجّل مسبقاً باسم «${hit.name || 'مستخدم'}» — استخدم رقماً آخر`); }
+        if (hit) { const msg = await duplicatePhoneMessage(phone); setSaving(false); return toast.error(msg, { duration: 6000 }); }
       } catch { /* الفحص اختياري */ }
       const payload = {
         name_ar: name, owner_phone: phone, owner_password: form.owner_password, store_type: form.store_type,
@@ -143,28 +146,39 @@ export default function Restaurants() {
       setShowNew(false);
       setForm(EMPTY_NEW);
       fetchRestaurants();
-    } catch (e) { toast.error(e?.message || (e?.status === 409 ? 'رقم الهاتف مسجّل مسبقاً' : 'فشل الإضافة')); }
+    } catch (e) {
+      if (e?.status === 409) toast.error(await duplicatePhoneMessage(phone), { duration: 6000 });
+      else toast.error(e?.message || 'فشل الإضافة');
+    }
     finally { setSaving(false); }
   };
 
+  /** تبديل حقل: زر معطّل أثناء الطلب + نرسل القيمة المطلوبة صراحةً + نعتمد ما يرجعه الخادم — A-25 */
   const toggleField = async (r, field) => {
-    if (field === 'is_active' && truthy(r.is_active)) {
+    const key = `${r.id}:${field}`;
+    if (busyKey) return;
+    const want = !truthy(r[field]);
+    if (field === 'is_active' && !want) {
       const ok = await confirm({ title: 'إخفاء المتجر', message: `سيختفي «${r.name_ar}» من تطبيق الزبائن ولن يستقبل طلبات. يمكنك إعادة تفعيله لاحقاً.`, confirmText: 'إخفاء' });
       if (!ok) return;
     }
+    setBusyKey(key);
     try {
-      const res = await api.patch(`/admin/restaurants/${r.id}/toggle`, { field });
-      const val = res?.value ?? !truthy(r[field]);
+      const res = await api.patch(`/admin/restaurants/${r.id}/toggle`, { field, value: want });
+      const val = res?.value ?? res?.data?.value ?? want;
       setRestaurants(prev => prev.map(x => (x.id === r.id ? { ...x, [field]: val } : x)));
-      toast.success('تم التحديث');
-    } catch (e) { toast.error(e?.message || 'فشل التحديث'); }
+      const msg = field === 'is_featured' ? (val ? 'تم تمييز المتجر' : 'أُلغي تمييز المتجر')
+        : field === 'is_active' ? (val ? 'تم تفعيل المتجر' : 'تم إخفاء المتجر') : 'تم التحديث';
+      toast.success(msg, { id: key });
+    } catch (e) { toast.error(e?.message || 'فشل التحديث', { id: key }); }
+    finally { setBusyKey(null); }
   };
 
   const shown = filtered.slice(0, visible);
 
   return (
     <div className="page">
-      <PageHeader icon={<FiShoppingBag />} title="المطاعم والمتاجر" subtitle={`${restaurants.length} متجر · ${counts.active} نشط · ${counts.hidden} مخفي`}
+      <PageHeader icon={<FiShoppingBag />} title="المطاعم والمتاجر" subtitle={`${arCount(restaurants.length, 'store', { zero: 'لا متاجر' })} · ${counts.active} نشط · ${counts.hidden} مخفي`}
         action={<PrimaryBtn onClick={() => setShowNew(true)}><FiPlus /> <span>متجر<span className="hidden sm:inline"> جديد</span></span></PrimaryBtn>} />
 
       <div className="lg:card lg:p-4 space-y-3">
@@ -179,8 +193,11 @@ export default function Restaurants() {
       </div>
 
       {loading && restaurants.length === 0 ? <ListSkeleton rows={6} grid />
-        : filtered.length === 0 ? <EmptyState icon={<FiShoppingBag />} title="لا توجد متاجر" hint={search ? 'لا نتائج مطابقة للبحث' : 'أضف أول متجر من زر «متجر»'}
-            action={!search && <PrimaryBtn onClick={() => setShowNew(true)}><FiPlus /> إضافة متجر</PrimaryBtn>} />
+        : filtered.length === 0 ? ((search.trim() || filter || typeFilter) && restaurants.length > 0
+            ? <EmptyState icon={<FiFilter />} title="لا نتائج لهذا الفلتر" hint="جرّب بحثاً آخر أو امسح الفلاتر"
+                action={<Button variant="secondary" icon={<FiX />} onClick={() => { setSearch(''); setFilter(''); setTypeFilter(''); }}>مسح الفلاتر</Button>} />
+            : <EmptyState icon={<FiShoppingBag />} title="لا توجد متاجر بعد" hint="أضف أول متجر من زر «متجر»"
+                action={<PrimaryBtn onClick={() => setShowNew(true)}><FiPlus /> إضافة متجر</PrimaryBtn>} />)
         : (
           <div className="grid gap-3 lg:gap-4 sm:grid-cols-2 2xl:grid-cols-3 stagger">
             {shown.map(r => {
@@ -207,9 +224,9 @@ export default function Restaurants() {
                       </div>
                       <p className="text-[11.5px] text-ink-3 mt-1.5 truncate flex items-center gap-1.5 font-medium">
                         {r.city && r.city !== '-' && <><FiMapPin className="flex-shrink-0" />{r.city} · </>}
-                        <FiPhone className="flex-shrink-0" /><span className="num">{r.phone || 'بدون هاتف'}</span>
+                        <FiPhone className="flex-shrink-0" />{r.phone ? <bdi dir="ltr" className="num">{r.phone}</bdi> : <span>بدون هاتف</span>}
                       </p>
-                      <p className="text-[11.5px] text-ink-3 mt-0.5 truncate flex items-center gap-1.5 font-medium"><FiUser className="flex-shrink-0" />المالك: {r.owner_name || r.owner_phone || 'غير محدد'}</p>
+                      <p className="text-[11.5px] text-ink-3 mt-0.5 truncate flex items-center gap-1.5 font-medium"><FiUser className="flex-shrink-0" />المالك: {r.owner_name || (r.owner_phone ? <bdi dir="ltr" className="num">{r.owner_phone}</bdi> : 'غير محدد')}</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-3 mt-4 rounded-2xl bg-surface divide-x divide-x-reverse divide-surface-line text-center py-2.5">
@@ -218,13 +235,13 @@ export default function Restaurants() {
                     <div><p className="text-[15px] font-black text-ink num">{num(r.rating).toFixed(1)}<span className="text-amber-400 text-[12px]"> ★</span></p><p className="text-[10.5px] text-ink-3 font-bold">تقييم</p></div>
                   </div>
                   <div className="grid grid-cols-3 gap-2 mt-3 mt-auto pt-3">
-                    <button onClick={() => toggleField(r, 'is_active')}
-                      className={`btn btn-sm ${active ? 'btn-secondary' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}>
-                      {active ? <><FiEyeOff /> إخفاء</> : <><FiEye /> تفعيل</>}
+                    <button onClick={() => toggleField(r, 'is_active')} disabled={!!busyKey} aria-busy={busyKey === `${r.id}:is_active` || undefined}
+                      className={`btn btn-sm disabled:opacity-60 ${active ? 'btn-secondary' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}>
+                      {busyKey === `${r.id}:is_active` ? <Spinner /> : active ? <FiEyeOff /> : <FiEye />} {active ? 'إخفاء' : 'تفعيل'}
                     </button>
-                    <button onClick={() => toggleField(r, 'is_featured')} aria-pressed={featured} title={featured ? 'إلغاء التمييز' : 'تمييز المتجر'}
-                      className={`btn btn-sm ${featured ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' : 'btn-secondary'}`}>
-                      <FiStar className={featured ? 'fill-current' : ''} /> {featured ? 'مُميّز' : 'تمييز'}
+                    <button onClick={() => toggleField(r, 'is_featured')} disabled={!!busyKey} aria-pressed={featured} aria-busy={busyKey === `${r.id}:is_featured` || undefined} title={featured ? 'إلغاء التمييز' : 'تمييز المتجر'}
+                      className={`btn btn-sm disabled:opacity-60 ${featured ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' : 'btn-secondary'}`}>
+                      {busyKey === `${r.id}:is_featured` ? <Spinner /> : <FiStar className={featured ? 'fill-current' : ''} />} {featured ? 'مُميّز' : 'تمييز'}
                     </button>
                     <button onClick={() => setEditing(r)} className="btn btn-sm btn-soft">
                       <FiEdit2 /> تعديل
@@ -245,7 +262,7 @@ export default function Restaurants() {
       <Modal open={showNew} onClose={() => setShowNew(false)} title="متجر جديد" subtitle="صاحب المتجر يكمّل الموقع والمنيو والأوقات من بوابته" icon={<FiPlus />}>
         <div className="space-y-3">
           <Field label="اسم المتجر *"><input className="inp" placeholder="مثال: مطعم العميد" value={form.name_ar} onChange={e => setForm(f => ({ ...f, name_ar: e.target.value }))} /></Field>
-          <Field label="قسم المتجر *" hint="(يظهر المتجر للزبائن تحت هذا القسم)">
+          <Field label="قسم المتجر *" hint="(يظهر المتجر للزبائن تحت هذا القسم)" as="group">
             <StoreTypePicker types={ST.types} value={form.store_type} onChange={(k) => setForm(f => ({ ...f, store_type: k }))} />
           </Field>
           <Field label="رقم هاتف صاحب المتجر *" hint="(يُستخدم لتسجيل الدخول — يجب ألا يكون مسجّلاً)">
@@ -267,7 +284,6 @@ export default function Restaurants() {
 }
 
 function EditRestaurant({ ST, restaurant, onClose, onSaved, refetch }) {
-  const confirm = useConfirm();
   const [f, setF] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -305,34 +321,29 @@ function EditRestaurant({ ST, restaurant, onClose, onSaved, refetch }) {
         delivery_time_min: r.delivery_time_min, delivery_time_max: r.delivery_time_max,
         store_type: f.store_type, is_open: f.is_open, commission_rate: rate,
       });
-      // توافق مع الخادم القديم: العمولة عبر مسارها الخاص
-      if (rate !== num(r.commission_rate ?? 15)) {
-        try { await api.patch(`/admin/restaurants/${r.id}/commission`, { rate }); } catch { /* ignore */ }
+      // العمولة عبر مسارها الخاص — فشلها يظهر ولا يُبلَّغ «تم الحفظ» — A-22
+      const problems = [];
+      const rows0 = await refetch();
+      const fresh0 = rows0?.find(x => x.id === r.id);
+      if (rate !== num(fresh0?.commission_rate ?? r.commission_rate ?? 15)) {
+        try { await api.patch(`/admin/restaurants/${r.id}/commission`, { rate }); }
+        catch (e) { problems.push(`العمولة: ${e?.message || 'تعذّر حفظها'}`); }
       }
-      // حالة فتح/إغلاق: نتحقق بعد الحفظ ونبدّل فقط إن لم يطبّقها الخادم
-      const rows = await refetch();
-      const fresh = rows?.find(x => x.id === r.id);
-      if (fresh && fresh.is_open != null && truthy(fresh.is_open) !== f.is_open) {
-        try { await api.patch(`/admin/restaurants/${r.id}/toggle`, { field: 'is_open' }); } catch { /* ignore */ }
+      // حالة فتح/إغلاق: نبدّل فقط إن لم يطبّقها الخادم
+      if (fresh0 && fresh0.is_open != null && truthy(fresh0.is_open) !== f.is_open) {
+        try { await api.patch(`/admin/restaurants/${r.id}/toggle`, { field: 'is_open', value: f.is_open }); }
+        catch (e) { problems.push(`حالة الفتح: ${e?.message || 'تعذّر حفظها'}`); }
       }
-      if (fresh && fresh.store_type && ST.norm(fresh.store_type) !== f.store_type) {
-        toast('نوع المتجر يتطلب تحديث الخادم ليُحفظ', { icon: 'ℹ️' });
+      if (fresh0 && fresh0.store_type && ST.norm(fresh0.store_type) !== f.store_type) problems.push('قسم المتجر لم يُحفظ على الخادم');
+      if (problems.length) {
+        await refetch();
+        toast.error(`حُفظت باقي البيانات، لكن:\n${problems.join('\n')}`, { duration: 6000 });
+        return; // تبقى النافذة مفتوحة لإعادة المحاولة
       }
       toast.success('تم حفظ التعديلات');
       onSaved();
     } catch (e) { toast.error(e?.message || 'فشل الحفظ'); }
     finally { setSaving(false); }
-  };
-
-  const hideForever = async () => {
-    const ok = await confirm({
-      title: 'إخفاء نهائي',
-      message: `سيُخفى «${restaurant.name_ar}» من التطبيق ولن يستقبل طلبات.\nالبيانات والطلبات السابقة تبقى محفوظة، ويمكن إعادة التفعيل من زر «تفعيل».`,
-      confirmText: 'إخفاء نهائي',
-    });
-    if (!ok) return;
-    try { await api.delete(`/admin/restaurants/${restaurant.id}`); toast.success('تم إخفاء المتجر'); onSaved(); }
-    catch (e) { toast.error(e?.message || 'فشل'); }
   };
 
   return (
@@ -349,20 +360,15 @@ function EditRestaurant({ ST, restaurant, onClose, onSaved, refetch }) {
           <Field label="الحد الأدنى للطلب (₪)"><input className="inp" type="number" min="0" step="0.5" value={f.min_order} onChange={set('min_order')} /></Field>
           <Field label="نسبة العمولة %"><input className="inp" type="number" min="0" max="100" step="0.5" value={f.commission_rate} onChange={set('commission_rate')} /></Field>
         </div>
-        <Field label="قسم المتجر" hint="(يحدد أين يظهر المتجر في تطبيق الزبائن)">
+        <Field label="قسم المتجر" hint="(يحدد أين يظهر المتجر في تطبيق الزبائن)" as="group">
           <StoreTypePicker types={ST.types} value={f.store_type} onChange={(k) => setF(p => ({ ...p, store_type: k }))} />
         </Field>
         <div className="flex items-center justify-between rounded-2xl bg-surface p-3.5">
           <div><p className="font-bold text-sm text-ink">المتجر مفتوح الآن</p><p className="text-[11.5px] text-ink-3">يستقبل طلبات جديدة</p></div>
           <Switch checked={f.is_open} onChange={(v) => setF(p => ({ ...p, is_open: v }))} label="المتجر مفتوح الآن" />
         </div>
-        {truthy(restaurant.is_active) && (
-          <div className="rounded-2xl border border-red-100 bg-red-50/50 p-4">
-            <p className="font-black text-sm text-red-700 flex items-center gap-1.5"><FiAlertOctagon /> منطقة الخطر</p>
-            <p className="text-[11.5px] text-red-500 mt-1 mb-3">الإخفاء النهائي لا يحذف البيانات — يوقف ظهور المتجر واستقبال الطلبات.</p>
-            <Button variant="danger" className="w-full bg-white border border-red-200" onClick={hideForever}>إخفاء نهائي</Button>
-          </div>
-        )}
+        {/* «إخفاء نهائي» كان مطابقاً لزر «إخفاء» (ليس نهائياً) — أُزيل لتفادي التضليل؛ الإخفاء/التفعيل من بطاقة المتجر — A-31 */}
+        <p className="text-[11.5px] text-ink-3 font-medium">لإخفاء المتجر عن الزبائن استخدم زر «إخفاء» في بطاقته — الإخفاء لا يحذف أي بيانات ويمكن التراجع عنه.</p>
       </div>
     </Modal>
   );

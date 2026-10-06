@@ -8,6 +8,36 @@ import { FiRefreshCw, FiAlertTriangle, FiX, FiCheck, FiTrendingUp, FiTrendingDow
 
 export const cx = (...a) => a.filter(Boolean).join(' ');
 
+// ─── مكدّس النوافذ المفتوحة (Sheet / الدعم …): Esc وزر الرجوع يغلقان الأعلى فقط ───
+const overlayStack = [];
+export const hasOverlay = () => overlayStack.length > 0;
+export function closeTopOverlay() {
+  const top = overlayStack[overlayStack.length - 1];
+  if (!top) return false;
+  try { top.close(); } catch {}
+  return true;
+}
+export function useOverlay(open, onClose) {
+  const ref = useRef(onClose);
+  ref.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const entry = { close: () => ref.current && ref.current() };
+    overlayStack.push(entry);
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || overlayStack[overlayStack.length - 1] !== entry) return;
+      e.stopPropagation();
+      entry.close();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      const i = overlayStack.lastIndexOf(entry);
+      if (i >= 0) overlayStack.splice(i, 1);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+}
+
 export const prefersReducedMotion = () => {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
 };
@@ -182,7 +212,7 @@ export function Toggle({ checked, onChange, disabled, label, size = 'md', busy =
   return (
     <button type="button" role="switch" aria-checked={!!checked} aria-label={label} disabled={disabled || busy}
       onClick={() => onChange && onChange(!checked)}
-      className={cx('no-press relative inline-flex items-center flex-shrink-0 rounded-full p-1 transition-colors duration-200', dims.w, checked ? onBg : offBg, className)}>
+      className={cx('no-press hit-area relative inline-flex items-center flex-shrink-0 rounded-full p-1 transition-colors duration-200', dims.w, checked ? onBg : offBg, className)}>
       {/* في RTL: البداية يمين — المفتاح يتحرك يسارًا عند التفعيل */}
       <span className={cx('rounded-full bg-white shadow-[0_2px_6px_rgba(20,20,43,.25)] flex items-center justify-center transition-transform duration-300 ease-spring', dims.k, checked ? dims.on : 'translate-x-0')}>
         {busy && <Spinner size={11} className="text-ink-3" />}
@@ -239,6 +269,10 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, varian
   const [closing, setClosing] = useState(false);
   const onCloseRef = useRef(onClose); onCloseRef.current = onClose;
   const autoId = useId();
+  // سحب المقبض لأسفل يغلق النافذة (جوال)
+  const drag = useRef(null);
+  const [dragY, setDragY] = useState(0);
+  useOverlay(open, onClose);
 
   useEffect(() => {
     if (open) { setMounted(true); setClosing(false); return; }
@@ -248,16 +282,21 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, varian
     return () => clearTimeout(t);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Esc + حبس التركيز + منع تمرير الخلفية
+  useEffect(() => { if (!open) setDragY(0); }, [open]);
+
+  // حبس التركيز + منع تمرير الخلفية (Esc عبر مكدّس النوافذ: الأعلى فقط)
   useEffect(() => {
     if (!open) return;
     const prevFocus = document.activeElement;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const t = setTimeout(() => panelRef.current?.focus(), 30);
+    // لا نسرق التركيز من حقل autoFocus داخل النافذة
+    const t = setTimeout(() => {
+      const p = panelRef.current;
+      if (p && !p.contains(document.activeElement)) p.focus();
+    }, 30);
     const onKey = (e) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onCloseRef.current?.(); }
-      if (e.key === 'Tab' && panelRef.current) {
+      if (e.key === 'Tab' && panelRef.current && panelRef.current.contains(document.activeElement)) {
         const f = panelRef.current.querySelectorAll('button:not([disabled]),a[href],input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])');
         if (!f.length) return;
         const first = f[0]; const last = f[f.length - 1];
@@ -273,6 +312,20 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, varian
     };
   }, [open]);
 
+  const onDragStart = (e) => {
+    drag.current = { y: e.clientY, t: performance.now() };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+  };
+  const onDragMove = (e) => { if (drag.current) setDragY(Math.max(0, e.clientY - drag.current.y)); };
+  const onDragEnd = (e) => {
+    if (!drag.current) return;
+    const dy = Math.max(0, e.clientY - drag.current.y);
+    const v = dy / Math.max(1, performance.now() - drag.current.t);
+    drag.current = null;
+    if (dy > 110 || (dy > 40 && v > 0.6)) onCloseRef.current?.();
+    else setDragY(0);
+  };
+
   if (!mounted) return null;
   const maxW = { sm: 'lg:max-w-sm', md: 'lg:max-w-lg', lg: 'lg:max-w-2xl' }[size];
   const isDrawer = variant === 'drawer';
@@ -281,7 +334,8 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, varian
     <div className="fixed inset-0 z-[100]" dir="rtl" role="dialog" aria-modal="true" aria-labelledby={labelledBy || (title ? autoId : undefined)}>
       <div className={cx('absolute inset-0 bg-ink/45 backdrop-blur-[3px] transition-opacity duration-200', closing ? 'opacity-0' : 'animate-fade-in')} onClick={onClose} />
       <div className={cx('absolute inset-x-0 bottom-0 flex justify-center pointer-events-none',
-        isDrawer ? 'lg:inset-y-0 lg:left-0 lg:right-auto lg:items-stretch' : 'lg:inset-0 lg:items-center lg:p-6')}>
+        isDrawer ? 'lg:inset-y-0 lg:left-0 lg:right-auto lg:items-stretch' : 'lg:inset-0 lg:items-center lg:p-6')}
+        style={dragY ? { transform: `translateY(${dragY}px)` } : { transition: 'transform .22s cubic-bezier(.2,.8,.2,1)' }}>
         <div ref={panelRef} tabIndex={-1}
           className={cx('pointer-events-auto relative w-full bg-white flex flex-col outline-none shadow-sheet',
             'rounded-t-[28px] max-h-[92vh]',
@@ -289,7 +343,10 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, varian
             closing ? 'sheet-out' : isDrawer ? 'sheet-in drawer-in' : 'sheet-in modal-in')}
           style={{ paddingBottom: 'var(--sab)' }}>
           {/* مقبض السحب (جوال) */}
-          <div className="lg:hidden flex justify-center pt-2.5 pb-1"><span className="w-10 h-1.5 rounded-full bg-gray-200" /></div>
+          <div className="lg:hidden flex justify-center pt-2.5 pb-1.5 cursor-grab active:cursor-grabbing" style={{ touchAction: 'none' }} aria-hidden
+            onPointerDown={onDragStart} onPointerMove={onDragMove} onPointerUp={onDragEnd} onPointerCancel={onDragEnd}>
+            <span className="w-10 h-1.5 rounded-full bg-gray-200" />
+          </div>
           {(title || subtitle) && (
             <div className="flex items-start justify-between gap-3 px-5 pt-2 lg:pt-5 pb-3 border-b border-surface-line">
               <div className="min-w-0">

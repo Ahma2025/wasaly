@@ -10,8 +10,9 @@ import OrderMoney from './OrderMoney';
 import { ProgressRing, RadarRings, Press, LoadingDots, FadeIn, PopIn, haptic, useReducedMotion } from './Anim';
 import {
   orderTitle, orderIcon, orderNo, isPersonal, pickupPoint, pickupLabel, dropLabel,
-  driverFee, tipOf, money, haversineKm, km, num, cashToCollect,
+  driverFee, tipOf, money, haversineKm, km, num, cashToCollect, TERMS,
 } from '../utils/format';
+import { arCount } from '../utils/plural';
 
 const RING = 132;
 
@@ -112,7 +113,7 @@ export default function OfferModal({ offer, remaining, onAccept, onReject, accep
                 <ProgressRing progress={progress} size={RING} stroke={9} color={urgent ? '#FFE14D' : '#FFF'} track="rgba(255,255,255,0.22)">
                   <View style={styles.ringInner}>
                     <Animated.Text style={[styles.secs, urgent && { color: '#FFE14D' }, { transform: [{ scale: beatScale }] }]}
-                      accessibilityLabel={`متبقي ${remaining} ثانية`}>
+                      accessibilityLabel={`متبقي ${arCount(remaining, 'second')}`}>
                       {Math.max(0, remaining)}
                     </Animated.Text>
                     <Text style={styles.secsLabel}>{remaining > 0 ? 'ثانية' : 'انتهت'}</Text>
@@ -128,7 +129,7 @@ export default function OfferModal({ offer, remaining, onAccept, onReject, accep
               {tipOf(o) > 0 && (
                 <View style={styles.tipChip}>
                   <Ionicons name="heart" size={12} color="#FFF" />
-                  <Text style={styles.tipText}>يشمل إكرامية {money(tipOf(o))}</Text>
+                  <Text style={styles.tipText}>يشمل {TERMS.tip} {money(tipOf(o))}</Text>
                 </View>
               )}
             </FadeIn>

@@ -2,7 +2,9 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator, Alert, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import api from '../utils/api';
+import api, { isNetworkError, NETWORK_MESSAGE } from '../utils/api';
+import { plural } from '../utils/plural';
+import { fmtDateTime } from '../utils/format';
 import { readCache, writeCache } from '../utils/cache';
 import { Skeleton } from '../components/Skeleton';
 import { FadeIn, Press, Pulse } from '../components/Anim';
@@ -92,6 +94,8 @@ export default function OrdersHistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [reordering, setReordering] = useState(null);
+  const [loadError, setLoadError] = useState(''); // آخر تحميل فشل (نعرض الكاش مع تنبيه، أو حالة خطأ لو ما في كاش)
+  const [fromCache, setFromCache] = useState(false);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -101,6 +105,8 @@ export default function OrdersHistoryScreen() {
       ]);
       const list = data.data || [];
       setOrders(list);
+      setLoadError('');
+      setFromCache(false);
       writeCache('orders_my', list);
       if (Array.isArray(groups?.data)) {
         const map = {};
@@ -108,7 +114,9 @@ export default function OrdersHistoryScreen() {
         setGroupsById(map);
         writeCache('groups_my', map);
       }
-    } catch {}
+    } catch (e) {
+      setLoadError(isNetworkError(e) ? NETWORK_MESSAGE : (e?.message || 'تعذّر تحميل طلباتك'));
+    }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
@@ -116,10 +124,11 @@ export default function OrdersHistoryScreen() {
     (async () => {
       const [cached, cachedGroups] = await Promise.all([readCache('orders_my'), readCache('groups_my')]);
       if (cachedGroups && typeof cachedGroups === 'object') setGroupsById(cachedGroups);
-      if (cached) { setOrders(cached); setLoading(false); }
+      if (cached) { setOrders(cached); setFromCache(true); setLoading(false); }
       fetchOrders();
     })();
   }, [fetchOrders]));
+  const onRefresh = () => { setRefreshing(true); fetchOrders(); };
 
   const doReorder = async (order) => {
     setReordering(order.id);
@@ -168,7 +177,7 @@ export default function OrdersHistoryScreen() {
 
   return (
     <View style={styles.container}>
-      <GradientHeader title="طلباتي" hideBack subtitle={active.length ? `${active.length} طلب جاري الآن` : (orders.length ? `${orders.length} طلب` : undefined)} />
+      <GradientHeader title="طلباتي" hideBack subtitle={active.length ? `جاري الآن: ${plural(active.length, 'order')}` : (orders.length ? plural(orders.length, 'order') : undefined)} />
 
       {loading ? (
         <View style={{ padding: 16, gap: 12 }}>{[0, 1, 2, 3].map(i => (
@@ -181,13 +190,25 @@ export default function OrdersHistoryScreen() {
           </View>
         ))}</View>
       ) : orders.length === 0 ? (
-        <EmptyState emoji="🧾" title="ما في طلبات بعد" subtitle="أول طلب إلك عليه خصم 15% 🎁" ctaLabel="اطلب الآن" onCta={() => navigation.navigate('الرئيسية')} />
+        // فاضية: إما فعلاً ما في طلبات، أو فشل التحميل (ما منقول "ما في طلبات" لزبون عنده طلب شغّال)
+        <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: tabInset }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} colors={[COLORS.primary]} progressBackgroundColor={COLORS.card} />}>
+          {loadError
+            ? <EmptyState emoji="📡" tone="error" title="تعذّر تحميل طلباتك" subtitle={`${loadError} — اسحب للتحديث أو حاول مرة ثانية`} ctaLabel="إعادة المحاولة" onCta={() => { setLoading(true); fetchOrders(); }} />
+            : <EmptyState emoji="🧾" title="ما في طلبات بعد" subtitle="أول طلب إلك عليه خصم 15% 🎁" ctaLabel="اطلب الآن" onCta={() => navigation.navigate('الرئيسية')} />}
+        </ScrollView>
       ) : (
         <ScrollView
           contentContainerStyle={{ paddingBottom: tabInset + 24 }}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchOrders(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} progressBackgroundColor={COLORS.card} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} colors={[COLORS.primary]} progressBackgroundColor={COLORS.card} />}
         >
+          {!!loadError && fromCache && (
+            <TouchableOpacity style={styles.staleBanner} onPress={onRefresh} accessibilityRole="button" accessibilityLabel="آخر نسخة محفوظة، اضغط للتحديث">
+              <Ionicons name="cloud-offline-outline" size={16} color={COLORS.text} />
+              <Text style={styles.staleTxt}>آخر نسخة محفوظة — {loadError}. اضغط للتحديث</Text>
+            </TouchableOpacity>
+          )}
           <View style={styles.section}>
             <View style={styles.secHead}>
               <View style={styles.liveDotWrap}>{active.length > 0 && <Pulse to={1.6}><View style={styles.liveDot} /></Pulse>}</View>
@@ -240,7 +261,7 @@ const PROGRESS = ['pending', 'confirmed', 'preparing', 'ready', 'on_the_way', 'd
 
 /* بطاقة طلب جاري: متدرّجة مع شريط مراحل مصغّر */
 function ActiveCard({ order, navigation, styles, C }) {
-  const meta = statusMeta(order.status);
+  const meta = statusMeta(order.status, order);
   const personal = isPersonalOrder(order);
   const idx = Math.max(0, PROGRESS.indexOf(order.status));
   return (
@@ -257,9 +278,9 @@ function ActiveCard({ order, navigation, styles, C }) {
             <Text style={[styles.restaurantName, { color: '#FFF' }]} numberOfLines={1}>{orderTitle(order)}</Text>
             <Text style={[styles.orderDate, { color: 'rgba(255,255,255,0.85)' }]}>{order.order_number ? `#${order.order_number}` : ''}</Text>
           </View>
-          <View style={styles.activeStatus}>
+          <View style={[styles.activeStatus, styles.activeStatusShrink]}>
             <Ionicons name={meta.icon} size={13} color={C.primary} />
-            <Text style={[styles.statusText, { color: C.primary }]}>{statusLabel(order.status, order)}</Text>
+            <Text style={[styles.statusText, { color: C.primary, flexShrink: 1 }]} numberOfLines={1}>{statusLabel(order.status, order)}</Text>
           </View>
         </View>
         {!personal && (
@@ -299,7 +320,7 @@ function StackedLogos({ restaurants, styles, C, onGradient }) {
   );
 }
 
-const groupTitle = (g) => `طلب مجمّع • ${g.stops || g.restaurants?.length || 0} مطاعم`;
+const groupTitle = (g) => `طلب مجمّع • ${plural(g.stops || g.restaurants?.length || 0, 'restaurant')}`;
 const groupNames = (g) => (g.restaurants || []).map(r => r.name).filter(Boolean).join(' · ');
 
 /* طلب مجمّع جاري: كارت واحد لكل المطاعم */
@@ -315,13 +336,16 @@ function GroupActiveCard({ group, navigation, styles, C }) {
         <LinearGradient colors={C.gradients.sheen} style={styles.activeSheen} pointerEvents="none" />
         <View style={styles.cardTop}>
           <StackedLogos restaurants={group.restaurants} styles={styles} C={C} onGradient />
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={[styles.restaurantName, { color: '#FFF' }]} numberOfLines={1}>{groupTitle(group)}</Text>
-            <Text style={[styles.orderDate, { color: 'rgba(255,255,255,0.88)' }]} numberOfLines={1}>{groupNames(group) || (group.group_number ? `#${group.group_number}` : '')}</Text>
           </View>
-          <View style={styles.activeStatus}>
+        </View>
+        {/* الحالة بسطر لحالها — ما بتقصّ العنوان وأسماء المطاعم على الشاشات الصغيرة */}
+        <View style={styles.groupMetaRow}>
+          <Text style={[styles.orderDate, { color: 'rgba(255,255,255,0.88)', flex: 1, marginTop: 0 }]} numberOfLines={1}>{groupNames(group) || (group.group_number ? `#${group.group_number}` : '')}</Text>
+          <View style={[styles.activeStatus, styles.activeStatusShrink]}>
             <Ionicons name={meta.icon} size={13} color={C.primary} />
-            <Text style={[styles.statusText, { color: C.primary }]} numberOfLines={1}>{label}</Text>
+            <Text style={[styles.statusText, { color: C.primary, flexShrink: 1 }]} numberOfLines={1}>{label}</Text>
           </View>
         </View>
         <View style={styles.miniSteps}>
@@ -353,7 +377,7 @@ function GroupOrderCard({ group, navigation, styles, C }) {
         <View style={{ flex: 1 }}>
           <Text style={styles.restaurantName} numberOfLines={1}>{groupTitle(group)}</Text>
           <Text style={styles.orderDate} numberOfLines={1}>
-            {date ? date.toLocaleString('ar', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : ''}
+            {date ? fmtDateTime(date) : ''}
             {group.group_number ? `  ·  #${group.group_number}` : ''}
           </Text>
         </View>
@@ -371,7 +395,7 @@ function GroupOrderCard({ group, navigation, styles, C }) {
 }
 
 function OrderCard({ order, navigation, onReorder, reordering, styles, C }) {
-  const meta = statusMeta(order.status);
+  const meta = statusMeta(order.status, order);
   const personal = isPersonalOrder(order);
   const date = order.created_at ? new Date(order.created_at) : null;
   return (
@@ -390,7 +414,7 @@ function OrderCard({ order, navigation, onReorder, reordering, styles, C }) {
         <View style={{ flex: 1 }}>
           <Text style={styles.restaurantName} numberOfLines={1}>{orderTitle(order)}</Text>
           <Text style={styles.orderDate}>
-            {date ? date.toLocaleString('ar', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : ''}
+            {date ? fmtDateTime(date) : ''}
             {order.order_number ? `  ·  #${order.order_number}` : ''}
           </Text>
         </View>
@@ -401,7 +425,7 @@ function OrderCard({ order, navigation, onReorder, reordering, styles, C }) {
       </View>
 
       <View style={styles.cardBottom}>
-        <Text style={styles.itemsCount}>{order.items_count ? `${order.items_count} صنف` : (personal ? 'طلب شخصي' : '')}</Text>
+        <Text style={styles.itemsCount}>{order.items_count ? plural(order.items_count, 'item') : (personal ? 'طلب شخصي' : '')}</Text>
         <Text style={styles.totalAmount}>{parseFloat(order.total || 0).toFixed(2)}₪</Text>
       </View>
 
@@ -441,6 +465,10 @@ const makeStyles = (C) => StyleSheet.create({
   activeSheen: { position: 'absolute', top: 0, left: 0, right: 0, height: 50 },
   logoGlass: { backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
   activeStatus: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, backgroundColor: '#FFF', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  activeStatusShrink: { flexShrink: 1, maxWidth: '55%' },
+  groupMetaRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginTop: -2, marginBottom: 10 },
+  staleBanner: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 14, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, backgroundColor: C.warnBg, borderColor: C.warnBorder },
+  staleTxt: { flex: 1, fontSize: 12.5, fontWeight: '700', color: C.text, textAlign: 'right' },
   miniSteps: { flexDirection: 'row-reverse', gap: 5, marginTop: 2, marginBottom: 12 },
   miniStep: { flex: 1, height: 5, borderRadius: 3 },
   activeBottom: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between' },

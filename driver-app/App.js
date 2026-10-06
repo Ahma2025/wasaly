@@ -117,17 +117,20 @@ export default function App() {
 
   if (!fontsReady) return null; // السبلاش الأصلي ما زال ظاهراً
 
+  // D-33: التطبيق (الجلسة، السوكِت، عروض الطلبات) يقلع فوراً تحت شاشة البداية — السبلاش طبقة فوقه فقط
+  // فلا يتأخر عرض طلب فُتح التطبيق من إشعاره ١.٥-٢.٥ ثانية
   return (
     <SafeAreaProvider>
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
-      {!splashDone ? (
-        <SplashScreen onReady={hideNative} onFinish={() => setSplashDone(true)} />
-      ) : (
-        <AuthProvider>
-          <NavigationContainer ref={navRef} theme={navTheme} onReady={markNavReady}>
-            <AppNavigator />
-          </NavigationContainer>
-        </AuthProvider>
+      <AuthProvider>
+        <NavigationContainer ref={navRef} theme={navTheme} onReady={markNavReady}>
+          <AppNavigator />
+        </NavigationContainer>
+      </AuthProvider>
+      {!splashDone && (
+        <View style={styles.splashOverlay}>
+          <SplashScreen onReady={hideNative} onFinish={() => setSplashDone(true)} />
+        </View>
       )}
     </SafeAreaProvider>
   );
@@ -135,4 +138,5 @@ export default function App() {
 
 const styles = StyleSheet.create({
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.primary },
+  splashOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 100, elevation: 100 },
 });

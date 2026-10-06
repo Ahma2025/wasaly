@@ -2,9 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, Image, Keyboard, Animated, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api from '../utils/api';
+import api, { isNetworkError, NETWORK_MESSAGE } from '../utils/api';
+import { normStoreType } from '../utils/storeTypes';
 import { useTheme } from '../context/ThemeContext';
 import { FadeIn, Press } from '../components/Anim';
 import { Chip } from '../components/UI';
@@ -38,10 +39,19 @@ export default function SearchScreen() {
   const [recent, setRecent] = useState([]);
   const [focused, setFocused] = useState(false);
   const navigation = useNavigation();
+  const route = useRoute();
   const timerRef = useRef(null);
   const abortRef = useRef(null);
   const seqRef = useRef(0);
+  const inputRef = useRef(null);
   const focusV = useRef(new Animated.Value(0)).current;
+
+  // جاي من شريط البحث بالرئيسية → الكيبورد يطلع فوراً
+  useEffect(() => {
+    if (!route.params?.focus) return;
+    const t = setTimeout(() => inputRef.current?.focus(), 250);
+    return () => clearTimeout(t);
+  }, [route.params?.focus]);
 
   useEffect(() => {
     AsyncStorage.getItem(RECENT_KEY).then(v => { try { const a = JSON.parse(v || '[]'); if (Array.isArray(a)) setRecent(a.slice(0, 8)); } catch {} }).catch(() => {});
@@ -79,7 +89,7 @@ export default function SearchScreen() {
       if ((res.restaurants?.length || 0) + (res.items?.length || 0) > 0) remember(text);
     } catch (e) {
       if (e?.canceled || seq !== seqRef.current) return;
-      setError(e?.message === 'Network error' ? 'تعذّر الاتصال — تأكد من الإنترنت' : 'تعذّر البحث، حاول مرة ثانية');
+      setError(isNetworkError(e) ? NETWORK_MESSAGE : 'تعذّر البحث، حاول مرة ثانية');
     } finally {
       if (seq === seqRef.current) setLoading(false);
     }
@@ -96,36 +106,55 @@ export default function SearchScreen() {
   const clear = () => { haptic.light(); clearTimeout(timerRef.current); abortRef.current?.abort?.(); seqRef.current++; setQuery(''); setResults(null); setLoading(false); setError(''); };
   const runQuick = (p) => { haptic.select(); setQuery(p); search(p); Keyboard.dismiss(); };
 
-  const renderRestaurant = (item, index) => (
-    <FadeIn delay={stagger(index, 40)} from={14}>
-      <Press style={styles.card} scaleTo={0.97} haptic={false} onPress={() => navigation.navigate('Restaurant', { restaurantId: item.id })}
-        accessibilityRole="button" accessibilityLabel={item.name_ar || item.name}>
-        <View>
-          {item.logo || item.cover_image
-            ? <Image source={{ uri: item.logo || item.cover_image }} style={styles.logo} />
-            : <LinearGradient colors={COLORS.gradients.sunset} style={styles.logo}><Ionicons name="restaurant" size={24} color="#FFF" /></LinearGradient>}
-          {item.is_open !== false && <View style={[styles.openDot, { borderColor: COLORS.card }]} />}
-        </View>
-        <View style={styles.cardInfo}>
-          <Text style={styles.cardName} numberOfLines={1}>{item.name_ar || item.name}</Text>
-          <View style={styles.cardMeta}>
-            <View style={styles.metaChip}><Ionicons name="star" size={11} color="#FFB020" /><Text style={styles.metaTxt}>{(Number(item.rating) || 0).toFixed(1)}</Text></View>
-            <View style={styles.metaChip}><Ionicons name="time-outline" size={11} color={COLORS.primary} /><Text style={styles.metaTxt}>{item.delivery_time_min || 20}-{item.delivery_time_max || 45} د</Text></View>
-            {item.is_open === false && <View style={[styles.metaChip, { backgroundColor: COLORS.dangerBg }]}><Text style={[styles.metaTxt, { color: COLORS.red }]}>مغلق</Text></View>}
+  // وقت التوصيل: فقط القيم الموجودة فعلاً (ما منخترع "45" ثابتة)
+  const timeText = (r) => {
+    const mn = parseInt(r.delivery_time_min, 10), mx = parseInt(r.delivery_time_max, 10);
+    if (mn > 0 && mx > mn) return `${mn}-${mx} د`;
+    if (mn > 0) return `من ${mn} د`;
+    return null;
+  };
+
+  const renderRestaurant = (item, index) => {
+    const closed = item.is_open === false;
+    const rating = Number(item.rating) || 0;
+    const t = timeText(item);
+    return (
+      <FadeIn index={index} from={14}>
+        <Press style={[styles.card, closed && { opacity: 0.6 }]} scaleTo={0.97} haptic={false} onPress={() => navigation.navigate('Restaurant', { restaurantId: item.id })}
+          accessibilityRole="button" accessibilityLabel={`${item.name_ar || item.name}${closed ? '، مغلق' : ''}`}>
+          <View>
+            {item.logo || item.cover_image
+              ? <Image source={{ uri: item.logo || item.cover_image }} style={styles.logo} />
+              : <LinearGradient colors={COLORS.gradients.sunset} style={styles.logo}><Ionicons name="restaurant" size={24} color="#FFF" /></LinearGradient>}
+            {/* النقطة الخضرا فقط لو السيرفر أكّد إنه مفتوح */}
+            {item.is_open === true && <View style={[styles.openDot, { borderColor: COLORS.card }]} />}
           </View>
-          <Text style={styles.fee}>التوصيل حسب المسافة</Text>
-        </View>
-        <View style={styles.chev}><Ionicons name="chevron-back" size={16} color={COLORS.primary} /></View>
-      </Press>
-    </FadeIn>
-  );
+          <View style={styles.cardInfo}>
+            <Text style={styles.cardName} numberOfLines={1}>{item.name_ar || item.name}</Text>
+            <View style={styles.cardMeta}>
+              <View style={styles.metaChip}>
+                {rating > 0 && <Ionicons name="star" size={11} color="#FFB020" />}
+                <Text style={styles.metaTxt}>{rating > 0 ? rating.toFixed(1) : 'جديد ✨'}</Text>
+              </View>
+              {!!t && <View style={styles.metaChip}><Ionicons name="time-outline" size={11} color={COLORS.primary} /><Text style={styles.metaTxt}>{t}</Text></View>}
+              {closed && <View style={[styles.metaChip, { backgroundColor: COLORS.dangerBg }]}><Text style={[styles.metaTxt, { color: COLORS.red }]}>مغلق</Text></View>}
+            </View>
+            <Text style={styles.fee}>التوصيل حسب المسافة</Text>
+          </View>
+          <View style={styles.chev}><Ionicons name="chevron-back" size={16} color={COLORS.primary} /></View>
+        </Press>
+      </FadeIn>
+    );
+  };
 
   const renderItem = (item, index) => {
     const pr = itemPrice(item);
+    const closed = item.is_open === false || item.restaurant_is_open === false;
     return (
-      <FadeIn delay={stagger(index, 40)} from={14}>
-        <Press style={styles.itemCard} scaleTo={0.97} haptic={false} onPress={() => navigation.navigate('Restaurant', { restaurantId: item.restaurant_id })}
-          accessibilityRole="button" accessibilityLabel={`${item.name_ar || item.name} من ${item.restaurant_name || ''}`}>
+      <FadeIn index={index} from={14}>
+        <Press style={[styles.itemCard, closed && { opacity: 0.6 }]} scaleTo={0.97} haptic={false}
+          onPress={() => navigation.navigate('Restaurant', { restaurantId: item.restaurant_id, itemId: item.id })}
+          accessibilityRole="button" accessibilityLabel={`${item.name_ar || item.name} من ${item.restaurant_name || ''}${closed ? '، مغلق' : ''}`}>
           {item.image
             ? <Image source={{ uri: item.image }} style={styles.itemImg} />
             : <View style={styles.itemImg}><Ionicons name="fast-food-outline" size={24} color={COLORS.primary} /></View>}
@@ -147,9 +176,21 @@ export default function SearchScreen() {
   };
 
   let rIdx = 0, iIdx = 0;
+  // المطاعم والمتاجر بعنوانين منفصلين (صيدلية/محل ما بتطلع تحت «مطاعم»)؛ سيرفر بلا store_type → عنوان عام
+  const allRests = results?.restaurants || [];
+  const typed = allRests.some(r => r.store_type);
+  const isFoodPlace = (r) => normStoreType(r.store_type) === 'restaurant';
+  const restGroups = !typed
+    ? [{ key: 'h-r', title: 'مطاعم ومتاجر', icon: 'storefront', list: allRests }]
+    : [
+      { key: 'h-r', title: 'مطاعم', icon: 'restaurant', list: allRests.filter(isFoodPlace) },
+      { key: 'h-s', title: 'متاجر', icon: 'storefront', list: allRests.filter(r => !isFoodPlace(r)) },
+    ];
   const data = results ? [
-    ...(results.restaurants?.length ? [{ type: 'header', key: 'h-r', title: 'مطاعم', count: results.restaurants.length, icon: 'restaurant' }] : []),
-    ...(results.restaurants || []).map(r => ({ type: 'restaurant', key: `r-${r.id}`, _i: rIdx++, ...r })),
+    ...restGroups.flatMap(g => (g.list.length ? [
+      { type: 'header', key: g.key, title: g.title, count: g.list.length, icon: g.icon },
+      ...g.list.map(r => ({ type: 'restaurant', key: `r-${r.id}`, _i: rIdx++, ...r })),
+    ] : [])),
     ...(results.items?.length ? [{ type: 'header', key: 'h-i', title: 'أصناف', count: results.items.length, icon: 'fast-food' }] : []),
     ...(results.items || []).map((i, idx) => ({ type: 'item', key: `i-${i.id ?? idx}-${i.restaurant_id ?? ''}`, _i: iIdx++, ...i })),
   ] : [];
@@ -161,12 +202,12 @@ export default function SearchScreen() {
       <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.header, { paddingTop: headerTop }]}>
         <HeroDecor />
         <FadeIn from={8}>
-          <Text style={styles.headerTitle}>شو نفسك تاكل؟</Text>
-          <Text style={styles.headerSub}>ابحث بين المطاعم والأصناف بلحظة</Text>
+          <Text style={styles.headerTitle}>شو بتدوّر عليه؟</Text>
+          <Text style={styles.headerSub}>ابحث بين المطاعم والمتاجر والمنتجات بلحظة</Text>
         </FadeIn>
         <Animated.View style={[styles.searchBox, { borderColor: boxBorder }]}>
           <View style={styles.searchIcon}><Ionicons name="search" size={18} color={COLORS.primary} /></View>
-          <TextInput style={styles.input} placeholder="ابحث عن مطعم أو طعام..." placeholderTextColor={COLORS.faint}
+          <TextInput ref={inputRef} style={styles.input} placeholder="ابحث عن مطعم، متجر أو منتج..." placeholderTextColor={COLORS.faint}
             value={query} onChangeText={onChangeText} returnKeyType="search" textAlign="right"
             onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
             onSubmitEditing={() => { clearTimeout(timerRef.current); search(query); }} accessibilityLabel="بحث" />

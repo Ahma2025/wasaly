@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../utils/api';
-import { initCardPayment } from '../utils/payments';
+import { initCardPayment, abandonCardPayment, fetchOrderState, canPayByCard, confirmCashResult } from '../utils/payments';
 import { useTheme } from '../context/ThemeContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GradientButton, Ripple, PopIn } from '../components/Anim';
@@ -22,50 +22,105 @@ export default function PaymentWebViewScreen({ route, navigation }) {
   const handledRef = useRef(false);
 
   // الرجوع لشاشة التتبع: لو جايين منها نرجع لها، وإلا نستبدل صفحة الدفع بها
-  const toTracking = useCallback(() => {
+  const toTracking = useCallback((extra = {}) => {
     const st = navigation.getState?.();
     const prev = st?.routes?.[st.index - 1];
-    if (prev?.name === 'OrderTracking' && String(prev.params?.orderId) === String(orderId)) navigation.goBack();
-    else navigation.replace('OrderTracking', { orderId, fromCheckout: true });
+    if (prev?.name === 'OrderTracking' && String(prev.params?.orderId) === String(orderId)) {
+      if (extra.cashChosen) navigation.navigate({ key: prev.key, params: { ...(prev.params || {}), cashChosen: true }, merge: true });
+      else navigation.goBack();
+    } else navigation.replace('OrderTracking', { orderId, fromCheckout: true, ...extra });
   }, [navigation, orderId]);
+
+  // «كاش عند الاستلام»: نبلغ السيرفر يطلق الطلب للمطعم فوراً (بدل ما يضل مخفي 10 دقايق) ثم التتبع
+  const toCash = useCallback(async () => {
+    setVerifying(true);
+    const res = await abandonCardPayment(orderId);
+    setVerifying(false);
+    if (confirmCashResult(res, { onTrack: () => toTracking(), onRetry: () => toCashRef.current() })) toTracking({ cashChosen: true });
+  }, [orderId, toTracking]);
+  const toCashRef = useRef(toCash);
+  toCashRef.current = toCash;
 
   const retry = async () => {
     setVerifying(true);
     try {
+      // قبل أي عملية دفع جديدة: الطلب لازم يكون لسا بطاقة وغير مدفوع (وإلا = دفع مرتين)
+      const o = await fetchOrderState(orderId);
+      if (o && !canPayByCard(o)) {
+        const paid = o.payment_status === 'paid';
+        Alert.alert(paid ? 'تم الدفع ✅' : 'الدفع بالبطاقة',
+          paid ? 'طلبك مدفوع وبالطريق للمطعم.' : o.status === 'cancelled' ? 'الطلب ملغي.' : 'تحوّل طلبك للدفع كاش عند الاستلام ووصل للمطعم — ما في داعي تدفع بالبطاقة.',
+          [{ text: 'تتبّع الطلب', onPress: () => toTracking() }], { cancelable: false });
+        return;
+      }
       const init = await initCardPayment(orderId);
+      if (init.already_paid) {
+        Alert.alert('تم الدفع ✅', 'دفعتك السابقة بالبطاقة مكتملة — طلبك بالطريق للمطعم.', [{ text: 'تتبّع الطلب', onPress: () => toTracking() }], { cancelable: false });
+        return;
+      }
       handledRef.current = false;
+      verifyTries.current = 0;
       setLoadError(false);
       setSession(s => ({ url: init.authorization_url, reference: init.reference, key: s.key + 1 }));
     } catch (e) {
       Alert.alert('تعذّر بدء الدفع', e?.message || 'حاول لاحقاً', [
-        { text: 'الدفع كاش عند الاستلام', onPress: toTracking },
+        { text: 'الدفع كاش عند الاستلام', onPress: toCash },
         { text: 'حاول مرة ثانية', onPress: retry },
       ]);
     } finally { setVerifying(false); }
   };
 
+  // نتيجة نهائية «غير مدفوع» → مسموح دفعة جديدة أو كاش
   const failed = (title, msg) => Alert.alert(title, msg, [
-    { text: 'الدفع كاش عند الاستلام', onPress: toTracking },
+    { text: 'الدفع كاش عند الاستلام', onPress: toCash },
     { text: 'ادفع مرة ثانية', onPress: retry },
   ], { cancelable: false });
 
-  // نتحقّق من الدفع بعد ما ترجع Lahza لصفحة الـ callback
+  const verifyTries = useRef(0);
+  const verifyOnce = (reference) => api.get(`/payments/lahza/verify/${reference}`, { timeout: 20000 });
+
+  /*
+    نتحقّق من الدفع بعد ما ترجع Lahza لصفحة الـ callback.
+    فشل التحقّق (نت/سيرفر) ≠ فشل الدفع: نعيد التحقّق بنفس المرجع بصمت (2-3 مرات)
+    وبعدها «أعد التحقق» — بدون فتح دفعة جديدة (ممكن الزبون يكون دفع فعلاً)
+  */
   const finish = async () => {
     if (handledRef.current) return;
     handledRef.current = true;
     setVerifying(true);
-    try {
-      const res = await api.get(`/payments/lahza/verify/${session.reference}`);
+    const reference = session.reference;
+    let res = null, lastErr = null;
+    for (let i = 0; i < 3; i++) {
+      try {
+        res = await verifyOnce(reference); lastErr = null;
+        // Lahza لسا ما خلّصت العملية (pending) → نعيد التحقق بنفس المرجع بدل ما نعتبرها فشل
+        if (res && !res.paid && res.pending && i < 2) { res = null; await new Promise(r => setTimeout(r, 2000 * (i + 1))); continue; }
+        break;
+      } catch (e) {
+        lastErr = e;
+        // رد صريح من السيرفر (4xx) = ما في فايدة نعيد
+        if (e?.status && e.status < 500 && e.status !== 408 && e.status !== 429) break;
+        await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+      }
+    }
+    setVerifying(false);
+    // لسا معلّق عند Lahza: ما منفتح دفعة جديدة — «أعد التحقق»
+    if (res && !res.paid && res.pending) { res = null; lastErr = { message: 'الدفع لسا قيد المعالجة عند البنك' }; }
+    if (res) {
       if (res.paid) {
-        Alert.alert('تم الدفع ✅', 'تم تأكيد الدفع بنجاح، طلبك بالطريق للمطعم.', [{ text: 'تتبّع الطلب', onPress: toTracking }], { cancelable: false });
+        Alert.alert('تم الدفع ✅', 'تم تأكيد الدفع بنجاح، طلبك بالطريق للمطعم.', [{ text: 'تتبّع الطلب', onPress: () => toTracking() }], { cancelable: false });
       } else {
         failed('لم يكتمل الدفع', 'ما تم تأكيد الدفع. طلبك محفوظ — تقدر تحاول مرة ثانية أو تدفع كاش عند الاستلام.');
       }
-    } catch (e) {
-      failed('تعذّر التحقّق من الدفع', 'طلبك محفوظ. تقدر تحاول الدفع مرة ثانية أو تدفع كاش عند الاستلام.');
-    } finally {
-      setVerifying(false);
+      return;
     }
+    verifyTries.current += 1;
+    Alert.alert('تعذّر التحقّق من الدفع',
+      `${lastErr?.message || 'تعذّر الاتصال'}\nإذا دفعت فعلاً لا تدفع مرة ثانية — اضغط «أعد التحقق»، أو تابع طلبك وبنثبّت الدفع تلقائياً خلال دقائق.`,
+      [
+        { text: 'تتبّع الطلب', onPress: () => toTracking() },
+        { text: 'أعد التحقق', onPress: () => { handledRef.current = false; finish(); } },
+      ], { cancelable: false });
   };
 
   const onNav = (state) => {
@@ -73,9 +128,9 @@ export default function PaymentWebViewScreen({ route, navigation }) {
   };
 
   const cancel = () => {
-    Alert.alert('إلغاء الدفع', 'بدك توقف الدفع بالبطاقة؟ طلبك محفوظ وتقدر تدفع كاش عند الاستلام.', [
+    Alert.alert('إيقاف الدفع', 'بدك توقف الدفع بالبطاقة؟ طلبك محفوظ وبيوصل للمطعم كطلب كاش عند الاستلام.', [
       { text: 'متابعة الدفع', style: 'cancel' },
-      { text: 'إيقاف الدفع', style: 'destructive', onPress: toTracking },
+      { text: 'الدفع كاش عند الاستلام', style: 'destructive', onPress: toCash },
     ]);
     return true;
   };
@@ -84,7 +139,7 @@ export default function PaymentWebViewScreen({ route, navigation }) {
   useFocusEffect(useCallback(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', cancel);
     return () => sub.remove();
-  }, [toTracking]));
+  }, [toCash]));
 
   return (
     <View style={styles.container}>
@@ -127,7 +182,7 @@ export default function PaymentWebViewScreen({ route, navigation }) {
           <Text style={styles.errTitle}>{session.url ? 'تعذّر فتح صفحة الدفع' : 'رابط الدفع غير متوفر'}</Text>
           <Text style={styles.errSub}>تأكد من الإنترنت وحاول مرة ثانية، أو ادفع كاش عند الاستلام.</Text>
           <GradientButton title="ادفع مرة ثانية" onPress={retry} loading={verifying} style={{ alignSelf: 'stretch', marginTop: 10 }} icon={<Ionicons name="refresh" size={18} color="#FFF" />} />
-          <TouchableOpacity style={styles.secondaryBtn} onPress={toTracking} accessibilityRole="button"><Text style={styles.secondaryTxt}>الدفع كاش عند الاستلام</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={toCash} disabled={verifying} accessibilityRole="button"><Text style={styles.secondaryTxt}>الدفع كاش عند الاستلام</Text></TouchableOpacity>
         </View>
       )}
 

@@ -75,6 +75,7 @@ router.get('/:code', auth, async (req, res) => {
       data: {
         ...group,
         is_host: String(group.host_id) === String(req.user.id),
+        is_locked: group.status === 'locked',
         items: parsed,
         total,
         participant_count: new Set(parsed.map(p => String(p.user_id))).size,
@@ -98,7 +99,8 @@ router.post('/:id/items', auth, async (req, res) => {
       member = p.length > 0;
     }
     if (!member && !knowsCode) return res.status(403).json({ success: false, message: 'أدخل كود المجموعة للانضمام' });
-    if (g[0].status !== 'open') return res.status(400).json({ success: false, message: 'المجموعة مقفلة، لا يمكن الإضافة' });
+    if (g[0].status === 'locked') return res.status(409).json({ success: false, code: 'GROUP_LOCKED', message: 'المضيف يكمل الطلب الآن — لا يمكن إضافة أصناف' });
+    if (g[0].status !== 'open') return res.status(400).json({ success: false, code: 'GROUP_CLOSED', message: 'المجموعة مقفلة، لا يمكن الإضافة' });
     const qty = parseInt(quantity);
     if (!Number.isInteger(qty) || qty < 1 || qty > 99) return res.status(400).json({ success: false, message: 'الكمية غير صحيحة' });
     // السعر من قاعدة البيانات (السعر المرسَل للعرض فقط؛ الطلب الفعلي يُسعَّر بالسيرفر عند POST /orders)
@@ -123,36 +125,77 @@ router.post('/:id/items', auth, async (req, res) => {
 // حذف صنف (صاحبه أو المضيف)
 router.delete('/:id/items/:itemId', auth, async (req, res) => {
   try {
-    const { rows: g } = await pool.query('SELECT host_id FROM group_orders WHERE id=$1', [req.params.id]);
+    const { rows: g } = await pool.query('SELECT host_id, status FROM group_orders WHERE id=$1', [req.params.id]);
     if (!g[0]) return res.status(404).json({ success: false });
     const { rows: it } = await pool.query('SELECT user_id FROM group_order_items WHERE id=$1 AND group_id=$2', [req.params.itemId, req.params.id]);
     if (!it[0]) return res.status(404).json({ success: false });
     const isOwner = String(it[0].user_id) === String(req.user.id);
     const isHost = String(g[0].host_id) === String(req.user.id);
     if (!isOwner && !isHost) return res.status(403).json({ success: false, message: 'غير مصرح' });
+    if (g[0].status === 'locked' && !isHost) return res.status(409).json({ success: false, code: 'GROUP_LOCKED', message: 'المضيف يكمل الطلب الآن — لا يمكن التعديل' });
     await pool.query('DELETE FROM group_order_items WHERE id=$1', [req.params.itemId]);
     await notifyGroup(req.io, req.params.id);
     res.json({ success: true });
   } catch (e) { serverError(res, e); }
 });
 
-// تعليم المجموعة "تم الطلب" أو "ملغاة" — المضيف فقط
+// 🔒 C-15: المضيف بدأ الدفع → المجموعة "locked" (لا إضافات تضيع بعد أخذ السلة)؛ unlock إن تراجع
+async function setLock(req, res, from, to) {
+  try {
+    if (!/^\d+$/.test(String(req.params.id))) return res.status(404).json({ success: false, message: 'المجموعة غير موجودة' });
+    const { rows: g } = await pool.query('SELECT host_id, status FROM group_orders WHERE id=$1', [req.params.id]);
+    if (!g[0]) return res.status(404).json({ success: false, message: 'المجموعة غير موجودة' });
+    if (String(g[0].host_id) !== String(req.user.id)) return res.status(403).json({ success: false, message: 'المضيف فقط يقدر يقفل المجموعة' });
+    if (g[0].status === to) return res.json({ success: true, status: to, already: true });
+    if (g[0].status !== from) return res.status(400).json({ success: false, message: 'المجموعة مقفلة مسبقاً' });
+    await pool.query('UPDATE group_orders SET status=$1 WHERE id=$2 AND status=$3', [to, req.params.id, from]);
+    await notifyGroup(req.io, req.params.id, { status: to });
+    res.json({ success: true, status: to });
+  } catch (e) { serverError(res, e); }
+}
+router.post('/:id/lock', auth, (req, res) => setLock(req, res, 'open', 'locked'));
+router.post('/:id/unlock', auth, (req, res) => setLock(req, res, 'locked', 'open'));
+
+// تعليم المجموعة "تم الطلب" أو "ملغاة" — المضيف فقط (من open أو locked)
 router.post('/:id/close', auth, async (req, res) => {
   try {
     const { status = 'ordered', order_id } = req.body;
     if (!['ordered', 'cancelled'].includes(status)) return res.status(400).json({ success: false, message: 'حالة غير صحيحة' });
-    const { rows: g } = await pool.query('SELECT host_id, status FROM group_orders WHERE id=$1', [req.params.id]);
+    if (!/^\d+$/.test(String(req.params.id))) return res.status(404).json({ success: false });
+    const { rows: g } = await pool.query('SELECT host_id, status, restaurant_name, code FROM group_orders WHERE id=$1', [req.params.id]);
     if (!g[0]) return res.status(404).json({ success: false });
     if (String(g[0].host_id) !== String(req.user.id)) return res.status(403).json({ success: false, message: 'المضيف فقط يقدر يقفل المجموعة' });
-    if (g[0].status !== 'open') return res.status(400).json({ success: false, message: 'المجموعة مقفلة مسبقاً' });
+    if (!['open', 'locked'].includes(g[0].status)) return res.status(400).json({ success: false, message: 'المجموعة مقفلة مسبقاً' });
     let linkedOrder = null;
     if (order_id && /^\d+$/.test(String(order_id))) {
       const { rows: o } = await pool.query('SELECT id FROM orders WHERE id=$1 AND customer_id=$2', [order_id, req.user.id]);
       linkedOrder = o[0] ? String(o[0].id) : null;
     }
-    await pool.query("UPDATE group_orders SET status=$1, order_id=$2 WHERE id=$3 AND status='open'", [status, linkedOrder, req.params.id]);
-    await notifyGroup(req.io, req.params.id, { status });
-    res.json({ success: true });
+    const { rowCount } = await pool.query("UPDATE group_orders SET status=$1, order_id=$2 WHERE id=$3 AND status IN ('open','locked')", [status, linkedOrder, req.params.id]);
+    if (!rowCount) return res.status(400).json({ success: false, message: 'المجموعة مقفلة مسبقاً' });
+
+    // C-15: أصناف المشاركين التي لم تدخل الطلب الفعلي → نبلغ أصحابها (بدل "تم الطلب" المضلّل)
+    let excluded = [];
+    if (status === 'ordered' && linkedOrder) {
+      const { rows: gi } = await pool.query('SELECT id, user_id, name, menu_item_id, quantity FROM group_order_items WHERE group_id=$1', [req.params.id]);
+      const { rows: oi } = await pool.query('SELECT menu_item_id, SUM(quantity)::int AS q FROM order_items WHERE order_id=$1 GROUP BY menu_item_id', [linkedOrder]);
+      const left = new Map(oi.map(r => [String(r.menu_item_id), r.q]));
+      for (const it of gi) {
+        const k = String(it.menu_item_id || '');
+        const need = parseInt(it.quantity) || 1;
+        const have = left.get(k) || 0;
+        if (have >= need) left.set(k, have - need);
+        else excluded.push({ item_id: it.id, user_id: it.user_id, name: it.name, quantity: need - have });
+      }
+      const { saveNotification } = require('../utils/notifications');
+      const byUser = new Map();
+      for (const x of excluded) { if (String(x.user_id) === String(req.user.id)) continue; (byUser.get(String(x.user_id)) || byUser.set(String(x.user_id), []).get(String(x.user_id))).push(x.name); }
+      for (const [uid, names] of byUser) {
+        saveNotification(uid, '⚠️ بعض أصنافك لم تدخل الطلب الجماعي', 'group_order', { group_id: req.params.id, code: g[0].code }, `لم يُطلب: ${names.join('، ')}`);
+      }
+    }
+    await notifyGroup(req.io, req.params.id, { status, excluded });
+    res.json({ success: true, excluded });
   } catch (e) { serverError(res, e); }
 });
 

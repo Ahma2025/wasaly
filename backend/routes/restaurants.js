@@ -6,6 +6,7 @@ const cache = require('../utils/cache');
 const { serverError, intParam, clampInt, strParam } = require('../utils/http');
 const { hebronRange } = require('../utils/time');
 const storeTypes = require('../utils/storeTypes');
+const { statusLabel } = require('../utils/orderService');
 
 // ⏱️ مدد الكاش (ms) — قابلة للضبط بمتغيّرات البيئة
 const LIST_TTL = Number(process.env.CACHE_RESTAURANTS_TTL_MS) || 45000;
@@ -149,7 +150,15 @@ router.get('/:id', optionalAuth, async (req, res) => {
     if (!/^\d+$/.test(String(req.params.id))) return res.status(404).json({ success: false, message: 'Restaurant not found' });
     const data = await cache.wrapVersioned(cache.V.catalog, `rdetail:${req.params.id}`, DETAIL_TTL, () => loadRestaurantDetail(req.params.id));
     if (!data) return res.status(404).json({ success: false, message: 'Restaurant not found' });
-    res.json({ success: true, data: { ...publicView(data.restaurant, req.user), hours: data.hours, menu: data.menu } });
+    // C-07: حالة المفضلة لكل مستخدم — خارج الكاش المشترك (null للزائر)
+    let isFavorite = null;
+    if (req.user) {
+      try {
+        const { rows: fv } = await pool.query('SELECT 1 FROM favorites WHERE user_id=$1 AND restaurant_id=$2 LIMIT 1', [req.user.id, req.params.id]);
+        isFavorite = fv.length > 0;
+      } catch { isFavorite = null; }
+    }
+    res.json({ success: true, data: { ...publicView(data.restaurant, req.user), is_favorite: isFavorite, hours: data.hours, menu: data.menu } });
   } catch (e) { serverError(res, e, 'GET /restaurants/:id'); }
 });
 
@@ -226,10 +235,16 @@ router.put('/:id', auth, restaurantOnly, async (req, res) => {
     const updates = []; const values = [];
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
-        if (['min_order', 'delivery_fee'].includes(key) && (isNaN(parseFloat(req.body[key])) || parseFloat(req.body[key]) < 0)) {
-          return res.status(400).json({ success: false, message: 'قيمة غير صحيحة' });
+        let v = req.body[key];
+        if (['min_order', 'delivery_fee'].includes(key)) {
+          // R-07: حقل فارغ ("بدون حد أدنى") = 0 بدل رفض كل الإعدادات
+          if (v === null || v === '') v = 0;
+          if (isNaN(parseFloat(v)) || parseFloat(v) < 0) {
+            return res.status(400).json({ success: false, field: key, message: key === 'min_order' ? 'الحد الأدنى للطلب غير صحيح' : 'رسوم التوصيل غير صحيحة' });
+          }
+          v = parseFloat(v);
         }
-        values.push(req.body[key]); updates.push(`${key}=$${values.length}`);
+        values.push(v); updates.push(`${key}=$${values.length}`);
       }
     }
     updates.push('updated_at=NOW()');
@@ -259,9 +274,11 @@ router.get('/:id/orders', auth, restaurantOnly, async (req, res) => {
     const safeLimit = clampInt(req.query.limit, 20, 1, 100);
     const safeOffset = clampInt(req.query.offset, 0, 0, 100000);
     const statuses = status ? status.split(',').map(x => x.trim()).filter(Boolean).sort() : [];
+    // R-18: ?sort=oldest → الأقدم أولاً (FIFO للوحة الطلبات النشطة)
+    const asc = ['oldest', 'asc'].includes(String(req.query.sort || '').toLowerCase());
     // ⚡️ التطبيق يسأل كل 20 ثانية: كاش 5ث لكل مطعم+فلتر، ويُبطَل فوراً عند أي تغيير على طلبات هذا المطعم
     const rid = String(req.params.id);
-    const key = `rorders:${rid}:${statuses.join(',')}:${safeLimit}:${safeOffset}`;
+    const key = `rorders:${rid}:${statuses.join(',')}:${safeLimit}:${safeOffset}:${asc ? 'a' : 'd'}`;
     const rows = await cache.wrapVersioned(cache.V.restOrders(rid), key, REST_ORDERS_TTL, async () => {
     // 🧺 ابن طلب مجمّع: group_id/stop_sequence (من o.*) + group_number + group_stops_count + is_group لتمييز البطاقة
     let q = `SELECT o.*, u.name as customer_name, u.phone as customer_phone,
@@ -271,11 +288,28 @@ router.get('/:id/orders', auth, restaurantOnly, async (req, res) => {
              AND NOT (o.payment_method='card' AND COALESCE(o.payment_status,'pending') <> 'paid' AND o.status='pending' AND COALESCE(o.total,0) > 0)`;
     const params = [req.params.id];
     if (statuses.length) { params.push(statuses); q += ` AND o.status = ANY($${params.length}::text[])`; }
-    q += ` ORDER BY o.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    q += ` ORDER BY o.created_at ${asc ? 'ASC' : 'DESC'}, o.id ${asc ? 'ASC' : 'DESC'} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(safeLimit, safeOffset);
       return (await pool.query(q, params)).rows;
     });
-    res.json({ success: true, data: rows });
+    // نسخ لكل طلب (لا نعدّل كائنات الكاش المشتركة)
+    const isAdmin = req.user.role === 'admin';
+    res.json({ success: true, data: rows.map((r) => {
+      const o = { ...r };
+      delete o.payment_ref_history;
+      o.status_label = statusLabel(o);
+      // X-03: سائق معروض عليه لم يقبل ≠ سائق الطلب
+      o.driver_offer_pending = !o.driver_assigned_at && !!o.driver_id;
+      if (!o.driver_assigned_at) o.driver_id = null;
+      // X-06: ابن طلب مجمّع — إكرامية/أجرة السائق للمجموعة لا تظهر على فاتورة هذا المطعم؛ المجموع = أصنافه فقط
+      if (o.group_id && !isAdmin) {
+        o.tip = 0; o.driver_fee = 0; o.delivery_fee = 0;
+        o.total = Math.round(parseFloat(o.subtotal || 0) * 100) / 100;
+        o.group_payment_note = 'الدفع على الطلب المجمّع (يحصّله السائق)';
+        o.total_label = 'قيمة أصناف هذا المطعم';
+      }
+      return o;
+    }) });
   } catch (e) { serverError(res, e); }
 });
 
@@ -295,13 +329,19 @@ router.get('/:id/stats', auth, restaurantOnly, async (req, res) => {
                   GROUP BY oi.name_ar ORDER BY sold DESC LIMIT 5`, [id]),
       pool.query(`SELECT status, COUNT(*) FROM orders WHERE restaurant_id=$1 GROUP BY status`, [id]),
       pool.query(`SELECT COUNT(*) FILTER (WHERE status <> 'cancelled') AS today_orders,
-                         COALESCE(SUM(subtotal) FILTER (WHERE status <> 'cancelled'), 0) AS today_revenue
+                         COALESCE(SUM(subtotal) FILTER (WHERE status <> 'cancelled'), 0) AS today_revenue,
+                         COUNT(*) FILTER (WHERE status = 'delivered') AS today_delivered_orders,
+                         COALESCE(SUM(subtotal) FILTER (WHERE status = 'delivered'), 0) AS today_delivered_revenue
                   FROM orders WHERE restaurant_id=$1 AND created_at >= $2::timestamp AND created_at < $3::timestamp`, [id, today.start, today.end]),
     ]);
     res.json({ success: true, data: {
       sales: sales.rows, topItems: topItems.rows, ordersByStatus: orders.rows,
       today_orders: parseInt(todayQ.rows[0]?.today_orders || 0),
       today_revenue: Math.round(parseFloat(todayQ.rows[0]?.today_revenue || 0) * 100) / 100,
+      // R-20: today_* = كل الطلبات غير الملغاة (تشمل الجارية)؛ today_delivered_* = المُسلّمة فقط (مثل الرسمة والأسبوع)
+      today_delivered_orders: parseInt(todayQ.rows[0]?.today_delivered_orders || 0),
+      today_delivered_revenue: Math.round(parseFloat(todayQ.rows[0]?.today_delivered_revenue || 0) * 100) / 100,
+      revenue_basis: 'subtotal',
     } });
   } catch (e) { serverError(res, e); }
 });
@@ -339,7 +379,7 @@ router.post('/:id/vip', auth, restaurantOnly, async (req, res) => {
       const msg = `🌟 تمت إضافتك كزبون مميز في ${rst[0]?.name_ar || 'المطعم'}! استمتع بمعاملة خاصة.`;
       saveNotification(customer_id, msg, 'vip', { restaurant_id: req.params.id });
       notifyUser(req.io, customer_id, 'vip', { restaurant_id: req.params.id });
-      try { const t = await getUserTokens(customer_id); if (t.length) await sendFCM(t, '🌟 زبون مميز!', msg, { type: 'vip' }, 'com.wasaly.customer'); } catch { /* ignore */ }
+      try { const t = await getUserTokens(customer_id); if (t.length) await sendFCM(t, '🌟 زبون مميز!', msg, { type: 'vip', restaurant_id: String(req.params.id) }, 'com.wasaly.customer'); } catch { /* ignore */ }
     } catch (e) { console.error('vip notify:', e.message); }
     res.json({ success: true });
   } catch (e) { serverError(res, e); }

@@ -8,6 +8,7 @@ const { saveNotification, notifyUser, Notify, sendFCM, getUserTokens } = require
 const { sendWebPush } = require('../routes/webpush');
 const cache = require('./cache');
 const driverLoc = require('./driverLocation');
+const { FRESH_SQL } = require('./driverPresence');
 
 // ─── أدوات عامة ─────────────────────────────────────────────────
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
@@ -32,6 +33,41 @@ const ACTIVE_STATUSES = ['pending', 'confirmed', 'preparing', 'ready', 'on_the_w
 const STATUS_LABELS = {
   pending: 'بانتظار المطعم', confirmed: 'مؤكد', preparing: 'قيد التحضير', ready: 'جاهز',
   on_the_way: 'في الطريق', delivered: 'تم التوصيل', cancelled: 'ملغي',
+};
+
+/**
+ * عنوان الحالة حسب نوع الطلب (نفس الحالة الخام `status` لا تتغيّر — للتوافق مع التطبيقات المنشورة):
+ *  • C-02: بطاقة غير مدفوعة (مخفي عن المطعم) → "بانتظار إتمام الدفع" بدل "بانتظار المطعم"
+ *  • C-05: توصيل شخصي بعد قبول السائق (preparing/ready) → "السائق بالطريق للاستلام"
+ *  • X-10: استلام من المحل → "جاهز للاستلام" / "تم الاستلام"
+ */
+function statusLabel(o) {
+  if (!o) return '';
+  const st = o.status;
+  if (st === 'pending' && isAwaitingCardPayment(o)) return 'بانتظار إتمام الدفع';
+  if (o.order_type === 'personal') {
+    if (['preparing', 'ready'].includes(st) || (st === 'confirmed' && o.driver_assigned_at)) return 'السائق بالطريق للاستلام';
+    if (st === 'confirmed') return 'نبحث عن سائق';
+  }
+  if (o.order_type === 'pickup') {
+    if (st === 'ready') return 'جاهز للاستلام';
+    if (st === 'delivered') return 'تم الاستلام';
+  }
+  return STATUS_LABELS[st] || st;
+}
+
+// X-07: العدد مع المعدود بالعربي الصحيح — forms = [مفرد، مثنى، جمع (3-10)، تمييز (11+)]
+function arCount(n, forms) {
+  const k = Math.abs(parseInt(n) || 0);
+  const [one, two, few, many] = forms;
+  if (k === 1) return one;
+  if (k === 2) return two;
+  if (k >= 3 && k <= 10) return `${k} ${few}`;
+  return `${k} ${many || few}`;
+}
+const AR = {
+  restaurants: ['مطعم واحد', 'مطعمين', 'مطاعم', 'مطعماً'],
+  stops: ['محطة واحدة', 'محطتين', 'محطات', 'محطة'],
 };
 
 function haversineKm(aLat, aLng, bLat, bLng) {
@@ -406,7 +442,7 @@ async function notifyRestaurantNewOrder(io, order, group = null) {
     const gPush = group ? { group_id: String(group.group_id), group_number: String(group.group_number), stops_count: String(group.stops_count), is_group: 'true' } : {};
     const title = group ? '🛎️ طلب مجمّع جديد!' : '🛎️ طلب جديد!';
     const body = group
-      ? `طلب #${order.order_number} (ضمن طلب مجمّع من ${group.stops_count} مطاعم — سائق واحد) ينتظر موافقتك`
+      ? `طلب #${order.order_number} (ضمن طلب مجمّع من ${arCount(group.stops_count, AR.restaurants)} — سائق واحد) ينتظر موافقتك`
       : `طلب #${order.order_number} ينتظر موافقتك`;
     notifyUser(io, ownerId, 'new_order', { order_id: order.id, order_number: order.order_number, restaurant_id: restaurant.id, ...g });
     saveNotification(ownerId, group ? `طلب مجمّع جديد #${order.order_number}` : `طلب جديد #${order.order_number}`, 'new_order', { order_id: order.id, ...g });
@@ -474,9 +510,10 @@ async function findNearestDriver(lat, lng, orderId, tried, groupId = null) {
   // السائقون أولاً (جدول صغير) ثم تحقق المستخدم بمفتاحه الأساسي (LATERAL = بحث PK لكل سائق) — يمنع خطة Merge Join تمسح كل جدول users
   // 🧺 الطلب المجمّع: فقط السائقون بتطبيق يدعمه (supports_groups) — وإلا يبقى confirmed ويُعاد المحاولة
   const groupsOnly = groupId ? 'AND supports_groups = true' : '';
+  // 🫀 D-07: السائق الخامل منذ ساعات طويلة (توكن منتهٍ/خروج إجباري) لا تُحجز عليه العروض
   const q = (where) => `WITH d AS MATERIALIZED (
       SELECT user_id, current_lat, current_lng FROM drivers
-      WHERE is_online = true AND COALESCE(is_busy, false) = false ${groupsOnly} ${where})
+      WHERE is_online = true AND COALESCE(is_busy, false) = false AND ${FRESH_SQL} ${groupsOnly} ${where})
     SELECT d.user_id, d.current_lat, d.current_lng FROM d
     CROSS JOIN LATERAL (SELECT 1 FROM users u WHERE u.id = d.user_id AND u.is_active = true
       AND COALESCE(u.is_blocked, false) = false AND u.role = 'driver' LIMIT 1) ok`;
@@ -549,16 +586,20 @@ async function dispatchOrder(io, orderId, excludeDriverId = null) {
     const { rows: off } = await pool.query(
       `UPDATE orders SET driver_id=$1, driver_offer_expires_at = NOW() + INTERVAL '${OFFER_SECONDS} seconds'
        WHERE id=$2 AND driver_id IS NULL AND driver_assigned_at IS NULL AND status IN ('confirmed','preparing','ready')
-       RETURNING id, restaurant_id`, [driverId, orderId]);
+       RETURNING id, restaurant_id, driver_offer_expires_at`, [driverId, orderId]);
     if (!off[0]) return null;
     cache.invalidateRestaurantOrders(off[0].restaurant_id);
 
-    const expiresAt = new Date(Date.now() + OFFER_SECONDS * 1000).toISOString();
+    // نفس قيمة القاعدة بالضبط (GET /orders/:id و /drivers/me يرجعانها) → offer_id متطابق في كل القنوات
+    const expiresAt = new Date(off[0].driver_offer_expires_at || Date.now() + OFFER_SECONDS * 1000).toISOString();
+    // D-01/D-02: offer_id يميّز كل عرض (نفس الطلب قد يُعرض مجدداً بعد رفض/انتهاء) + server_now لتصحيح انحراف ساعة الجهاز
+    const offerId = `${o.id}|${expiresAt}`;
     notifyUser(io, driverId, 'new_order_request', {
       order_id: o.id, restaurant_lat: lat, restaurant_lng: lng, offer_seconds: OFFER_SECONDS, expires_at: expiresAt,
+      offer_id: offerId, server_now: new Date().toISOString(),
     });
     pushTo(driverId, '🛵 طلب توصيل جديد!', 'يوجد طلب جديد بانتظارك، اقبل الآن!',
-      { type: 'new_order_request', order_id: String(o.id), offer_seconds: String(OFFER_SECONDS), expires_at: expiresAt }, 'com.wasaly.driver');
+      { type: 'new_order_request', order_id: String(o.id), offer_seconds: String(OFFER_SECONDS), expires_at: expiresAt, offer_id: offerId }, 'com.wasaly.driver');
 
     clearTimer(offerTimers, key);
     const t = setTimeout(async () => {
@@ -720,9 +761,10 @@ async function refundOrderBenefits(orderId) {
         await client.query('UPDATE users SET wallet_balance = GREATEST(0, ROUND((COALESCE(wallet_balance,0)::numeric - $1::numeric), 2)) WHERE id=$2', [cashback, order.customer_id]);
       }
       if (order.coupon_code) {
-        const { rowCount } = await client.query('DELETE FROM coupon_usage WHERE order_id=$1', [order.id]);
-        if (rowCount > 0) {
-          await client.query('UPDATE coupons SET usage_count = GREATEST(0, COALESCE(usage_count,0) - 1) WHERE LOWER(code)=LOWER($1)', [order.coupon_code]);
+        // بمعرّف الكوبون (لا بالنص: كود محذوف قد يُعاد استخدامه لكوبون جديد — A-20)
+        const { rows: cu } = await client.query('DELETE FROM coupon_usage WHERE order_id=$1 RETURNING coupon_id', [order.id]);
+        for (const u of cu) {
+          await client.query('UPDATE coupons SET usage_count = GREATEST(0, COALESCE(usage_count,0) - 1) WHERE id=$1', [u.coupon_id]);
         }
       }
       if (order.payment_method === 'card' && order.payment_status === 'paid' && num(order.total) > 0) {
@@ -760,7 +802,8 @@ async function cancelOrder(io, order, by, reason, allowedFrom) {
   const ownerId = await getOwnerId(cancelled.restaurant_id);
   const gx = grouped ? { group_id: cancelled.group_id } : {};
   for (const uid of [cancelled.driver_id, ownerId].filter(Boolean)) {
-    notifyUser(io, uid, 'order_cancelled', { order_id: cancelled.id, by, ...gx });
+    // R-12: رقم الطلب المعروف (#WSL…) + السبب في الحدث
+    notifyUser(io, uid, 'order_cancelled', { order_id: cancelled.id, order_number: cancelled.order_number, by, reason: cancelled.cancel_reason || null, ...gx });
   }
   // 🧺 ابن طلب مجمّع → إعادة حساب المجموعة واسترجاع الفرق + إشعار الزبون (بدل "تم إلغاء طلبك")
   if (grouped) {
@@ -787,22 +830,87 @@ async function cancelOrder(io, order, by, reason, allowedFrom) {
 // ═══════════════════════════════════════════════════════════════
 //  💳 الدفع بالبطاقة: إطلاق الطلب للمطعم بعد التحقق (أو تحويله لنقدي كما يعِد التطبيق)
 // ═══════════════════════════════════════════════════════════════
+async function alertAdmins(message, type, data = {}) {
+  try {
+    const { rows: admins } = await pool.query("SELECT id FROM users WHERE role='admin' AND is_active=true");
+    for (const a of admins) saveNotification(a.id, message, type, data);
+  } catch (e) { console.error('alertAdmins:', e.message); }
+}
+
+/**
+ * C-03: دفعة بطاقة ناجحة تُسجَّل دائماً — حتى لو كان الطلب قد حُوّل لنقدي سابقاً (فشل التهيئة/المهلة/الزبون اختار كاش):
+ *   payment_status='paid' + payment_method='card' → cash_to_collect=0 فلا يحصّل السائق كاشاً (لا دفع مرتين)،
+ *   مع تنبيه الإدارة (وإشعار السائق المُسند) إن حدث ذلك بعد إطلاق الطلب نقداً، أو استرجاع يدوي إن كان ملغى.
+ * الفرع غير المدفوع كما هو: بطاقة معلّقة → نقدي ويُرسل للمطعم.
+ */
 async function releaseCardOrder(io, orderId, { paid, reference } = {}) {
-  let rows;
   if (paid) {
-    ({ rows } = await pool.query(
-      `UPDATE orders SET payment_status='paid', payment_reference=COALESCE($2, payment_reference), updated_at=NOW()
-       WHERE id=$1 AND payment_method='card' AND COALESCE(payment_status,'pending') <> 'paid' RETURNING *`, [orderId, reference || null]));
-  } else {
-    // التطبيق يقول للزبون "طلبك محفوظ ويمكنك الدفع عند الاستلام" → نحوّله لنقدي ونطلقه
-    ({ rows } = await pool.query(
-      `UPDATE orders SET payment_method='cash', updated_at=NOW()
-       WHERE id=$1 AND payment_method='card' AND COALESCE(payment_status,'pending') <> 'paid' AND status='pending' RETURNING *`, [orderId]));
+    const { rows } = await pool.query(
+      `UPDATE orders o SET payment_status='paid', payment_method='card',
+              payment_reference=COALESCE($2, o.payment_reference), updated_at=NOW()
+       FROM orders old
+       WHERE o.id=$1 AND old.id=o.id AND COALESCE(o.payment_status,'pending') <> 'paid'
+       RETURNING o.*, old.payment_method AS prev_payment_method`, [orderId, reference || null]);
+    const order = rows[0];
+    if (!order) {
+      // مدفوع مسبقاً بمرجع مختلف → دفعة مكرّرة محتملة (تنبيه للإدارة لاسترجاع يدوي)
+      try {
+        const { rows: cur } = await pool.query('SELECT id, order_number, payment_reference, total FROM orders WHERE id=$1', [orderId]);
+        const c = cur[0];
+        if (c && reference && c.payment_reference && String(c.payment_reference) !== String(reference)) {
+          await alertAdmins(`💳 دفعة بطاقة مكرّرة محتملة للطلب #${c.order_number} (مرجع ${reference}) — تحقّق واسترجع يدوياً`, 'refund_needed', { order_id: c.id, reference });
+        }
+      } catch (e) { console.error('duplicate payment check:', e.message); }
+      return null;
+    }
+    const prevMethod = order.prev_payment_method;
+    delete order.prev_payment_method;
+    touchOrder(order);
+    if (prevMethod === 'card' && order.status === 'pending') {
+      await notifyRestaurantNewOrder(io, order); // كان مخفياً بانتظار الدفع → يصل المطعم الآن
+    } else {
+      // الطلب أُطلق نقداً سابقاً (أو ملغى) ثم ثبت الدفع بالبطاقة
+      await emitOrderStatus(io, order, order.status);
+      if (order.status === 'cancelled') {
+        await alertAdmins(`💳 دفعة بطاقة وصلت لطلب ملغى #${order.order_number} — يلزم استرجاع ${round2(num(order.total))}₪ يدوياً`, 'refund_needed', { order_id: order.id });
+      } else {
+        await alertAdmins(`💳 الطلب #${order.order_number} دُفع بالبطاقة بعد تحويله لنقدي — تأكّد أن السائق لا يحصّل كاشاً`, 'payment_after_cash', { order_id: order.id });
+        if (order.driver_id && order.driver_assigned_at) {
+          pushTo(order.driver_id, '💳 الطلب مدفوع بالبطاقة', `الطلب #${order.order_number} مدفوع إلكترونياً — لا تحصّل أي مبلغ من الزبون`,
+            { type: 'order_paid', order_id: String(order.id) }, 'com.wasaly.driver');
+        }
+      }
+    }
+    return order;
   }
-  const order = rows && rows[0];
-  if (order) touchOrder(order);
-  if (order && order.status === 'pending') await notifyRestaurantNewOrder(io, order);
+  // التطبيق يقول للزبون "طلبك محفوظ ويمكنك الدفع عند الاستلام" → نحوّله لنقدي ونطلقه
+  const { rows } = await pool.query(
+    `UPDATE orders SET payment_method='cash', updated_at=NOW()
+     WHERE id=$1 AND payment_method='card' AND COALESCE(payment_status,'pending') <> 'paid' AND status='pending' RETURNING *`, [orderId]);
+  const order = rows[0];
+  if (order) {
+    touchOrder(order);
+    await emitOrderStatus(io, order, order.status); // الزبون: من "بانتظار إتمام الدفع" إلى "بانتظار المطعم"
+    await notifyRestaurantNewOrder(io, order);
+  }
   return order || null;
+}
+
+// C-04: كل مراجع الدفع للطلب (الحالي + السابقة) — الأحدث أولاً، بلا تكرار
+function paymentRefs(order) {
+  const out = [];
+  const add = (r) => { const s = String(r || '').trim(); if (s && !out.includes(s)) out.push(s); };
+  add(order && order.payment_reference);
+  String((order && order.payment_ref_history) || '').split(',').reverse().forEach(add);
+  return out;
+}
+
+// C-06: مفتاح منع التكرار (Idempotency-Key أو client_ref) — نص قصير آمن وإلا null
+function clientRefFrom(req) {
+  const raw = (req.headers && (req.headers['idempotency-key'] || req.headers['x-idempotency-key'])) || (req.body && req.body.client_ref);
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim();
+  return /^[A-Za-z0-9._:-]{8,100}$/.test(s) ? s : null;
 }
 
 // 💵 مصدر "الإيراد" (ما دفعه الزبون لكل عملية دفع) — الطلبات العادية + الطلبات المجمّعة مرة واحدة
@@ -820,7 +928,7 @@ module.exports = {
   emitOrderStatus, touchOrder, notifyRestaurantNewOrder, findNearestDriver, getOwnerId, pushTo,
   dispatchOrder, stopDispatch, recoverDispatch, isAwaitingCardPayment,
   settleDelivery, markDelivered, refundOrderBenefits, cancelOrder, releaseCardOrder,
-  REVENUE_SOURCE,
+  REVENUE_SOURCE, statusLabel, arCount, AR, alertAdmins, paymentRefs, clientRefFrom,
   // للتوزيع المجمّع (نفس خرائط المؤقتات بمفاتيح 'g<id>')
   _dispatchState: { triedDrivers, offerTimers, retryTimers, clearTimer },
 };

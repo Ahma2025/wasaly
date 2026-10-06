@@ -26,7 +26,10 @@ export function HeroDecor() {
 }
 
 /* هيدر فخم بتدرّج لوني — موحّد عبر كل الشاشات الفرعية (RTL: زر الرجوع على اليمين) */
-export default function GradientHeader({ title, subtitle, right, onBack, colors, hideBack, children }) {
+/*
+  right: عنصر حر (للتوافق) — أو الأفضل rightIcon + onRight + rightLabel → زر دائري 42px بهدف لمس كامل
+*/
+export default function GradientHeader({ title, subtitle, right, rightIcon, onRight, rightLabel, rightBadge, onBack, colors, hideBack, children }) {
   const nav = useNavigation();
   const { colors: C } = useTheme();
   const top = useHeaderTop(10);
@@ -43,7 +46,11 @@ export default function GradientHeader({ title, subtitle, right, onBack, colors,
           <Text style={styles.title} numberOfLines={1} accessibilityRole="header">{title}</Text>
           {subtitle ? <Text style={styles.sub} numberOfLines={1}>{subtitle}</Text> : null}
         </FadeIn>
-        <View style={right ? styles.iconBtn : styles.iconSpacer}>{right || null}</View>
+        {rightIcon ? (
+          <IconButton icon={rightIcon} onPress={onRight} label={rightLabel || title} onGradient badge={rightBadge} />
+        ) : (
+          <View style={right ? styles.iconBtn : styles.iconSpacer}>{right || null}</View>
+        )}
       </View>
       {children}
     </LinearGradient>

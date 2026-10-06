@@ -3,13 +3,15 @@ import toast from 'react-hot-toast';
 import { FiSend, FiBell, FiCheck } from 'react-icons/fi';
 import api from '../utils/api';
 import { fmtDate } from '../utils/format';
+import { arCount } from '../utils/plural';
 import { PageHeader, Field, Button, Segmented, SectionHeader, useConfirm } from '../components/ui';
 
 const LOGO = `${import.meta.env.BASE_URL}logo.png`;
 const ROLES = { customer: 'الزبائن', driver: 'السائقين', restaurant: 'المتاجر (أصحاب المطاعم)' };
 const ROLE_ICON = { customer: '🛍️', driver: '🛵', restaurant: '🏪' };
 const templates = [
-  { title: 'خصم خاص 🔥', body: 'لا تفوّت عروضنا الحصرية اليوم! استخدم كود WASALY للحصول على خصم 10%' },
+  // بلا كود كوبون ثابت قد لا يكون موجوداً — أضف الكود الفعّال من «الكوبونات» بنفسك — A-37
+  { title: 'عروض خاصة 🔥', body: 'لا تفوّت عروض المتاجر اليوم في وصلّي! افتح التطبيق واكتشف الخصومات المتاحة' },
   { title: 'تحديث جديد ✨', body: 'وصلّي تتطور! جرّب الميزات الجديدة في آخر تحديث' },
   { title: 'متاجر جديدة 🏪', body: 'أضفنا متاجر جديدة رائعة في منطقتك! اكتشفها الآن' },
 ];
@@ -35,7 +37,7 @@ export default function Notifications() {
     try {
       const data = await api.post('/admin/notifications/broadcast', { ...form, title: form.title.trim(), body: form.body.trim() });
       setSent({ recipients: data.recipients ?? data.data?.recipients ?? 0, audience });
-      toast.success('تم الإرسال');
+      toast.success('بدأ إرسال الإشعار');
     } catch (e) { toast.error(e?.message || 'خطأ في الإرسال'); }
     finally { setSending(false); }
   };
@@ -47,7 +49,7 @@ export default function Notifications() {
       <div className="grid gap-4 lg:gap-6 lg:grid-cols-[minmax(0,1fr)_380px] items-start">
         <div className="space-y-4">
           <section className="card p-4 sm:p-5 space-y-4">
-            <Field label="الجمهور المستهدف">
+            <Field label="الجمهور المستهدف" as="group">
               <Segmented full value={form.target} onChange={v => setForm(f => ({ ...f, target: v }))} options={[['all', 'الجميع'], ['role', 'حسب الدور']]} />
             </Field>
             {form.target === 'role' && (
@@ -73,8 +75,12 @@ export default function Notifications() {
               <div className="p-3.5 bg-green-50 rounded-2xl border border-green-200 flex gap-3 animate-pop">
                 <span className="w-9 h-9 rounded-xl bg-green-500 text-white flex items-center justify-center flex-shrink-0"><FiCheck /></span>
                 <div>
-                  <p className="text-green-800 font-black text-sm">تم الإرسال بنجاح</p>
-                  <p className="text-green-700 text-xs font-medium mt-0.5">وصل إلى <b className="num">{sent.recipients}</b> جهاز ({sent.audience}) — فقط من فعّل الإشعارات.</p>
+                  <p className="text-green-800 font-black text-sm">بدأ الإرسال</p>
+                  <p className="text-green-700 text-xs font-medium mt-0.5">
+                    {sent.recipients > 0
+                      ? <>جارٍ الإرسال إلى <b className="num">{arCount(sent.recipients, 'user')}</b> ({sent.audience}) — فقط من فعّل الإشعارات. قد يستغرق التسليم دقائق.</>
+                      : <>لا يوجد مستخدمون فعّلوا الإشعارات ضمن {sent.audience}.</>}
+                  </p>
                 </div>
               </div>
             )}

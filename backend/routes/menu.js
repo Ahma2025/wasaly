@@ -68,7 +68,8 @@ router.get('/restaurant/:id/manage', auth, restaurantOnly, async (req, res) => {
     for (const i of items) i.options = opts.filter(o => String(o.item_id) === String(i.id));
     const data = cats.map(c => ({ ...c, items: items.filter(i => String(i.category_id) === String(c.id)) }));
     const orphan = items.filter(i => !cats.some(c => String(c.id) === String(i.category_id)));
-    if (orphan.length) data.push({ id: null, restaurant_id: Number(rid), name_ar: 'بدون قسم', name_en: 'Uncategorized', is_active: true, items: orphan });
+    // R-24: is_orphan + key ثابت — ليس قسماً حقيقياً (لا تعديل/حذف/إضافة عليه)
+    if (orphan.length) data.push({ id: null, key: 'orphan', is_orphan: true, restaurant_id: Number(rid), name_ar: 'بدون قسم', name_en: 'Uncategorized', is_active: true, items: orphan });
     res.json({ success: true, data });
   } catch (e) { fail(res, e); }
 });

@@ -8,6 +8,9 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
+import android.webkit.WebView;
+
+import androidx.activity.OnBackPressedCallback;
 
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -24,6 +27,31 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(PrinterPermissionsPlugin.class);
         super.onCreate(savedInstanceState);
         applySystemBarInsets();
+        installBackHandler();
+    }
+
+    /**
+     * زر الرجوع (بدون @capacitor/app): نسأل الواجهة window.__wasalyHandleBack()
+     *  - 'handled' → الواجهة أغلقت نافذة أو رجعت صفحة (لا شيء هنا)
+     *  - 'exit'    → ضغطتان على الصفحة الرئيسية: نرسل التطبيق للخلفية (يبقى استقبال الطلبات شغّالًا)
+     *  - غير ذلك (الواجهة لم تجهز بعد) → رجوع WebView إن أمكن وإلا للخلفية
+     */
+    private void installBackHandler() {
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                final WebView wv = (bridge != null) ? bridge.getWebView() : null;
+                if (wv == null) { moveTaskToBack(true); return; }
+                wv.evaluateJavascript(
+                    "(function(){try{return window.__wasalyHandleBack?window.__wasalyHandleBack():'none'}catch(e){return 'none'}})()",
+                    value -> {
+                        String r = value == null ? "" : value.replace("\"", "");
+                        if ("handled".equals(r)) return;
+                        if ("exit".equals(r)) { moveTaskToBack(true); return; }
+                        if (wv.canGoBack()) wv.goBack(); else moveTaskToBack(true);
+                    });
+            }
+        });
     }
 
     /**

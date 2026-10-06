@@ -2,9 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { FiLayers, FiPause, FiWifiOff, FiSave, FiRotateCcw, FiTruck, FiDollarSign, FiMapPin, FiShoppingBag, FiInfo } from 'react-icons/fi';
 import api from '../utils/api';
+import { useNavigate } from 'react-router-dom';
 import { PageHeader, Button, Field, useConfirm } from '../components/ui';
 import { Sk } from '../components/Skeleton';
-import { money } from '../utils/format';
+import { money, TERMS } from '../utils/format';
+import { arCount } from '../utils/plural';
+import { useOverlay } from '../utils/backStack';
 
 /** قواعد التحقق — مطابقة لعقد PUT /api/admin/settings/multi-restaurant */
 const RULES = {
@@ -49,6 +52,13 @@ export default function MultiRestaurant() {
   const errors = useMemo(() => Object.fromEntries(Object.entries(RULES).map(([k, fn]) => [k, fn(values[k])])), [values]);
   const hasErrors = Object.values(errors).some(Boolean);
   const dirty = loaded && Object.keys(RULES).some(k => Number(cfg?.[k]) !== values[k]);
+
+  // زر الرجوع (أندرويد) مع تعديلات غير محفوظة: نسأل قبل المغادرة بدل ضياعها — X-04
+  const navigate = useNavigate();
+  useOverlay(dirty && !saving, async () => {
+    const ok = await confirm({ title: 'تعديلات غير محفوظة', message: 'غيّرت إعدادات الطلبات المجمّعة ولم تحفظها. المغادرة بدون حفظ؟', confirmText: 'مغادرة بدون حفظ', cancelText: 'البقاء' });
+    if (ok) { setForm(toForm(cfg)); setTouched({}); if (!(window.__wasalyNav && window.__wasalyNav())) navigate('/'); }
+  });
 
   const toggle = async () => {
     if (!loaded || toggling) return;
@@ -103,7 +113,7 @@ export default function MultiRestaurant() {
                 </span>
                 <h2 className="text-2xl sm:text-[28px] font-black mt-3 leading-tight">تفعيل الطلبات المجمّعة</h2>
                 <p className={`text-sm mt-2 leading-relaxed max-w-md ${enabled ? 'text-white/85' : 'text-ink-2'}`}>
-                  يستطيع الزبون الطلب من عدة مطاعم قريبة في سلة واحدة، ويجمعها سائق واحد ثم يوصلها. الدفع نقداً (مع المحفظة).
+                  يستطيع الزبون الطلب من عدة مطاعم قريبة في سلة واحدة، ويجمعها سائق واحد ثم يوصلها. الدفع {TERMS.cash} (مع {TERMS.wallet}).
                 </p>
                 {error && (
                   <p className="text-xs text-red-500 font-bold mt-3 flex items-center gap-2"><FiWifiOff /> تعذّر تحميل الإعدادات — <button onClick={load} className="underline">إعادة المحاولة</button></p>
@@ -147,7 +157,7 @@ export default function MultiRestaurant() {
                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-ink-3">كم</span>
                   </div>
                 </Field>
-                <Field label="رسوم كل مطعم إضافي" hint="(₪ · 0 – 100)" error={err('extra_stop_fee')}>
+                <Field label={TERMS.extraStopFee} hint="(₪ لكل مطعم بعد الأول · 0 – 100)" error={err('extra_stop_fee')}>
                   <div className="relative">
                     <FiDollarSign className="absolute right-3.5 top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none" />
                     <input className="inp pr-10 pl-12 num" type="number" inputMode="decimal" min={0} max={100} step={0.5} value={form.extra_stop_fee} onChange={set('extra_stop_fee')} disabled={!loaded} aria-invalid={!!err('extra_stop_fee')} />
@@ -169,13 +179,15 @@ export default function MultiRestaurant() {
             <h2 className="panel-title">كيف تُحسب الرسوم؟</h2>
             <ul className="text-sm text-ink-2 leading-relaxed space-y-1.5 list-disc pr-4">
               <li><b>رسوم التوصيل الأساسية</b> حسب مسافة <b>أبعد مطعم</b> عن الزبون (من مناطق التوصيل).</li>
-              <li><b>رسوم المطاعم الإضافية</b> = رسوم المطعم الإضافي × (عدد المطاعم − 1).</li>
+              <li><b>رسوم المطاعم الإضافية</b> = {TERMS.extraStopFee} × (عدد المطاعم − 1).</li>
               <li>التوصيل المجاني يُلغي الرسوم الأساسية فقط، لا رسوم المطاعم الإضافية.</li>
               <li>الكوبون وخصم الطلب الأول يُطبَّقان <b>مرة واحدة</b> على مجموع السلة.</li>
-              <li>أجرة السائق = الأساسية + الإضافية دائماً (حتى مع التوصيل المجاني) + الإكرامية.</li>
+              {/* الأجرة لا تشمل الإكرامية — A-49 */}
+              <li><b>أجرة السائق</b> = الرسوم الأساسية + رسوم المطاعم الإضافية دائماً (حتى مع التوصيل المجاني).</li>
+              <li><b>ربح السائق</b> = الأجرة + {TERMS.tip} (الإكرامية كاملة للسائق).</li>
             </ul>
             <div className="rounded-2xl bg-surface p-3.5">
-              <p className="text-[11px] font-extrabold text-ink-3 mb-1">مثال: {exStops} مطاعم</p>
+              <p className="text-[11px] font-extrabold text-ink-3 mb-1">مثال: طلب من {arCount(exStops, 'restaurant')}</p>
               <p className="text-sm font-bold text-ink">رسوم إضافية = <span className="num">{money(exFee)}</span> × <span className="num">{Math.max(0, exStops - 1)}</span> = <span className="num text-violet-700 font-black">{money(exFee * Math.max(0, exStops - 1))}</span></p>
             </div>
           </section>

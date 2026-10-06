@@ -8,7 +8,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
-import * as Location from 'expo-location';
+import { fastLocation } from '../utils/location';
+import { restaurantsForCategory } from '../utils/categoryMatch';
+import { plural } from '../utils/plural';
+import RtlHScroll from '../components/RtlHScroll';
 import BannerSlider from '../components/BannerSlider';
 import { Skeleton, GridSkeleton } from '../components/Skeleton';
 import SupportButton from '../components/SupportButton';
@@ -126,6 +129,17 @@ function CollapsibleSection({ title, subtitle, icon, children, defaultOpen = tru
   );
 }
 
+/* شارة التقييم — مطعم جديد بدون تقييمات = «جديد ✨» بدل «⭐ 0.0» اللي بيبيّن كأنه سيء */
+function RatingPill({ rating, style, txtStyle }) {
+  const v = Number(rating) || 0;
+  return (
+    <View style={style}>
+      {v > 0 ? <Ionicons name="star" size={10} color="#FFB020" /> : null}
+      <Text style={txtStyle}>{v > 0 ? v.toFixed(1) : 'جديد ✨'}</Text>
+    </View>
+  );
+}
+
 /* ── كرت الشبكة ── */
 function RCard({ r, onPress }) {
   const { colors: C } = useTheme();
@@ -143,10 +157,7 @@ function RCard({ r, onPress }) {
             <Text style={rc.badgeTxt}>خصم {disc}%</Text>
           </LinearGradient>
         )}
-        <View style={rc.ratePill}>
-          <Ionicons name="star" size={10} color="#FFB020" />
-          <Text style={rc.rateTxt}>{(Number(r.rating) || 0).toFixed(1)}</Text>
-        </View>
+        <RatingPill rating={r.rating} style={rc.ratePill} txtStyle={rc.rateTxt} />
         {!r.is_open && <View style={rc.overlay}><Ionicons name="moon" size={16} color="#FFF" /><Text style={rc.overlayTxt}>مغلق</Text></View>}
         {!!r.logo && (
           <View style={rc.logoCircle}>
@@ -178,10 +189,7 @@ function HCard({ r, onPress }) {
           : <LinearGradient colors={C.gradients.sunset} style={[hc.img, { alignItems: 'center', justifyContent: 'center' }]}><Ionicons name="restaurant" size={28} color="rgba(255,255,255,0.85)" /></LinearGradient>}
         <LinearGradient colors={C.gradients.scrim} style={hc.scrim} />
         {!r.is_open && <View style={hc.closed}><Text style={hc.closedTxt}>مغلق</Text></View>}
-        <View style={hc.ratePill}>
-          <Ionicons name="star" size={10} color="#FFB020" />
-          <Text style={hc.rateTxt}>{(Number(r.rating) || 0).toFixed(1)}</Text>
-        </View>
+        <RatingPill rating={r.rating} style={hc.ratePill} txtStyle={hc.rateTxt} />
         {!!r.logo && <View style={hc.logoDot}><Image source={{ uri: r.logo }} style={hc.logoImg} /></View>}
       </View>
       <Text style={hc.name} numberOfLines={1}>{r.name_ar}</Text>
@@ -258,10 +266,14 @@ export default function HomeScreen() {
   const [recentRests, setRecentRests] = useState([]);
   const [activeCat, setActiveCat] = useState(null);
   const [storeTypes, setStoreTypes] = useState([]);
-  const suggestedRef = useRef(null);
+  const [failed, setFailed] = useState(false);       // آخر تحميل فشل (نت/سيرفر)
+  const [fromCache, setFromCache] = useState(false);
+  const [locating, setLocating] = useState(false);   // «الأقرب إليك» عم يحدد الموقع
+  const [unread, setUnread] = useState(0);
   const scrollY = useRef(new Animated.Value(0)).current;
   const [miniOn, setMiniOn] = useState(false);
   const miniRef = useRef(false);
+  const locatingRef = useRef(false);
 
   useEffect(() => {
     // اعرض من الكاش فوراً (بدون تحميل) ثم حدّث بالخلفية
@@ -273,13 +285,14 @@ export default function HomeScreen() {
         if (cached.categories) setCategories(cached.categories);
         if (cached.banners) setBanners(cached.banners);
         if (cached.recentRests) setRecentRests(cached.recentRests);
+        setFromCache(true);
         setLoading(false);
       }
       load();
     })();
   }, []);
 
-  // العنوان الافتراضي للشريط العلوي — يتحدّث عند كل رجوع للرئيسية
+  // العنوان الافتراضي للشريط العلوي + عدّاد الإشعارات غير المقروءة — يتحدّثوا عند كل رجوع للرئيسية
   useFocusEffect(useCallback(() => {
     let alive = true;
     setActiveCat(null);
@@ -294,32 +307,40 @@ export default function HomeScreen() {
         writeCache('addresses', d.data || []);
       } catch {}
     })();
+    api.get('/notifications/unread-count').then(r => { if (alive) setUnread(parseInt(r?.count ?? r?.data?.count, 10) || 0); }).catch(() => {});
     return () => { alive = false; };
   }, []));
 
   // موقع المستخدم لترتيب "الأقرب إليك" — بدون طلب إذن مزعج عند الفتح (فقط لو مسموح مسبقاً)
   const fetchUserLoc = async (ask) => {
-    try {
-      const perm = ask ? await Location.requestForegroundPermissionsAsync() : await Location.getForegroundPermissionsAsync();
-      if (perm.status !== 'granted') return { denied: true, canAskAgain: perm.canAskAgain };
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const c = { lat: loc.coords.latitude, lng: loc.coords.longitude };
-      setUserLoc(c);
-      return { loc: c };
-    } catch { return { error: true }; }
+    const r = await fastLocation({ ask });
+    if (r.loc) setUserLoc(r.loc);
+    return r;
   };
   useEffect(() => { fetchUserLoc(false); }, []);
 
   const chooseSort = async (k) => {
     if (k === 'nearest' && !userLoc) {
+      if (locatingRef.current) return; // ضغطات إضافية وهو عم يحدد الموقع
+      locatingRef.current = true;
+      // نختار الشريحة فوراً مع إشارة إنه عم يحدد الموقع
+      const prevSort = sortBy;
+      setSortBy('nearest'); setLocating(true);
       const r = await fetchUserLoc(true);
+      locatingRef.current = false;
+      setLocating(false);
       if (!r.loc) {
-        Alert.alert('الموقع غير متاح', 'حتى نرتّب المطاعم حسب الأقرب لك، فعّل إذن الموقع للتطبيق.', [
+        setSortBy(prevSort);
+        Alert.alert('الموقع غير متاح', r.timeout
+          ? 'ما قدرنا نحدد موقعك بسرعة — تأكد إن الـ GPS شغّال وجرّب مرة ثانية.'
+          : 'حتى نرتّب المطاعم حسب الأقرب لك، فعّل إذن الموقع للتطبيق.', [
           { text: 'إلغاء', style: 'cancel' },
-          { text: 'الإعدادات', onPress: () => Linking.openSettings().catch(() => {}) },
+          r.timeout ? { text: 'حاول مجدداً', onPress: () => chooseSort('nearest') } : { text: 'الإعدادات', onPress: () => Linking.openSettings().catch(() => {}) },
         ]);
         return;
       }
+      layoutAnim();
+      return;
     }
     layoutAnim();
     setSortBy(k);
@@ -343,13 +364,14 @@ export default function HomeScreen() {
       const allRests = r.status === 'fulfilled' ? (r.value?.data || []) : [];
       const cats = c.status === 'fulfilled' ? (c.value?.data || []) : [];
       const bans = b.status === 'fulfilled' ? (b.value?.data || []) : [];
-      if (r.status === 'fulfilled') setRestaurants(allRests);
+      setFailed(r.status !== 'fulfilled');
+      if (r.status === 'fulfilled') { setRestaurants(allRests); setFromCache(false); }
       if (c.status === 'fulfilled') setCategories(cats);
       if (b.status === 'fulfilled') setBanners(bans);
 
       // مطاعم طلبت منها مؤخراً
       let recent = [];
-      try {
+      if (r.status === 'fulfilled') try {
         const my = await api.get('/orders/my');
         const orders = my?.data || [];
         const seen = new Set();
@@ -364,11 +386,11 @@ export default function HomeScreen() {
         setRecentRests(recent);
       } catch {}
 
-      // خزّن للعرض الفوري في المرة الجاية
-      if (allRests.length || cats.length || bans.length) {
+      // خزّن للعرض الفوري في المرة الجاية (فقط لو المطاعم وصلت — ما منمسح الكاش الجيد بفشل)
+      if (r.status === 'fulfilled' && (allRests.length || cats.length || bans.length)) {
         writeCache('home', { restaurants: allRests, categories: cats, banners: bans, recentRests: recent });
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { setFailed(true); }
     finally { setLoading(false); }
   };
 
@@ -396,23 +418,16 @@ export default function HomeScreen() {
     const pick = list[Math.floor(Math.random() * list.length)];
     go(pick.id);
   };
-  // مطابقة المطعم مع فئة حسب فئات المنيو الموجودة داخله
-  const matchesCat = (r, catName) => {
-    if (!catName) return false;
-    return (r.menu_cats || []).some(mc => mc && (mc.includes(catName) || catName.includes(mc)));
-  };
-  const byCat = (cat) => sorted.filter(r => matchesCat(r, cat.name_ar));
-  const topRated = [...restaurants].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 10);
+  // مطابقة المطاعم مع التصنيف — نفس منطق صفحة التصنيف (category_id أولاً ثم أقسام المنيو)
+  const byCat = (cat) => restaurantsForCategory(sorted, { id: cat.id, name: cat.name_ar });
+  // الفلاتر («المفتوحة الآن») تنطبق على كل الأقسام
+  const topRated = [...sorted].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 10);
+  const recentShown = openOnly ? recentRests.filter(r => r.is_open) : recentRests;
   const suggested = sorted.slice(0, 8);
   const openCount = restaurants.filter(r => r.is_open).length;
 
-  useEffect(() => {
-    if (suggested.length > 0) {
-      const t = setTimeout(() => suggestedRef.current?.scrollToEnd({ animated: false }), 100);
-      return () => clearTimeout(t);
-    }
-  }, [suggested.length]);
-
+  // البحث: الكيبورد يطلع فوراً (بدون كبسة ثانية)
+  const openSearch = () => navigation.navigate('بحث', { focus: Date.now() });
   const locText = defaultAddr ? `${addressLabel(defaultAddr)} · ${defaultAddr.address || ''}` : 'أضف عنوان التوصيل';
   const noMatches = restaurants.length > 0 && sorted.length === 0;
   const firstName = user?.name ? String(user.name).split(' ')[0] : '';
@@ -442,7 +457,7 @@ export default function HomeScreen() {
       </Animated.View>
       <View style={{ paddingTop: headerTop, paddingHorizontal: 16 }}>
         <View style={s.headerRow}>
-          <IconButton icon="notifications-outline" onPress={() => navigation.navigate('Notifications')} label="الإشعارات" onGradient />
+          <IconButton icon="notifications-outline" onPress={() => navigation.navigate('Notifications')} label={unread ? `الإشعارات، ${plural(unread, 'notification')} غير مقروءة` : 'الإشعارات'} onGradient badge={unread} />
           <Press style={s.locBtn} scaleTo={0.97} onPress={goAddress} accessibilityRole="button" accessibilityLabel={`عنوان التوصيل: ${locText}`}>
             <View style={s.locIcon}><Ionicons name="location" size={15} color={C.primary} /></View>
             <View style={{ flexShrink: 1, alignItems: 'flex-end' }}>
@@ -455,11 +470,11 @@ export default function HomeScreen() {
         </View>
         <Animated.View style={[s.greetWrap, { opacity: greetFade, transform: [{ translateY: greetShift }] }]}>
           <Text style={s.greetHi}>{greetingText()}{firstName ? `، ${firstName}` : ''} 👋</Text>
-          <Text style={s.greetSub}>شو نفسك تاكل اليوم؟{openCount ? ` · ${openCount} مطعم مفتوح الآن` : ''}</Text>
+          <Text style={s.greetSub}>شو نفسك تاكل اليوم؟{openCount ? ` · مفتوح الآن: ${plural(openCount, 'restaurant')}` : ''}</Text>
         </Animated.View>
       </View>
       <View style={s.searchDock}>
-        <AnimatedSearchBar C={C} onPress={() => navigation.navigate('بحث')} />
+        <AnimatedSearchBar C={C} onPress={openSearch} />
       </View>
     </View>
   );
@@ -473,13 +488,13 @@ export default function HomeScreen() {
       <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
       <LinearGradient colors={C.gradients.sheen} style={[StyleSheet.absoluteFill, { height: 40 }]} pointerEvents="none" />
       <View style={s.headerRow}>
-        <IconButton icon="search" size={38} onPress={() => navigation.navigate('بحث')} label="بحث" onGradient />
+        <IconButton icon="search" size={38} onPress={openSearch} label="بحث" onGradient />
         <TouchableOpacity style={s.miniLoc} onPress={goAddress} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={`عنوان التوصيل: ${locText}`}>
           <Ionicons name="location" size={14} color="#FFF" />
           <Text style={s.miniLocTxt} numberOfLines={1}>{locText}</Text>
           <Ionicons name="chevron-down" size={13} color="#FFF" />
         </TouchableOpacity>
-        <IconButton icon="notifications-outline" size={38} onPress={() => navigation.navigate('Notifications')} label="الإشعارات" onGradient />
+        <IconButton icon="notifications-outline" size={38} onPress={() => navigation.navigate('Notifications')} label="الإشعارات" onGradient badge={unread} />
       </View>
     </Animated.View>
   );
@@ -523,16 +538,22 @@ export default function HomeScreen() {
 
         {Hero}
 
+        {failed && fromCache && restaurants.length > 0 && (
+          <TouchableOpacity style={s.staleBanner} onPress={onRefresh} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="معروض من آخر تحديث، اضغط للتحديث">
+            <Ionicons name="cloud-offline-outline" size={16} color={C.text} />
+            <Text style={s.staleTxt}>تعذّر الاتصال — معروض من آخر تحديث. اضغط للتحديث</Text>
+          </TouchableOpacity>
+        )}
+
         <BannerSlider banners={banners} onPressBanner={onBannerPress} />
 
         {categories.length > 0 && (
           <View style={{ paddingTop: 18 }}>
             <View style={s.catHeader}>
               <Text style={s.catTitle}>اطلب حسب التصنيف</Text>
-              <Text style={s.catHint}>{categories.length} تصنيف</Text>
+              <Text style={s.catHint}>{plural(categories.length, 'category')}</Text>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingVertical: 4 }}>
+            <RtlHScroll contentContainerStyle={{ paddingHorizontal: 16, gap: 14, paddingVertical: 4 }}>
               {categories.map((cat, i) => {
                 const on = activeCat === cat.id;
                 return (
@@ -549,7 +570,7 @@ export default function HomeScreen() {
                   </FadeIn>
                 );
               })}
-            </ScrollView>
+            </RtlHScroll>
           </View>
         )}
 
@@ -557,7 +578,7 @@ export default function HomeScreen() {
         <View style={s.svcRow}>
           <ServiceCard colors={C.gradients.info} icon="cube" title="طلب شخصي" sub="وصّل طرد أو اطلب سائق · السعر حسب المسافة" tag="كاش"
             onPress={() => navigation.navigate('PersonalDelivery')} delay={80} />
-          <ServiceCard colors={C.gradients.violet} icon="people" title="طلب جماعي" sub="اطلبوا سوا وكل واحد يشوف حسابه"
+          <ServiceCard colors={C.gradients.violet} icon="people" title="اطلب مع أصحابك" sub="سلة مشتركة وكل واحد يشوف حسابه"
             onPress={() => navigation.navigate('GroupOrder')} delay={140} />
         </View>
 
@@ -567,26 +588,25 @@ export default function HomeScreen() {
             <View style={s.catHeader}>
               <Text style={s.catTitle}>تسوّق حسب القسم</Text>
               <Press onPress={() => navigation.navigate('ماركت', { storeType: 'all', t: Date.now() })} haptic={false} scaleTo={0.94}
-                style={s.shopAll} accessibilityRole="button" accessibilityLabel="كل المتاجر">
+                style={s.shopAll} accessibilityRole="button" accessibilityLabel="كل المتاجر" hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
                 <Text style={s.shopAllTxt}>كل المتاجر</Text>
                 <Ionicons name="chevron-back" size={13} color={C.primary} />
               </Press>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 10, paddingVertical: 4 }}>
+            <RtlHScroll contentContainerStyle={{ paddingHorizontal: 16, gap: 10, paddingVertical: 4 }}>
               {shopTypes.map((t, i) => (
                 <FadeIn key={t.key} delay={stagger(i, 45)} from={10}>
                   <Press style={s.shopTile} scaleTo={0.92} haptic={false} onPress={() => openStoreType(t)}
-                    accessibilityRole="button" accessibilityLabel={`${t.name}، ${t.count} متجر`}>
+                    accessibilityRole="button" accessibilityLabel={`${t.name}، ${plural(t.count, 'store')}`}>
                     <View style={[s.shopIcon, { backgroundColor: t.color + '1A' }]}>
                       <Text style={{ fontSize: 26 }}>{t.emoji}</Text>
                     </View>
                     <Text style={s.shopLbl} numberOfLines={2}>{t.name}</Text>
-                    <Text style={[s.shopCount, { color: t.color }]}>{t.count} متجر</Text>
+                    <Text style={[s.shopCount, { color: t.color }]}>{plural(t.count, 'store')}</Text>
                   </Press>
                 </FadeIn>
               ))}
-            </ScrollView>
+            </RtlHScroll>
           </View>
         )}
 
@@ -594,15 +614,19 @@ export default function HomeScreen() {
         <View style={s.sortHead}>
           <Text style={s.catTitle}>كل المطاعم</Text>
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 8, paddingVertical: 6 }}>
+        <RtlHScroll contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingVertical: 6 }}>
           <Chip icon="dice" label="فاجئني" onPress={surpriseMe} tone={C.primary} />
           <Chip icon={openOnly ? 'radio-button-on' : 'radio-button-off'} label="المفتوحة الآن" selected={openOnly}
             onPress={() => { layoutAnim(); setOpenOnly(v => !v); }} />
           {SORTS.map(opt => (
-            <Chip key={opt.k} icon={opt.icon} label={opt.l} selected={sortBy === opt.k} onPress={() => chooseSort(opt.k)} />
+            <Chip key={opt.k}
+              icon={opt.k === 'nearest' && locating ? 'locate' : opt.icon}
+              label={opt.k === 'nearest' && locating ? 'نحدد موقعك…' : opt.l}
+              selected={sortBy === opt.k}
+              accessibilityLabel={opt.k === 'nearest' && locating ? 'جاري تحديد موقعك' : opt.l}
+              onPress={() => chooseSort(opt.k)} />
           ))}
-        </ScrollView>
+        </RtlHScroll>
 
         {noMatches && (
           <View style={{ paddingVertical: 20 }}>
@@ -611,24 +635,19 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {recentRests.length > 0 && (
+        {recentShown.length > 0 && (
           <CollapsibleSection title="اطلب مرة أخرى" subtitle="من مطاعمك الأخيرة" icon="repeat">
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 6 }}>
-              {recentRests.map((r, i) => <FadeIn key={r.id} delay={stagger(i)} from={12}><HCard r={r} onPress={() => go(r.id)} /></FadeIn>)}
-            </ScrollView>
+            <RtlHScroll contentContainerStyle={{ paddingHorizontal: 16, gap: 14, paddingBottom: 6 }}>
+              {recentShown.map((r, i) => <FadeIn key={r.id} delay={stagger(i)} from={12}><HCard r={r} onPress={() => go(r.id)} /></FadeIn>)}
+            </RtlHScroll>
           </CollapsibleSection>
         )}
 
         {suggested.length > 0 && (
-          <CollapsibleSection title={sortBy === 'nearest' ? 'الأقرب إليك' : 'مطاعم مقترحة'} subtitle="مختارة إلك" icon="sparkles">
-            <ScrollView
-              ref={suggestedRef}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 14, paddingBottom: 6 }}>
+          <CollapsibleSection title={sortBy === 'nearest' && userLoc ? 'الأقرب إليك' : 'مطاعم مقترحة'} subtitle="مختارة إلك" icon="sparkles">
+            <RtlHScroll key={`sug-${sortBy}-${openOnly ? 1 : 0}`} contentContainerStyle={{ paddingHorizontal: 16, gap: 14, paddingBottom: 6 }}>
               {suggested.map((r, i) => <FadeIn key={r.id} delay={stagger(i)} from={12}><HCard r={r} onPress={() => go(r.id)} /></FadeIn>)}
-            </ScrollView>
+            </RtlHScroll>
           </CollapsibleSection>
         )}
 
@@ -650,7 +669,9 @@ export default function HomeScreen() {
 
         {restaurants.length === 0 && (
           <View style={{ paddingVertical: 30 }}>
-            <EmptyState emoji="🍽️" title="ما في مطاعم حاليًا" subtitle="جرّب تسحب للتحديث بعد شوي" ctaLabel="تحديث" onCta={onRefresh} />
+            {failed
+              ? <EmptyState emoji="📡" tone="error" title="تعذّر الاتصال" subtitle="تأكد من الإنترنت وحاول مرة ثانية" ctaLabel="إعادة المحاولة" onCta={onRefresh} />
+              : <EmptyState emoji="🍽️" title="ما في مطاعم حاليًا" subtitle="جرّب تسحب للتحديث بعد شوي" ctaLabel="تحديث" onCta={onRefresh} />}
           </View>
         )}
       </Animated.ScrollView>
@@ -757,4 +778,6 @@ const makeS = (C) => StyleSheet.create({
   shopLbl: { fontSize: 12, fontWeight: '800', color: C.text, textAlign: 'center', lineHeight: 15 },
   shopCount: { fontSize: 10.5, fontWeight: '800' },
   sortHead: { paddingHorizontal: 16, marginTop: 26, marginBottom: 6, alignItems: 'flex-end' },
+  staleBanner: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 6, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, backgroundColor: C.warnBg, borderColor: C.warnBorder },
+  staleTxt: { flex: 1, fontSize: 12.5, fontWeight: '700', color: C.text, textAlign: 'right' },
 });

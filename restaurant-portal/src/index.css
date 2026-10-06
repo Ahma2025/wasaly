@@ -53,6 +53,9 @@ button, a, input, select, textarea, [role="button"] {
 button:not(:disabled):active:not(.no-press), a.pressable:active { transform: scale(.97); }
 button:disabled { cursor: not-allowed; }
 
+/* مساحة لمس أكبر (≥44px) لعناصر صغيرة مثل مفتاح الإظهار/الإخفاء — دون تغيير شكلها */
+.hit-area::before { content: ""; position: absolute; inset: -8px -6px; }
+
 .shadow-brand { box-shadow: 0 14px 32px rgba(255,107,0,.28), 0 3px 8px rgba(255,107,0,.18); }
 
 /* حلقة تركيز موحّدة */

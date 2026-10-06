@@ -4,6 +4,7 @@ import { FiPlus, FiTrash2, FiTag, FiTruck } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { fmtDate, num, truthy } from '../utils/format';
+import { arCount } from '../utils/plural';
 import { PageHeader, EmptyState, ListSkeleton, Modal, Field, Badge, PrimaryBtn, useConfirm } from '../components/ui';
 
 const EMPTY = { code: '', type: 'percentage', value: '', max_discount: '', min_order: '', max_uses: '', expires_at: '' };
@@ -68,7 +69,15 @@ export default function Coupons() {
       setShowForm(false);
       setForm(EMPTY);
       toast.success('تم إنشاء الكوبون');
-    } catch (e) { toast.error(e?.message || 'فشل إنشاء الكوبون'); }
+    } catch (e) {
+      const code = form.code.trim();
+      // 409 لكود غير ظاهر = كوبون محذوف سابقاً بنفس الكود (الخادم الحالي يمنع إعادة استخدامه) — A-20
+      if (e?.status === 409) {
+        toast.error(visible.some(c => String(c.code).toUpperCase() === code)
+          ? 'يوجد كوبون فعّال بنفس الكود'
+          : `الكود «${code}» محجوز لكوبون محذوف سابقاً — اختر كوداً مختلفاً (مثلاً «${code}2»)`, { duration: 6000 });
+      } else toast.error(e?.message || 'فشل إنشاء الكوبون');
+    }
     finally { setSaving(false); }
   };
 
@@ -86,7 +95,7 @@ export default function Coupons() {
 
   return (
     <div className="page">
-      <PageHeader icon={<FiTag />} title="الكوبونات" subtitle={`${visible.length} كوبون فعّال`}
+      <PageHeader icon={<FiTag />} title="الكوبونات" subtitle={visible.length ? `${arCount(visible.length, 'coupon')} ${visible.length === 1 ? 'فعّال' : 'فعّالة'}` : 'لا كوبونات فعّالة'}
         action={<PrimaryBtn onClick={() => setShowForm(true)}><FiPlus /> <span>كوبون<span className="hidden sm:inline"> جديد</span></span></PrimaryBtn>} />
 
       {loading && coupons.length === 0 ? <ListSkeleton rows={4} grid />
@@ -153,10 +162,10 @@ export default function Coupons() {
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2"><Field label="كود الكوبون *"><input className="inp font-mono tracking-wider" dir="ltr" placeholder="WASALY10" value={form.code} onChange={set('code')} /></Field></div>
           <div className="col-span-2">
-            <Field label="نوع الخصم">
+            <Field label="نوع الخصم" as="group">
               <div className="grid grid-cols-3 gap-2">
                 {Object.entries(typeLabel).map(([k, l]) => (
-                  <button key={k} type="button" onClick={() => setForm(f => ({ ...f, type: k }))}
+                  <button key={k} type="button" aria-pressed={form.type === k} onClick={() => setForm(f => ({ ...f, type: k }))}
                     className={`py-2.5 rounded-xl text-xs font-bold ${form.type === k ? 'chip-on' : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>{l}</button>
                 ))}
               </div>
@@ -173,7 +182,7 @@ export default function Coupons() {
           <Field label="الحد الأدنى للطلب ₪"><input type="number" min="0" step="0.5" className="inp" placeholder="0" value={form.min_order} onChange={set('min_order')} /></Field>
           <Field label="عدد الاستخدامات" hint="(فارغ = غير محدود)"><input type="number" min="1" step="1" className="inp" placeholder="∞" value={form.max_uses} onChange={set('max_uses')} /></Field>
           <div className="col-span-2"><Field label="تاريخ الانتهاء" hint="(اختياري)"><input type="datetime-local" className="inp" value={form.expires_at} onChange={set('expires_at')} /></Field></div>
-          {form.type === 'free_delivery' && <p className="col-span-2 text-[11px] text-gray-400">يُلغي رسوم التوصيل عند استخدامه (يتطلب نسخة الخادم الجديدة).</p>}
+          {form.type === 'free_delivery' && <p className="col-span-2 text-[11px] text-ink-3">يُلغي رسوم التوصيل الأساسية للطلب عند استخدامه.</p>}
         </div>
       </Modal>
     </div>

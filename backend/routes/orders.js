@@ -74,25 +74,45 @@ router.post('/personal', auth, async (req, res) => {
     const km = S.haversineKm(+pickup_lat, +pickup_lng, +dropoff_lat, +dropoff_lng);
     const fare = await S.getZoneFee(pool, km);
 
-    const order = await S.withTransaction(async (client) => {
-      const { rows } = await client.query(
-        `INSERT INTO orders (order_number, customer_id, restaurant_id, delivery_address, delivery_lat, delivery_lng,
-          subtotal, delivery_fee, driver_fee, tip, discount, total, payment_method, payment_status, notes, order_type, status,
-          service_type, vehicle, pickup_lat, pickup_lng, pickup_address, recipient_name, recipient_phone,
-          parcel_desc, parcel_size, parcel_photo, passengers, distance_km, loyalty_points_earned)
-         VALUES ('', $1, NULL, $2, $3, $4, 0, $5::float8, $5::float8, 0, 0, $5::float8, 'cash', 'pending', $6, 'personal', 'confirmed',
-          $7, NULL, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 0) RETURNING id`,
-        [req.user.id, String(delivery_address || '').slice(0, 500), +dropoff_lat, +dropoff_lng, fare, String(notes || '').slice(0, 1000),
-         service_type, +pickup_lat, +pickup_lng, String(pickup_address || '').slice(0, 500),
-         String(recipient_name || '').slice(0, 100), String(recipient_phone || '').slice(0, 30), String(parcel_desc || '').slice(0, 500),
-         String(parcel_size || '').slice(0, 20), parcel_photo || '', pax, round2(km)]);
-      return setOrderNumber(client, rows[0].id);
-    });
+    // C-06: نفس مفتاح منع التكرار → نفس الطلب (لا طلب مكرّر عند إعادة المحاولة بعد انقطاع الرد)
+    const clientRef = S.clientRefFrom(req);
+    const replay = await findByClientRef(req.user.id, clientRef);
+    if (replay) return res.json({ success: true, data: replay, idempotent_replay: true });
+
+    let order;
+    try {
+      order = await S.withTransaction(async (client) => {
+        const { rows } = await client.query(
+          `INSERT INTO orders (order_number, customer_id, restaurant_id, delivery_address, delivery_lat, delivery_lng,
+            subtotal, delivery_fee, driver_fee, tip, discount, total, payment_method, payment_status, notes, order_type, status,
+            service_type, vehicle, pickup_lat, pickup_lng, pickup_address, recipient_name, recipient_phone,
+            parcel_desc, parcel_size, parcel_photo, passengers, distance_km, loyalty_points_earned, client_ref)
+           VALUES ('', $1, NULL, $2, $3, $4, 0, $5::float8, $5::float8, 0, 0, $5::float8, 'cash', 'pending', $6, 'personal', 'confirmed',
+            $7, NULL, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 0, $18) RETURNING id`,
+          [req.user.id, String(delivery_address || '').slice(0, 500), +dropoff_lat, +dropoff_lng, fare, String(notes || '').slice(0, 1000),
+           service_type, +pickup_lat, +pickup_lng, String(pickup_address || '').slice(0, 500),
+           String(recipient_name || '').slice(0, 100), String(recipient_phone || '').slice(0, 30), String(parcel_desc || '').slice(0, 500),
+           String(parcel_size || '').slice(0, 20), parcel_photo || '', pax, round2(km), clientRef]);
+        return setOrderNumber(client, rows[0].id);
+      });
+    } catch (e) {
+      const dup = isClientRefConflict(e, clientRef) ? await findByClientRef(req.user.id, clientRef) : null;
+      if (dup) return res.json({ success: true, data: dup, idempotent_replay: true });
+      throw e;
+    }
 
     S.dispatchOrder(req.io, order.id).catch(() => {});
     res.json({ success: true, data: order });
   } catch (e) { sendError(res, e, 'personal order'); }
 });
+
+// C-06: أدوات منع التكرار
+async function findByClientRef(userId, clientRef) {
+  if (!clientRef) return null;
+  const { rows } = await pool.query('SELECT * FROM orders WHERE customer_id=$1 AND client_ref=$2 ORDER BY id LIMIT 1', [userId, clientRef]);
+  return rows[0] || null;
+}
+const isClientRefConflict = (e, clientRef) => !!(clientRef && e && e.code === '23505' && /client_ref/.test(String(e.constraint || e.detail || '')));
 
 // ═══════════════════════════════════════════════════════════════
 //  🧾 عرض سعر (نفس جسم POST /orders) — نفس دالة التسعير بالضبط
@@ -114,7 +134,13 @@ router.post('/', auth, async (req, res) => {
     // البطاقة غير مفعّلة → التطبيق يخبر الزبون أن الطلب محفوظ للدفع عند الاستلام
     if (paymentMethod === 'card' && !LAHZA_ENABLED()) paymentMethod = 'cash';
 
-    const { order, priced } = await S.withTransaction(async (client) => {
+    // C-06: إعادة إرسال نفس المحاولة (نفس Idempotency-Key/client_ref) ترجع نفس الطلب — لا خصم محفظة/نقاط ولا إشعار مكرّر
+    const clientRef = S.clientRefFrom(req);
+    const replay = await findByClientRef(req.user.id, clientRef);
+    if (replay) return res.status(200).json({ success: true, data: replay, idempotent_replay: true });
+
+    let txOut;
+    try { txOut = await S.withTransaction(async (client) => {
       const { rows: ur } = await client.query('SELECT id, wallet_balance, loyalty_points FROM users WHERE id=$1 FOR UPDATE', [req.user.id]);
       const p = await S.priceOrder(client, req.user.id, body, { userRow: ur[0] || {} });
       const useCoupon = p.coupon && !p.coupon_error;
@@ -127,8 +153,8 @@ router.post('/', auth, async (req, res) => {
         `INSERT INTO orders (order_number, customer_id, restaurant_id, address_id, delivery_address, delivery_lat, delivery_lng,
            payment_method, payment_status, subtotal, delivery_fee, driver_fee, discount, coupon_discount, first_order_discount,
            points_value, free_delivery, tip, total, notes, coupon_code, estimated_delivery_time, loyalty_points_earned,
-           order_type, status, wallet_used, points_redeemed, cashback_given, commission_pct, distance_km)
-         VALUES ('', $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,'pending',$24,$25,0,$26,$27)
+           order_type, status, wallet_used, points_redeemed, cashback_given, commission_pct, distance_km, client_ref)
+         VALUES ('', $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,'pending',$24,$25,0,$26,$27,$28)
          RETURNING id`,
         [req.user.id, p.restaurant.id, orderType === 'delivery' && p.addressRow ? p.addressRow.id : null,
          orderType === 'delivery' ? (p.delivery_address || '') : null,
@@ -136,7 +162,7 @@ router.post('/', auth, async (req, res) => {
          p.subtotal, p.delivery_fee, p.driver_fee, p.discount, useCoupon ? p.coupon_discount : 0, p.first_order_discount,
          p.points_value, p.free_delivery, p.tip, p.total, String(body.notes || '').slice(0, 1000),
          useCoupon ? p.coupon.code : null, eta, p.points_earned, orderType,
-         p.wallet_used, p.points_redeemed, commissionPct, p.distance_km]);
+         p.wallet_used, p.points_redeemed, commissionPct, p.distance_km, clientRef]);
       const orderId = rows[0].id;
       const ord = await setOrderNumber(client, orderId);
 
@@ -175,7 +201,13 @@ router.post('/', auth, async (req, res) => {
         await client.query('INSERT INTO coupon_usage (coupon_id, user_id, order_id) VALUES ($1,$2,$3)', [p.coupon.id, req.user.id, orderId]);
       }
       return { order: ord, priced: p };
-    });
+    }); } catch (e) {
+      // سباق: طلبان متزامنان بنفس المفتاح → الثاني يرجع الأول (المعاملة الثانية تراجعت بالكامل)
+      const dup = isClientRefConflict(e, clientRef) ? await findByClientRef(req.user.id, clientRef) : null;
+      if (dup) return res.status(200).json({ success: true, data: dup, idempotent_replay: true });
+      throw e;
+    }
+    const { order, priced } = txOut;
 
     await cache.invalidateRestaurantOrders(order.restaurant_id);
     // 🔔 المطعم يُبلَّغ الآن — إلا طلبات البطاقة غير المدفوعة (تُطلق بعد التحقق من Lahza)
@@ -192,7 +224,7 @@ router.get('/my', auth, async (req, res) => {
     const safeLimit = clampInt(req.query.limit, 20, 1, 100);
     const safeOffset = clampInt(req.query.offset, 0, 0, 1000000);
     // أبناء الطلب المجمّع يظهرون كطلبات عادية + group_id/group_number/... حتى يدمجها التطبيق
-    let q = `SELECT o.*, r.name_ar as restaurant_name, r.logo as restaurant_logo,
+    let q = `SELECT o.*, r.name_ar as restaurant_name, r.logo as restaurant_logo, COALESCE(r.store_type, 'restaurant') AS store_type,
              (SELECT COUNT(*) FROM order_items WHERE order_id=o.id) as items_count,
              g.group_number, g.status AS group_status, g.total AS group_total, g.stops_total AS group_stops_count
              FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
@@ -202,12 +234,43 @@ router.get('/my', auth, async (req, res) => {
     if (status === 'active') q += ` AND o.status NOT IN ('delivered','cancelled')`;
     else if (status === 'past') q += ` AND o.status IN ('delivered','cancelled')`;
     else if (status) { q += ` AND o.status=$2`; params.push(status); }
-    q += ` ORDER BY o.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    q += ` ORDER BY o.created_at DESC, o.id DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(safeLimit, safeOffset);
     const { rows } = await pool.query(q, params);
-    res.json({ success: true, data: rows.map(r => ({ ...r, status_label: S.STATUS_LABELS[r.status] || r.status })) });
+    res.json({ success: true, data: rows.map(r => shapeDriverFields({
+      ...r, status_label: S.statusLabel(r), awaiting_payment: S.isAwaitingCardPayment(r) && r.status === 'pending',
+    }, req.user)) });
   } catch (e) { sendError(res, e, 'GET /orders/my'); }
 });
+
+/**
+ * X-03: سائق معروض عليه الطلب ولم يقبل بعد لا يُعرض للزبون/المطعم/الإدارة كأنه "السائق المُسند".
+ * driver_* تُفرَّغ حتى driver_assigned_at؛ driver_offer_pending=true أثناء العرض؛ الإدارة تأخذ offered_driver_id/name.
+ * السائق المعروض عليه نفسه يبقى يرى driver_id (= هو).
+ */
+function shapeDriverFields(o, viewer) {
+  if (!o) return o;
+  const assigned = !!o.driver_assigned_at;
+  o.driver_offer_pending = !assigned && !!o.driver_id && ['confirmed', 'preparing', 'ready'].includes(o.status);
+  if (!assigned) {
+    const isAdmin = viewer && viewer.role === 'admin';
+    const isSelf = viewer && o.driver_id && String(o.driver_id) === String(viewer.id);
+    if (isAdmin && o.driver_id) { o.offered_driver_id = o.driver_id; o.offered_driver_name = o.driver_name || null; }
+    for (const f of ['driver_name', 'driver_phone', 'driver_lat', 'driver_lng', 'vehicle_type', 'vehicle_plate']) if (f in o) o[f] = null;
+    if (!isSelf) o.driver_id = null;
+  }
+  return o;
+}
+
+// X-06: ابن طلب مجمّع بعين صاحب المطعم — إكرامية/أجرة السائق تخص المجموعة كلها (مسجّلة على "الابن الحامل" للمحاسبة)
+// فلا تظهر في فاتورة المطعم؛ total = قيمة أصناف هذا المطعم فقط
+function restaurantGroupChildView(o) {
+  if (!o || !o.group_id) return o;
+  return {
+    ...o, tip: 0, driver_fee: 0, delivery_fee: 0, total: round2(num(o.subtotal)),
+    group_payment_note: 'الدفع على الطلب المجمّع (يحصّله السائق)', total_label: 'قيمة أصناف هذا المطعم',
+  };
+}
 
 // Get order detail
 router.get('/:id', auth, async (req, res) => {
@@ -215,6 +278,7 @@ router.get('/:id', auth, async (req, res) => {
     if (!S.isIntId(req.params.id)) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
     const { rows: orders } = await pool.query(
       `SELECT o.*, r.name_ar as restaurant_name, r.logo, r.lat as restaurant_lat, r.lng as restaurant_lng,
+              COALESCE(r.store_type, 'restaurant') AS store_type,
               r.phone as restaurant_phone, r.owner_id as restaurant_owner_id, u.name as driver_name, u.phone as driver_phone,
               d.current_lat as driver_lat, d.current_lng as driver_lng, d.vehicle_type, d.vehicle_plate,
               cu.phone as customer_phone, cu.name as customer_name,
@@ -240,17 +304,27 @@ router.get('/:id', auth, async (req, res) => {
 
     const extra = {
       tip: round2(num(o.tip)),
-      status_label: S.STATUS_LABELS[o.status] || o.status,
+      status_label: S.statusLabel(o),
+      // C-02: بطاقة لم تُدفع بعد → الطلب لم يصل المطعم (التطبيق يعرض "بانتظار إتمام الدفع")
+      awaiting_payment: S.isAwaitingCardPayment(o) && o.status === 'pending',
       // ابن طلب مجمّع: التحصيل على مستوى المجموعة (GET /orders/groups/:id → cash_to_collect)
       cash_to_collect: (!o.group_id && o.payment_method !== 'card' && o.payment_status !== 'paid') ? round2(num(o.total)) : 0,
       is_group: !!o.group_id,
+      // A-05: الانتقالات المسموحة لهذا المستخدم الآن (لإخفاء الخيارات التي يرفضها السيرفر)
+      allowed_statuses: allowedStatusesFor(o, req.user),
     };
     if (isDriver && !o.driver_assigned_at && o.driver_offer_expires_at) {
       const exp = new Date(o.driver_offer_expires_at);
       extra.offer_seconds = Math.max(0, Math.round((exp.getTime() - Date.now()) / 1000));
       extra.expires_at = exp.toISOString();
+      extra.offer_id = `${o.id}|${extra.expires_at}`;
+      extra.server_now = new Date().toISOString();
     }
-    res.json({ success: true, data: { ...o, ...extra, items } });
+    delete o.payment_ref_history;
+    let data = shapeDriverFields({ ...o, ...extra, items }, req.user);
+    const isOwnerView = req.user.role !== 'admin' && o.restaurant_owner_id && String(o.restaurant_owner_id) === uid && !isDriver && String(o.customer_id) !== uid;
+    if (isOwnerView) data = restaurantGroupChildView(data);
+    res.json({ success: true, data });
   } catch (e) { sendError(res, e, 'GET /orders/:id'); }
 });
 
@@ -276,6 +350,29 @@ function validTransition(order, to) {
   if (to === 'on_the_way' && pickup) return false;
   if (to === 'delivered' && !pickup && order.status !== 'on_the_way') return false;
   return true;
+}
+
+// A-05: نفس قواعد PATCH /:id/status بالضبط — لإظهار الخيارات الممكنة فقط في الواجهات
+function allowedStatusesFor(order, user) {
+  if (!order || !user) return [];
+  const role = user.role, uid = String(user.id);
+  let allowed;
+  if (role === 'admin') allowed = Object.keys(TRANSITIONS).filter(s => s !== 'pending');
+  else if (role === 'driver') {
+    if (!order.driver_id || String(order.driver_id) !== uid || !order.driver_assigned_at) return [];
+    allowed = ['on_the_way', 'delivered'];
+  } else if (isRestaurantRole(role)) {
+    if (!order.restaurant_owner_id || String(order.restaurant_owner_id) !== uid) return [];
+    allowed = ['confirmed', 'preparing', 'ready', 'cancelled'];
+    if (order.order_type === 'pickup') allowed.push('delivered');
+    if (order.status === 'on_the_way') allowed = allowed.filter(s => s !== 'cancelled');
+  } else return [];
+  return allowed.filter((to) => {
+    if (order.group_id && ['on_the_way', 'delivered'].includes(to)) return false;
+    if (order.group_id && to === 'cancelled' && order.picked_up_at) return false;
+    if (to === 'confirmed' && S.isAwaitingCardPayment(order)) return false;
+    return validTransition(order, to);
+  });
 }
 
 async function loadOrderForUpdate(id) {
@@ -375,7 +472,9 @@ router.patch('/:id/status', auth, async (req, res) => {
       return res.json({ success: true });
     }
     if (status === 'cancelled') {
-      const c = await S.cancelOrder(req.io, order, by === 'restaurant' ? 'restaurant' : 'admin', req.body.reason, [order.status]);
+      // R-01: بوابة المطعم المنشورة ترسل cancel_reason (والجديدة reason) — نقبل الاثنين
+      const reason = req.body.reason ?? req.body.cancel_reason ?? req.body.cancelReason;
+      const c = await S.cancelOrder(req.io, order, by === 'restaurant' ? 'restaurant' : 'admin', reason, [order.status]);
       if (!c) return res.status(409).json({ success: false, message: 'تغيّرت حالة الطلب، حدّث الصفحة' });
       return res.json({ success: true });
     }
@@ -394,7 +493,9 @@ router.patch('/:id/status', auth, async (req, res) => {
       else if (status === 'ready') {
         saveNotification(updated.customer_id, updated.order_type === 'pickup' ? 'طلبك جاهز للاستلام 🛍️' : 'طلبك جاهز وبانتظار السائق ✅', 'order_status', { order_id: updated.id });
         if (updated.driver_id && updated.driver_assigned_at) {
-          S.pushTo(updated.driver_id, '✅ الطلب جاهز', `الطلب #${updated.order_number} جاهز للاستلام من المطعم`, { type: 'order_ready', order_id: String(updated.id) }, 'com.wasaly.driver');
+          // D-15: group_id لمحطة طلب مجمّع حتى يفتح الإشعار شاشة المجمّع
+          S.pushTo(updated.driver_id, '✅ الطلب جاهز', `الطلب #${updated.order_number} جاهز للاستلام من المطعم`,
+            { type: 'order_ready', order_id: String(updated.id), ...(updated.group_id ? { group_id: String(updated.group_id), is_group: 'true' } : {}) }, 'com.wasaly.driver');
         }
       }
     } catch (e) { console.error('notify status err:', e.message); }
@@ -463,9 +564,14 @@ router.patch('/:id/cancel', auth, async (req, res) => {
     if (!['pending', 'confirmed'].includes(order.status)) {
       return res.status(400).json({ success: false, message: 'لا يمكن إلغاء الطلب في هذه المرحلة' });
     }
-    const c = await S.cancelOrder(req.io, order, 'customer', req.body.reason, ['pending', 'confirmed']);
+    const c = await S.cancelOrder(req.io, order, 'customer', req.body.reason ?? req.body.cancel_reason, ['pending', 'confirmed']);
     if (!c) return res.status(400).json({ success: false, message: 'لا يمكن إلغاء الطلب في هذه المرحلة' });
-    res.json({ success: true });
+    // C-20: مدفوع بالبطاقة → الاسترجاع يدوي من الإدارة (تنبيه الإدارة يُرسل في refundOrderBenefits) — نخبر الزبون صراحةً
+    const cardRefund = c.payment_method === 'card' && c.payment_status === 'paid' && num(c.total) > 0;
+    res.json({ success: true, ...(cardRefund ? {
+      card_refund_pending: true, refund_amount: round2(num(c.total)),
+      refund_message: `المبلغ المدفوع بالبطاقة (${round2(num(c.total))}₪) رح يرجع لبطاقتك خلال أيام عمل، وفريق الدعم رح يتابع معك`,
+    } : {}) });
   } catch (e) { sendError(res, e, 'cancel'); }
 });
 
@@ -483,15 +589,26 @@ router.post('/:id/rate', auth, async (req, res) => {
     if (!orders[0]) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
     const order = orders[0];
 
+    // 🧺 C-13: الطلب المجمّع = توصيلة واحدة → السائق يُقيَّم مرة واحدة فقط لكل مجموعة (تقييمات المطاعم لكل ابن كما هي)
+    let driverRatingIgnored = false;
+    let effDriverRating = order.driver_id ? driverRating : null;
+    if (order.group_id && effDriverRating) {
+      const { rows: gr } = await pool.query(
+        `SELECT 1 FROM reviews rv JOIN orders o ON o.id=rv.order_id
+         WHERE o.group_id=$1 AND rv.order_id<>$2 AND rv.driver_rating IS NOT NULL LIMIT 1`, [order.group_id, order.id]);
+      if (gr[0]) { effDriverRating = null; driverRatingIgnored = true; }
+    }
+
     const { rows: ins } = await pool.query(
       `INSERT INTO reviews (order_id, customer_id, restaurant_id, driver_id, restaurant_rating, driver_rating, comment, images)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (order_id) DO NOTHING RETURNING id`,
       [order.id, req.user.id, order.restaurant_id, order.driver_id, order.restaurant_id ? restaurantRating : null,
-       order.driver_id ? driverRating : null, safeComment, JSON.stringify(Array.isArray(images) ? images.slice(0, 5) : [])]);
-    if (!ins[0]) return res.json({ success: true, already: true }); // تقييم واحد فقط — لا إشعارات مكرّرة
+       effDriverRating, safeComment, JSON.stringify(Array.isArray(images) ? images.slice(0, 5) : [])]);
+    // تقييم واحد فقط — لا إشعارات مكرّرة (التطبيق يعرض «قيّمت هذا الطلب من قبل»)
+    if (!ins[0]) return res.json({ success: true, already: true, message: 'قيّمت هذا الطلب من قبل' });
 
     await pool.query('UPDATE orders SET rating_restaurant=$1, rating_driver=$2, review_text=$3 WHERE id=$4',
-      [restaurantRating, driverRating, safeComment, order.id]);
+      [restaurantRating, effDriverRating, safeComment, order.id]);
     cache.invalidateRestaurantOrders(order.restaurant_id);
     if (order.restaurant_id) {
       await pool.query(
@@ -500,7 +617,7 @@ router.post('/:id/rate', auth, async (req, res) => {
           total_reviews = (SELECT COUNT(*) FROM reviews WHERE restaurant_id=$1 AND restaurant_rating IS NOT NULL) WHERE id=$1`,
         [order.restaurant_id]);
     }
-    if (order.driver_id) {
+    if (order.driver_id && effDriverRating) {
       await pool.query(
         `UPDATE drivers SET rating = COALESCE((SELECT ROUND(AVG(driver_rating)::numeric, 2) FROM reviews WHERE driver_id=$1 AND driver_rating BETWEEN 1 AND 5), 0)
          WHERE user_id=$1`, [order.driver_id]);
@@ -518,15 +635,15 @@ router.post('/:id/rate', auth, async (req, res) => {
       }
     } catch (e) { console.error('review notify (restaurant):', e.message); }
     try {
-      if (order.driver_id && driverRating) {
-        const msg = `قيّمك زبون: ${stars(driverRating)} (${driverRating}/5)${safeComment ? ' — ' + safeComment : ''}`;
-        saveNotification(order.driver_id, msg, 'review', { order_id: order.id, rating: driverRating });
-        notifyUser(req.io, order.driver_id, 'new_review', { order_id: order.id, rating: driverRating, comment: safeComment });
+      if (order.driver_id && effDriverRating) {
+        const msg = `قيّمك زبون: ${stars(effDriverRating)} (${effDriverRating}/5)${safeComment ? ' — ' + safeComment : ''}`;
+        saveNotification(order.driver_id, msg, 'review', { order_id: order.id, rating: effDriverRating });
+        notifyUser(req.io, order.driver_id, 'new_review', { order_id: order.id, rating: effDriverRating, comment: safeComment });
         try { const t = await getUserTokens(order.driver_id); if (t.length) await sendFCM(t, '⭐ تقييم جديد', msg, { type: 'review' }, 'com.wasaly.driver'); } catch { /* ignore */ }
       }
     } catch (e) { console.error('review notify (driver):', e.message); }
 
-    res.json({ success: true });
+    res.json({ success: true, ...(driverRatingIgnored ? { driver_rating_ignored: true, message: 'تم تقييم السائق مسبقاً ضمن هذا الطلب المجمّع' } : {}) });
   } catch (e) { sendError(res, e, 'rate'); }
 });
 

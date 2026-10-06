@@ -6,6 +6,7 @@ import { readCache, writeCache } from '../utils/cache';
 import { useRestaurant } from '../context/RestaurantContext';
 import { PageHeader, EmptyState, ErrorState, ListSkeleton, CountUp, cx } from '../components/ui';
 import { formatDateTime } from '../utils/format';
+import { pl } from '../utils/plural';
 
 const clampRating = (v) => {
   const n = Math.round(parseFloat(v));
@@ -33,9 +34,8 @@ const gradFor = (name = '') => AVATAR_GRADS[[...String(name)].reduce((s, c) => s
 export default function Reviews() {
   const { restaurant } = useRestaurant();
   const cacheKey = 'rest_reviews_' + restaurant.id;
-  const cachedRev = readCache(cacheKey);
-  const [reviews, setReviews] = useState(cachedRev || []);
-  const [loading, setLoading] = useState(!cachedRev);
+  const [reviews, setReviews] = useState(() => readCache(cacheKey) || []);
+  const [loading, setLoading] = useState(() => !readCache(cacheKey));
   const [error, setError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState(0);
@@ -52,17 +52,23 @@ export default function Reviews() {
 
   useEffect(() => { load(); }, [load]);
 
-  // المتوسط من التقييمات التي فيها تقييم للمطعم فقط (الفارغة لا تُحسب صفرًا)
-  const { avg, rated, dist, positive } = useMemo(() => {
+  // العنوان الرئيسي = التقييم الرسمي للمطعم (كل التقييمات، كما يراه الزبائن) — السيرفر يرسل آخر 100 تقييم فقط،
+  // لذلك التوزيع والنسبة الإيجابية محسوبان من «آخر N تقييم» ومكتوب ذلك بوضوح
+  const { avg, total, sample, dist, positive } = useMemo(() => {
     const vals = reviews.map(r => clampRating(r.restaurant_rating)).filter(v => v != null && v > 0);
     const dist = [5, 4, 3, 2, 1].map(s => ({ s, c: vals.filter(v => v === s).length }));
+    const official = parseFloat(restaurant.rating);
+    const officialCount = parseInt(restaurant.total_reviews);
+    const sampleAvg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
     return {
-      avg: vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length) : parseFloat(restaurant.rating || 0),
-      rated: vals.length,
+      avg: Number.isFinite(official) && official > 0 ? official : sampleAvg,
+      total: Number.isFinite(officialCount) && officialCount >= vals.length ? officialCount : vals.length,
+      sample: vals.length,
       dist,
       positive: vals.length ? Math.round(vals.filter(v => v >= 4).length / vals.length * 100) : null,
     };
-  }, [reviews, restaurant.rating]);
+  }, [reviews, restaurant.rating, restaurant.total_reviews]);
+  const partial = total > sample;
 
   const parseImgs = (imgs) => { try { const v = typeof imgs === 'string' ? JSON.parse(imgs) : (imgs || []); return Array.isArray(v) ? v : []; } catch { return []; } };
   const shown = filter ? reviews.filter(r => clampRating(r.restaurant_rating) === filter) : reviews;
@@ -80,16 +86,17 @@ export default function Reviews() {
               <div className="text-center">
                 <p className="text-[52px] font-black leading-none tnum"><CountUp value={avg || 0} decimals={1} /></p>
                 <div className="mt-2"><Stars n={avg} size={14} light /></div>
-                <p className="text-white/85 text-[12px] font-bold mt-1.5 tnum">{rated} تقييم</p>
+                <p className="text-white/85 text-[12px] font-bold mt-1.5 tnum">{total ? pl(total, 'review') : 'لا تقييمات'}</p>
               </div>
               <div className="flex-1 space-y-1.5">
+                {partial && <p className="text-[10.5px] text-white/80 font-bold">التوزيع: آخر {pl(sample, 'reviewGen')}</p>}
                 {dist.map(({ s, c }, i) => (
                   <button key={s} onClick={() => setFilter(filter === s ? 0 : s)} aria-pressed={filter === s}
                     className={cx('no-press w-full flex items-center gap-2 text-[11.5px] font-bold rounded-lg px-1 py-0.5 hover:bg-white/10', filter === s && 'bg-white/15')}>
                     <span className="w-3 tnum">{s}</span>
                     <FiStar size={10} className="fill-white flex-shrink-0" aria-hidden />
                     <span className="flex-1 h-2 bg-white/25 rounded-full overflow-hidden">
-                      <span className="block h-full bg-white rounded-full grow-x" style={{ width: `${rated ? (c / maxC) * 100 : 0}%`, animationDelay: `${i * 70}ms` }} />
+                      <span className="block h-full bg-white rounded-full grow-x" style={{ width: `${sample ? (c / maxC) * 100 : 0}%`, animationDelay: `${i * 70}ms` }} />
                     </span>
                     <span className="w-6 text-left text-white/85 tnum">{c}</span>
                   </button>
@@ -102,7 +109,7 @@ export default function Reviews() {
               <span className="w-11 h-11 rounded-[14px] bg-success-soft text-success flex items-center justify-center"><FiThumbsUp size={19} aria-hidden /></span>
               <div>
                 <p className="text-xl font-extrabold text-ink leading-none tnum"><CountUp value={positive} />%</p>
-                <p className="text-[12px] font-bold text-ink-3 mt-1">من التقييمات 4 نجوم أو أكثر</p>
+                <p className="text-[12px] font-bold text-ink-3 mt-1">{partial ? `من آخر ${pl(sample, 'reviewGen')}: 4 نجوم أو أكثر` : 'من التقييمات 4 نجوم أو أكثر'}</p>
               </div>
             </div>
           )}

@@ -181,5 +181,9 @@ const PORT = process.env.PORT || 5000;
     recoverDispatch(io);
     const sweep = setInterval(() => paymentsRouter.sweepPendingCardOrders(io), 60 * 1000);
     if (sweep.unref) sweep.unref();
+    // 🫀 D-07: سائقون "متصلون" بلا أي نشاط منذ ساعات طويلة (توكن منتهٍ/خروج إجباري) → offline
+    const { sweepStaleDrivers } = require('./utils/driverPresence');
+    const staleSweep = setInterval(() => sweepStaleDrivers(), 5 * 60 * 1000);
+    if (staleSweep.unref) staleSweep.unref();
   }
 })();

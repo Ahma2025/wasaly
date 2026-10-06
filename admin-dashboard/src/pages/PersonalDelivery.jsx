@@ -96,7 +96,7 @@ export default function PersonalDelivery() {
           <div className="rounded-[18px] p-4 bg-gradient-to-br from-sky-50 to-blue-50/60 border border-sky-100 flex gap-3">
             <span className="w-9 h-9 rounded-xl bg-white text-sky-600 flex items-center justify-center shadow-soft flex-shrink-0"><FiTruck /></span>
             <p className="text-xs text-sky-900/80 leading-relaxed font-medium">
-              يُرسل الطلب لأقرب سائق <b>متاح</b> (أي وسيلة). إن رفض أو لم يردّ يُحوَّل تلقائياً للسائق التالي. الدفع نقداً حالياً.
+              يُرسل الطلب لأقرب سائق <b>متاح</b> (أي وسيلة). إن رفض أو لم يردّ يُحوَّل تلقائياً للسائق التالي. الدفع كاش عند الاستلام حالياً.
               تظهر الطلبات الشخصية في «العمليات» و«الطلبات» بعلامة 📦.
             </p>
           </div>

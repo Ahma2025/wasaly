@@ -8,17 +8,15 @@ import PageSkeleton from '../components/Skeleton';
 import { PageHeader, ErrorState, EmptyState, KpiTile, CountUp, Trend, Tabs, CardHeader, prefersReducedMotion, cx } from '../components/ui';
 import { useRestaurant } from '../context/RestaurantContext';
 import { useLiveOrders } from '../context/LiveOrdersContext';
-import { STATUS_LABELS, STATUS_ACCENT, num, dayKey } from '../utils/format';
+import { STATUS_LABELS, statusMeta, num, dayKey, fmtLongToday } from '../utils/format';
+import { pl, noun } from '../utils/plural';
 
-const hasAny = (o, keys) => o && keys.some(k => o[k] != null);
-const FEE_KEYS = ['subtotal', 'food_revenue', 'delivery_fees', 'delivery_fee'];
-
-// مبيعات الطعام = المجموع الفرعي (بدون رسوم التوصيل التي تذهب للسائق)
+// مبيعات الطعام = المجموع الفرعي (السيرفر يحسب revenue من subtotal — بدون رسوم التوصيل والإكرامية)
 function foodRevenue(row) {
   if (!row) return 0;
   if (row.subtotal != null) return num(row.subtotal);
   if (row.food_revenue != null) return num(row.food_revenue);
-  return Math.max(0, num(row.revenue) - num(row.delivery_fees ?? row.delivery_fee));
+  return num(row.revenue);
 }
 
 const shortMoney = (v) => {
@@ -33,7 +31,7 @@ function ChartTooltip({ active, payload, label }) {
     <div className="bg-ink text-white rounded-xl px-3 py-2 shadow-lift text-right" dir="rtl">
       <p className="text-[11px] text-white/60 font-bold">يوم {label}</p>
       <p className="font-extrabold tnum">{num(payload[0].value).toFixed(2)}₪</p>
-      {p.count != null && <p className="text-[11px] text-white/70 tnum">{p.count} طلب</p>}
+      {p.count != null && <p className="text-[11px] text-white/70 tnum">{p.count ? `المُسلّمة: ${pl(p.count, 'order')}` : 'لا طلبات مُسلّمة'}</p>}
     </div>
   );
 }
@@ -42,9 +40,8 @@ export default function Dashboard() {
   const { restaurant } = useRestaurant();
   const { tick } = useLiveOrders();
   const cacheKey = 'rest_stats_' + restaurant.id;
-  const cachedStats = readCache(cacheKey);
-  const [stats, setStats] = useState(cachedStats || null);
-  const [loading, setLoading] = useState(!cachedStats);
+  const [stats, setStats] = useState(() => readCache(cacheKey) || null);
+  const [loading, setLoading] = useState(() => !readCache(cacheKey));
   const [error, setError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState('week');
@@ -70,10 +67,13 @@ export default function Dashboard() {
     const byDate = new Map(sales.map(s => [String(s.date).slice(0, 10), s]));
     // سلسلة أيام تقويمية كاملة (آخر 30 يوم) — الأيام بدون طلبات = صفر
     const days = [];
+    // الأيام بتوقيت فلسطين (نفس تجميع السيرفر)
+    const now = Date.now();
     for (let i = 29; i >= 0; i--) {
-      const dt = new Date(); dt.setHours(12, 0, 0, 0); dt.setDate(dt.getDate() - i);
-      const row = byDate.get(dayKey(dt));
-      days.push({ date: dayKey(dt), label: `${dt.getDate()}/${dt.getMonth() + 1}`, revenue: +foodRevenue(row).toFixed(2), count: row ? parseInt(row.count) || 0 : 0 });
+      const key = dayKey(new Date(now - i * 86400000));
+      const row = byDate.get(key);
+      const [, m, dd] = key.split('-');
+      days.push({ date: key, label: `${parseInt(dd)}/${parseInt(m)}`, revenue: +foodRevenue(row).toFixed(2), count: row ? parseInt(row.count) || 0 : 0 });
     }
     const last7 = days.slice(-7);
     const prev7 = days.slice(-14, -7);
@@ -82,14 +82,12 @@ export default function Dashboard() {
     const prev7Revenue = sum(prev7, 'revenue');
     const total30 = sum(days, 'revenue');
     const orders30 = sum(days, 'count');
-    const feesExcluded = sales.length === 0 || sales.some(s => hasAny(s, FEE_KEYS));
-    const todayFood = stats?.today_subtotal != null ? num(stats.today_subtotal)
-      : Math.max(0, num(stats?.today_revenue) - num(stats?.today_delivery_fees));
-    const todayFeesExcluded = stats?.today_subtotal != null || stats?.today_delivery_fees != null;
+    // «مبيعات اليوم» من السيرفر: subtotal لكل طلبات اليوم غير الملغاة (تشمل الجارية) — لذلك نوضّحها في البطاقة
+    const todayFood = stats?.today_subtotal != null ? num(stats.today_subtotal) : num(stats?.today_revenue);
     const byStatus = stats?.ordersByStatus || [];
     const totalAll = byStatus.reduce((s, x) => s + (parseInt(x.count) || 0), 0);
     return {
-      days, last7, prev7, last7Revenue, prev7Revenue, total30, orders30, feesExcluded, todayFood, todayFeesExcluded,
+      days, last7, prev7, last7Revenue, prev7Revenue, total30, orders30, todayFood,
       weekGrowth: prev7Revenue > 0 ? Math.round((last7Revenue - prev7Revenue) / prev7Revenue * 100) : null,
       avgOrder: orders30 > 0 ? total30 / orders30 : 0,
       delivered: parseInt(byStatus.find(s => s.status === 'delivered')?.count || 0),
@@ -105,12 +103,11 @@ export default function Dashboard() {
   const maxSold = Math.max(1, ...topItems.map(t => parseInt(t.sold) || 0));
   const chartData = view === 'week' ? d.last7 : d.days;
   const hasSales = d.total30 > 0;
-  const feeNote = !d.feesExcluded || !d.todayFeesExcluded;
   const todayOrders = parseInt(stats?.today_orders || 0);
 
   return (
     <div className="space-y-4 lg:space-y-5" dir="rtl">
-      <PageHeader title="الرئيسية" icon={FiHome} subtitle={new Date().toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long' })}
+      <PageHeader title="الرئيسية" icon={FiHome} subtitle={fmtLongToday()}
         onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing} />
 
       <div className="grid gap-3 lg:gap-4 lg:grid-cols-12">
@@ -123,10 +120,11 @@ export default function Dashboard() {
               <p className="text-[40px] lg:text-[46px] font-black leading-none mt-2 tnum">
                 <CountUp value={d.todayFood} decimals={2} /><span className="text-2xl font-extrabold ms-1">₪</span>
               </p>
+              <p className="text-white/80 text-[11px] font-bold mt-1.5">كل طلبات اليوم غير الملغاة (يشمل الجارية) · بدون التوصيل</p>
             </div>
             <span className="glass rounded-[16px] px-3 py-2 text-center flex-shrink-0">
               <span className="block text-[22px] font-black leading-none tnum"><CountUp value={todayOrders} /></span>
-              <span className="block text-[10.5px] text-white/85 font-bold mt-1">طلب اليوم</span>
+              <span className="block text-[10.5px] text-white/85 font-bold mt-1">{noun(todayOrders, 'order')} اليوم</span>
             </span>
           </div>
           {/* منحنى صغير لآخر 7 أيام */}
@@ -146,26 +144,26 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
           <p className="relative z-[1] text-white/75 text-[11px] font-bold mt-1 flex items-center justify-between">
-            <span>كل الطلبات غير الملغاة</span>
+            <span>المنحنى: الطلبات المُسلّمة</span>
             <span>آخر 7 أيام</span>
           </p>
         </section>
 
         {/* ─── مؤشرات ─── */}
         <div className="lg:col-span-7 grid grid-cols-2 gap-3 lg:gap-4 stagger">
-          <KpiTile icon={FiActivity} label="مبيعات آخر 7 أيام" value={d.last7Revenue} decimals={2} suffix="₪" trend={d.weekGrowth} hint={d.weekGrowth != null ? 'مقارنة بالأسبوع السابق' : undefined} />
-          <KpiTile icon={FiTrendingUp} label="مبيعات آخر 30 يوم" value={d.total30} decimals={2} suffix="₪" tone="violet" />
-          <KpiTile icon={FiShoppingBag} label="طلبات مُسلّمة (30 يوم)" value={d.orders30} tone="sky" />
-          <KpiTile icon={FiBarChart2} label="متوسط الطلب (30 يوم)" value={d.avgOrder} decimals={2} suffix="₪" tone="amber" />
+          <KpiTile icon={FiActivity} label="مبيعات آخر 7 أيام (المُسلّمة)" value={d.last7Revenue} decimals={2} suffix="₪" trend={d.weekGrowth} hint={d.weekGrowth != null ? 'مقارنة بالأيام السبعة السابقة' : undefined} />
+          <KpiTile icon={FiTrendingUp} label="مبيعات آخر 30 يومًا (المُسلّمة)" value={d.total30} decimals={2} suffix="₪" tone="violet" />
+          <KpiTile icon={FiShoppingBag} label="طلبات مُسلّمة (آخر 30 يومًا)" value={d.orders30} tone="sky" />
+          <KpiTile icon={FiBarChart2} label="متوسط الطلب (آخر 30 يومًا)" value={d.avgOrder} decimals={2} suffix="₪" tone="amber" />
         </div>
       </div>
 
       <div className="grid gap-3 lg:gap-4 lg:grid-cols-12">
         {/* ─── منحنى المبيعات ─── */}
         <section className="card p-4 lg:p-5 lg:col-span-8">
-          <CardHeader icon={FiTrendingUp} title="المبيعات اليومية" hint="مبيعات الطعام بدون رسوم التوصيل"
+          <CardHeader icon={FiTrendingUp} title="المبيعات اليومية" hint="الطلبات المُسلّمة · قيمة الأصناف بدون التوصيل"
             action={<Tabs size="sm" value={view} onChange={setView} ariaLabel="فترة المخطط" className="!shadow-none !bg-surface !border-0"
-              tabs={[{ key: 'week', label: '7 أيام' }, { key: 'month', label: '30 يوم' }]} />} />
+              tabs={[{ key: 'week', label: '7 أيام' }, { key: 'month', label: '30 يومًا' }]} />} />
           {hasSales ? (
             <div className="h-[200px] lg:h-[240px] -ms-2">
               <ResponsiveContainer width="100%" height="100%">
@@ -199,11 +197,11 @@ export default function Dashboard() {
           <CardHeader icon={FiBarChart2} title="آخر 7 أيام" action={d.weekGrowth !== null ? <Trend value={d.weekGrowth} /> : null} />
           <div className="grid grid-cols-2 gap-2">
             <div className="rounded-[14px] bg-brand-50 p-3">
-              <p className="text-[11px] font-bold text-brand-700/80">هذا الأسبوع</p>
+              <p className="text-[11px] font-bold text-brand-700/80">آخر 7 أيام</p>
               <p className="font-extrabold text-brand-700 text-lg tnum mt-0.5"><CountUp value={d.last7Revenue} decimals={2} />₪</p>
             </div>
             <div className="rounded-[14px] bg-surface p-3">
-              <p className="text-[11px] font-bold text-ink-3">الأسبوع السابق</p>
+              <p className="text-[11px] font-bold text-ink-3">السبعة السابقة</p>
               <p className="font-extrabold text-ink-2 text-lg tnum mt-0.5">{d.prev7Revenue.toFixed(2)}₪</p>
             </div>
           </div>
@@ -245,7 +243,7 @@ export default function Dashboard() {
                           : i === 1 ? 'bg-gradient-to-br from-gray-200 to-gray-300 text-gray-700'
                             : i === 2 ? 'bg-gradient-to-br from-brand-200 to-brand-300 text-brand-800' : 'bg-surface text-ink-3')}>{i + 1}</span>
                       <span className="flex-1 text-[14px] text-ink font-bold truncate">{item.name_ar}</span>
-                      <span className="text-[13px] font-extrabold text-ink tnum">{sold} <span className="text-ink-3 font-bold text-[11px]">مباع</span></span>
+                      <span className="text-[13px] font-extrabold text-ink tnum">{sold} <span className="text-ink-3 font-bold text-[11px]">{noun(sold, 'piece')}</span></span>
                     </div>
                     <div className="h-2 bg-surface rounded-full overflow-hidden">
                       <div className="h-full rounded-full grad-brand grow-x" style={{ width: `${Math.min(100, (sold / maxSold) * 100)}%`, opacity: Math.max(0.45, 1 - i * 0.1), animationDelay: `${Math.min(i, 7) * 60}ms` }} />
@@ -260,7 +258,7 @@ export default function Dashboard() {
         {/* ─── حالات الطلبات ─── */}
         <section className="card p-4 lg:p-5 lg:col-span-5">
           <CardHeader icon={FiPieChart} title="حالات الطلبات" hint="كل الأوقات"
-            action={d.totalAll > 0 ? <span className="text-right"><span className="block text-xl font-black text-ink leading-none tnum"><CountUp value={d.totalAll} /></span><span className="text-[10.5px] font-bold text-ink-3">طلب</span></span> : null} />
+            action={d.totalAll > 0 ? <span className="text-right"><span className="block text-xl font-black text-ink leading-none tnum"><CountUp value={d.totalAll} /></span><span className="text-[10.5px] font-bold text-ink-3">{noun(d.totalAll, 'order')}</span></span> : null} />
           {d.byStatus.length === 0 ? (
             <EmptyState compact icon={FiPieChart} title="لا طلبات بعد" />
           ) : (
@@ -269,7 +267,7 @@ export default function Dashboard() {
               <div className="flex h-3 rounded-full overflow-hidden bg-surface gap-[2px]" role="img" aria-label="توزيع حالات الطلبات">
                 {d.byStatus.map(s => {
                   const pct = d.totalAll > 0 ? (parseInt(s.count) / d.totalAll) * 100 : 0;
-                  return pct > 0 ? <span key={s.status} className="h-full grow-x" style={{ width: `${pct}%`, background: STATUS_ACCENT[s.status] || '#CBD5E1' }} /> : null;
+                  return pct > 0 ? <span key={s.status} className="h-full grow-x" style={{ width: `${pct}%`, background: statusMeta(s.status).accent }} /> : null;
                 })}
               </div>
               <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2 mt-4">
@@ -277,7 +275,7 @@ export default function Dashboard() {
                   const pct = d.totalAll > 0 ? Math.round((parseInt(s.count) / d.totalAll) * 100) : 0;
                   return (
                     <li key={s.status} className="flex items-center gap-2 rounded-[12px] bg-surface/70 px-2.5 py-2">
-                      <i className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: STATUS_ACCENT[s.status] || '#CBD5E1' }} aria-hidden />
+                      <i className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: statusMeta(s.status).accent }} aria-hidden />
                       <span className="flex-1 min-w-0 text-[12px] font-bold text-ink-2 truncate">{STATUS_LABELS[s.status] || s.status}</span>
                       <span className="text-[12px] font-extrabold text-ink tnum">{s.count}</span>
                       <span className="text-[10.5px] font-bold text-ink-3 tnum w-8 text-left">{pct}%</span>
@@ -286,19 +284,15 @@ export default function Dashboard() {
                 })}
               </ul>
               <div className="flex items-center gap-2 mt-3 text-[12px] font-bold text-emerald-700 bg-success-soft rounded-[12px] px-3 py-2">
-                <FiCheckCircle aria-hidden /> <span className="tnum">{d.delivered}</span> طلب مُسلّم منذ البداية
+                <FiCheckCircle aria-hidden /> المُسلّمة منذ البداية: <span className="tnum">{d.delivered ? pl(d.delivered, 'order') : 'لا يوجد'}</span>
               </div>
               {d.cancelled > 0 && d.totalAll > 0 && (
-                <p className="text-[12px] text-danger mt-2 font-bold flex items-center gap-1.5"><FiAlertCircle aria-hidden /> {d.cancelled} طلب ملغي ({Math.round(d.cancelled / d.totalAll * 100)}%) — راجع أسباب الإلغاء</p>
+                <p className="text-[12px] text-danger mt-2 font-bold flex items-center gap-1.5"><FiAlertCircle aria-hidden /> ملغاة: <span className="tnum">{pl(d.cancelled, 'order')}</span> ({Math.round(d.cancelled / d.totalAll * 100)}%) — راجع أسباب الإلغاء</p>
               )}
             </>
           )}
         </section>
       </div>
-
-      {feeNote && (
-        <p className="text-[11px] text-ink-3 text-center px-4">* بعض المبالغ قد تشمل رسوم التوصيل لأن الخادم لا يرسل المجموع الفرعي بعد. التواريخ حسب توقيت الخادم.</p>
-      )}
     </div>
   );
 }

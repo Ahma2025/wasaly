@@ -9,8 +9,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, GRADIENTS, SHADOW, RTL, RADIUS } from '../theme';
 import { ProgressRing, RadarRings, Press, LoadingDots, FadeIn, PopIn, haptic, useReducedMotion } from './Anim';
 import { Shimmer, Fact } from './OfferModal';
-import { money, km, num } from '../utils/format';
-import { groupNo, groupEarning, routeLegs } from '../utils/group';
+import { money, km, num, TERMS } from '../utils/format';
+import { arCount } from '../utils/plural';
+import { groupNo, groupEarning, routeLegs, routeOrder } from '../utils/group';
 
 const RING = 120;
 // التخطيط الأصلي مثبّت LTR (App.js) فنقلب الصفوف صراحةً؛ إن فُعّل RTL الأصلي يوماً يبقى الاتجاه صحيحاً
@@ -55,9 +56,10 @@ export default function GroupOfferModal({ offer, remaining, onAccept, onReject, 
     Animated.timing(flash, { toValue: 0, duration: 2600, delay: 900, useNativeDriver: true }).start();
   }, [updatedAt, flash]);
 
-  const stops = g?.stops || [];
+  // D-18: نفس ترتيب المسار الذي سيحسبه السيرفر عند القبول (أقرب جار من موقعك)
+  const stops = routeOrder(g?.stops || [], coords);
   const n = stops.length || g?.stops_total || 0;
-  const { legs, toDrop, total: tripKm } = routeLegs(g, coords);
+  const { legs, toDrop, total: tripKm } = routeLegs(g ? { ...g, stops } : g, coords);
   const busy = accepting || rejecting;
   const earn = groupEarning(g);
   const cash = num(g?.cash_to_collect);
@@ -76,7 +78,7 @@ export default function GroupOfferModal({ offer, remaining, onAccept, onReject, 
             <View style={[styles.row, styles.topRow]}>
               <View style={[styles.row, styles.newChip]}>
                 <Ionicons name="layers" size={14} color={COLORS.primary} />
-                <Text style={styles.newChipText}>طلب مجمّع • {n} مطاعم</Text>
+                <Text style={styles.newChipText}>طلب مجمّع • {arCount(n, 'restaurant')}</Text>
               </View>
               <Text style={styles.orderNo} numberOfLines={1}>#{groupNo(g)}</Text>
             </View>
@@ -86,7 +88,7 @@ export default function GroupOfferModal({ offer, remaining, onAccept, onReject, 
                 <ProgressRing progress={progress} size={RING} stroke={9} color={urgent ? '#FFE14D' : '#FFF'} track="rgba(255,255,255,0.22)">
                   <View style={styles.ringInner}>
                     <Animated.Text style={[styles.secs, urgent && { color: '#FFE14D' }, { transform: [{ scale: beatScale }] }]}
-                      accessibilityLabel={`متبقي ${remaining} ثانية`}>
+                      accessibilityLabel={`متبقي ${arCount(remaining, 'second')}`}>
                       {Math.max(0, remaining)}
                     </Animated.Text>
                     <Text style={styles.secsLabel}>{remaining > 0 ? 'ثانية' : 'انتهت'}</Text>
@@ -101,14 +103,14 @@ export default function GroupOfferModal({ offer, remaining, onAccept, onReject, 
               {tip > 0 && (
                 <View style={[styles.row, styles.tipChip]}>
                   <Ionicons name="heart" size={12} color="#FFF" />
-                  <Text style={styles.tipText}>يشمل إكرامية {money(tip)}</Text>
+                  <Text style={styles.tipText}>يشمل {TERMS.tip} {money(tip)}</Text>
                 </View>
               )}
             </FadeIn>
 
             <FadeIn delay={200} from={10}>
               <View style={[styles.row, styles.facts]}>
-                <Fact icon="storefront" label="محطات استلام" value={String(n)} />
+                <Fact icon="storefront" label="محطات الاستلام" value={String(n)} />
                 <View style={styles.factSep} />
                 <Fact icon="git-commit-outline" label="مسافة المسار" value={tripKm != null ? km(tripKm) : '—'} />
                 <View style={styles.factSep} />
@@ -169,8 +171,8 @@ export default function GroupOfferModal({ offer, remaining, onAccept, onReject, 
             {/* المال */}
             <FadeIn delay={320}>
               <View style={[styles.card, SHADOW.soft]}>
-                <MoneyRow icon="bicycle-outline" label={`أجرة التوصيل (${n} محطات)`} value={money(g.driver_fee)} />
-                {tip > 0 && <MoneyRow icon="heart-outline" label="إكرامية الزبون" value={money(tip)} color={COLORS.brandDeep} />}
+                <MoneyRow icon="bicycle-outline" label={`أجرة التوصيل (${arCount(n, 'stop')})`} value={money(g.driver_fee)} />
+                {tip > 0 && <MoneyRow icon="heart-outline" label={TERMS.tip} value={money(tip)} color={COLORS.brandDeep} />}
                 <MoneyRow icon="wallet-outline" label="أرباحك" value={money(earn)} color={COLORS.greenDeep} strong last={cash <= 0} />
                 {cash > 0 && <MoneyRow icon="cash-outline" label="تحصّله من الزبون (إجمالي الطلب)" value={money(cash)} color={COLORS.amberDeep} strong last />}
               </View>

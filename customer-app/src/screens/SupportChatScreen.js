@@ -3,10 +3,11 @@ import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Keyboard
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import api from '../utils/api';
+import api, { isNetworkError } from '../utils/api';
 import { useTheme } from '../context/ThemeContext';
 import GradientHeader from '../components/GradientHeader';
-import { SUPPORT_PHONE } from '../config';
+import { SUPPORT_PHONE, KB_TOOLBAR_H } from '../config';
+import { fmtTime } from '../utils/format';
 import { Animated, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { FadeIn, Press } from '../components/Anim';
@@ -45,7 +46,7 @@ function TypingDots({ color }) {
   );
 }
 
-const timeOf = (m) => { try { return m.created_at ? new Date(m.created_at).toLocaleTimeString('ar', { hour: '2-digit', minute: '2-digit' }) : ''; } catch { return ''; } };
+const timeOf = (m) => (m.created_at ? fmtTime(m.created_at) : '');
 
 export default function SupportChatScreen() {
   const { colors: C } = useTheme();
@@ -55,6 +56,8 @@ export default function SupportChatScreen() {
   const [pending, setPending] = useState([]); // رسائل قيد الإرسال/فشلت (ما بتضيع)
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');   // آخر جلب فشل (بدون نت مثلاً) → شريط تنبيه بدل "ابدأ محادثة"
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const listRef = useRef(null);
   const lastCount = useRef(0);
   const nearBottom = useRef(true);
@@ -68,7 +71,11 @@ export default function SupportChatScreen() {
         const same = prev.length === list.length && prev[prev.length - 1]?.id === list[list.length - 1]?.id;
         return same ? prev : list;
       });
-    } catch {}
+      setLoadError('');
+      setLoadedOnce(true);
+    } catch (e) {
+      setLoadError(isNetworkError(e) ? 'ما في اتصال — تأكد من الإنترنت (اضغط للتحديث)' : (e?.message || 'تعذّر تحميل المحادثة'));
+    }
     finally { setLoading(false); }
   }, []);
 
@@ -115,9 +122,17 @@ export default function SupportChatScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? KB_TOOLBAR_H : 0}>
       <GradientHeader title="الدعم الفني" subtitle="فريق وصلّي — نرد بأسرع وقت"
-        right={<TouchableOpacity onPress={() => Linking.openURL(`tel:${SUPPORT_PHONE}`).catch(() => {})} accessibilityLabel="اتصال بالدعم"><Ionicons name="call" size={20} color="#FFF" /></TouchableOpacity>} />
+        rightIcon="call" rightLabel="اتصال بالدعم" onRight={() => Linking.openURL(`tel:${SUPPORT_PHONE}`).catch(() => {})} />
+
+      {!!loadError && !loading && (
+        <TouchableOpacity style={styles.offline} onPress={load} accessibilityRole="button" accessibilityLabel={`${loadError}، اضغط لإعادة المحاولة`}>
+          <Ionicons name="cloud-offline-outline" size={16} color={C.text} />
+          <Text style={styles.offlineTxt}>{loadError}</Text>
+          <Ionicons name="refresh" size={15} color={C.primary} />
+        </TouchableOpacity>
+      )}
 
       {loading ? (
         <View style={{ flex: 1, padding: 16, gap: 12 }}>
@@ -160,7 +175,8 @@ export default function SupportChatScreen() {
                   {mine && !item.pending && !item.failed && <Ionicons name="checkmark-done" size={13} color={C.primary} />}
                 </View>
                 {item.failed && (
-                  <TouchableOpacity onPress={() => { haptic.light(); sendMsg(item.message, item.id); }} accessibilityRole="button" style={styles.retry}>
+                  <TouchableOpacity onPress={() => { haptic.light(); sendMsg(item.message, item.id); }} accessibilityRole="button" style={styles.retry}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                     <Ionicons name="refresh" size={13} color={C.red} />
                     <Text style={[styles.status, { color: C.red, fontWeight: '800' }]}>فشل الإرسال — اضغط لإعادة المحاولة</Text>
                   </TouchableOpacity>
@@ -168,7 +184,17 @@ export default function SupportChatScreen() {
               </FadeIn>
             );
           }}
-          ListEmptyComponent={
+          ListEmptyComponent={!loadedOnce && loadError ? (
+            <FadeIn style={{ alignItems: 'center', marginTop: 40, gap: 8 }}>
+              <LinearGradient colors={['#FFB4A8', '#F04438']} style={styles.emptyIcon}><Ionicons name="cloud-offline-outline" size={36} color="#FFF" /></LinearGradient>
+              <Text style={styles.empty}>تعذّر تحميل المحادثة</Text>
+              <Text style={styles.emptySub}>{loadError}</Text>
+              <TouchableOpacity onPress={() => { setLoading(true); load(); }} style={styles.retryBig} accessibilityRole="button">
+                <Ionicons name="refresh" size={15} color="#FFF" />
+                <Text style={styles.retryBigTxt}>إعادة المحاولة</Text>
+              </TouchableOpacity>
+            </FadeIn>
+          ) :
             <FadeIn style={{ alignItems: 'center', marginTop: 40, gap: 8 }}>
               <LinearGradient colors={C.gradients.sunset} style={styles.emptyIcon}><Ionicons name="chatbubbles" size={36} color="#FFF" /></LinearGradient>
               <Text style={styles.empty}>ابدأ محادثة مع فريق وصلّي 👋</Text>
@@ -207,4 +233,8 @@ const makeStyles = (C) => StyleSheet.create({
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 10, paddingTop: 10, backgroundColor: C.card, borderTopWidth: 1, borderTopColor: C.line },
   input: { flex: 1, backgroundColor: C.inputBg, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14.5, color: C.text, maxHeight: 110, borderWidth: 1, borderColor: C.border },
   sendBtn: { width: 46, height: 46, borderRadius: 23, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', ...C.shadow.float },
+  offline: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 10, borderRadius: 14, paddingVertical: 9, paddingHorizontal: 12, backgroundColor: C.warnBg, borderWidth: 1, borderColor: C.warnBorder },
+  offlineTxt: { flex: 1, fontSize: 12.5, fontWeight: '700', color: C.text, textAlign: 'right' },
+  retryBig: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, backgroundColor: C.primary, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 10, marginTop: 8 },
+  retryBigTxt: { color: '#FFF', fontWeight: '900', fontSize: 14 },
 });

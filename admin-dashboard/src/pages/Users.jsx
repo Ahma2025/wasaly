@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FiUserPlus, FiTruck, FiShoppingBag, FiUsers, FiCheck, FiSlash, FiArrowLeft } from 'react-icons/fi';
+import { FiUserPlus, FiTruck, FiShoppingBag, FiUsers, FiCheck, FiSlash, FiArrowLeft, FiRotateCcw, FiFilter, FiX } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { currentAdmin } from '../utils/session';
 import { normalizePhone } from '../utils/format';
-import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, TableSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, DataTable, Avatar, Segmented, useConfirm, useMediaQuery } from '../components/ui';
+import { arCount } from '../utils/plural';
+import { isInactive, duplicatePhoneMessage, reactivateUser } from '../utils/accounts';
+import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, TableSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, Button, DataTable, Avatar, Segmented, useConfirm, useMediaQuery } from '../components/ui';
 
 const PAGE = 50;
 const roleLabel = { customer: 'زبون', restaurant: 'مطعم', restaurant_owner: 'صاحب مطعم', driver: 'سائق', admin: 'مدير' };
@@ -21,6 +23,13 @@ const ROLE_TINT = { customer: '#2E90FA', restaurant: '#16A34A', restaurant_owner
 const isBlocked =(u) => u.is_blocked === true || u.is_blocked === 1 || u.is_blocked === '1';
 const EMPTY_FORM = { name: '', phone: '', password: '', role: 'customer', city: '' };
 
+/** شارة الحالة: معطّل (محذوف) ≠ محظور ≠ نشط — A-07 */
+function StateBadge({ u, dot }) {
+  if (isInactive(u)) return <Badge className="bg-gray-100 text-gray-600 ring-gray-200">{dot ? '● ' : ''}معطّل</Badge>;
+  if (isBlocked(u)) return <Badge className="bg-red-50 text-red-600 ring-red-200">{dot ? '● ' : ''}محظور</Badge>;
+  return <Badge className="bg-green-50 text-green-700 ring-green-200">{dot ? '● ' : ''}نشط</Badge>;
+}
+
 export default function Users() {
   const navigate = useNavigate();
   const confirm = useConfirm();
@@ -30,6 +39,8 @@ export default function Users() {
   const [total, setTotal] = useState(null);
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('');
+  const [state, setState] = useState('');
+  const [reactivating, setReactivating] = useState(null);
   const [loading, setLoading] = useState(!cached);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -90,6 +101,30 @@ export default function Users() {
     } catch (e) { toast.error(e?.message || 'خطأ'); }
   };
 
+  const reactivate = async (u) => {
+    const ok = await confirm({
+      title: 'إعادة تفعيل الحساب',
+      message: `سيعود حساب ${u.name || 'المستخدم'} (${u.phone}) نشطاً ويستطيع تسجيل الدخول.${u.role === 'customer' ? '' : '\nملاحظة: السائق/المتجر المحذوف يحتاج إعادة إضافة ملفه من صفحته.'}`,
+      confirmText: 'إعادة التفعيل', danger: false, icon: <FiRotateCcw />,
+    });
+    if (!ok) return;
+    setReactivating(u.id);
+    try {
+      const r = await reactivateUser(u.id);
+      setUsers(prev => prev.map(x => (x.id === u.id ? { ...x, is_active: r?.data?.is_active ?? r?.is_active ?? true } : x)));
+      toast.success('تمت إعادة تفعيل الحساب');
+    } catch (e) {
+      toast.error(e?.missingRoute ? 'إعادة التفعيل غير متاحة حالياً — تتطلب تحديث الخادم' : (e?.message || 'تعذّرت إعادة التفعيل'));
+    } finally { setReactivating(null); }
+  };
+
+  // فلتر الحالة محلياً على المحمّل (الخادم لا يفلتر بالحالة)
+  const shownUsers = users.filter(u => !state
+    || (state === 'inactive' && isInactive(u))
+    || (state === 'blocked' && !isInactive(u) && isBlocked(u))
+    || (state === 'active' && !isInactive(u) && !isBlocked(u)));
+  const filtersActive = !!(search.trim() || role || state);
+
   const createUser = async (e) => {
     e.preventDefault();
     if (!form.name.trim() || !form.phone.trim()) return toast.error('أدخل الاسم ورقم الهاتف');
@@ -105,15 +140,35 @@ export default function Users() {
       setShowCreate(false);
       setForm(EMPTY_FORM);
       fetchUsers();
-    } catch (err) { toast.error(err?.message || 'حدث خطأ'); }
+    } catch (err) {
+      // رقم مكرر: نوضح إن كان لحساب معطّل يمكن إعادة تفعيله — A-07
+      if (err?.status === 409 || /مسجل مسبقاً|مسجّل مسبقاً/.test(err?.message || '')) toast.error(await duplicatePhoneMessage(form.phone), { duration: 6000 });
+      else toast.error(err?.message || 'حدث خطأ');
+    }
     finally { setCreating(false); }
   };
 
-  const canBlock = (u) => u.role !== 'admin' && String(u.id) !== String(me?.id);
+  const canBlock = (u) => u.role !== 'admin' && String(u.id) !== String(me?.id) && !isInactive(u);
+  const actionFor = (u, compact) => {
+    if (isInactive(u)) {
+      return (
+        <button onClick={() => reactivate(u)} disabled={reactivating === u.id}
+          className="btn btn-sm flex-shrink-0 bg-sky-50 text-sky-700 hover:bg-sky-100 disabled:opacity-50">
+          <FiRotateCcw className={reactivating === u.id ? 'animate-spin' : ''} /> {compact ? 'تفعيل' : 'إعادة التفعيل'}
+        </button>
+      );
+    }
+    if (!canBlock(u)) return null;
+    return (
+      <button onClick={() => toggleBlock(u)} className={`btn btn-sm flex-shrink-0 ${isBlocked(u) ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'btn-danger'}`}>
+        {isBlocked(u) ? <><FiCheck /> رفع الحظر</> : <><FiSlash /> حظر</>}
+      </button>
+    );
+  };
 
   return (
     <div className="page">
-      <PageHeader icon={<FiUsers />} title="المستخدمون" subtitle={total != null ? `${total} مستخدم مسجّل` : 'إدارة الحسابات'}
+      <PageHeader icon={<FiUsers />} title="المستخدمون" subtitle={total != null ? `${arCount(total, 'account')} مسجّلة` : 'إدارة الحسابات'}
         action={<PrimaryBtn onClick={() => setShowCreate(true)}><FiUserPlus /> <span>حساب<span className="hidden sm:inline"> جديد</span></span></PrimaryBtn>} />
 
       <div className="lg:card lg:p-4 space-y-3">
@@ -121,12 +176,18 @@ export default function Users() {
         <Chips value={role} onChange={setRole} options={[
           ['', 'الكل'], ['customer', 'زبائن'], ['restaurant', 'مطاعم'], ['driver', 'سائقون'], ['admin', 'مدراء'],
         ]} />
+        <Chips brand value={state} onChange={setState} options={[
+          ['', 'كل الحالات'], ['active', 'نشط'], ['blocked', 'محظور'], ['inactive', 'معطّل'],
+        ]} />
       </div>
 
       {loading && users.length === 0 ? (desktop ? <TableSkeleton rows={8} /> : <ListSkeleton rows={5} />)
-        : users.length === 0 ? <EmptyState icon={<FiUsers />} title="لا يوجد مستخدمون" hint={search ? 'جرّب بحثاً آخر' : undefined} />
+        : shownUsers.length === 0 ? (filtersActive
+          ? <EmptyState icon={<FiFilter />} title="لا نتائج لهذا الفلتر" hint={state ? 'فلتر الحالة يطبّق على الحسابات المحمّلة — حمّل المزيد أو امسح الفلاتر' : 'جرّب بحثاً آخر'}
+              action={<Button variant="secondary" icon={<FiX />} onClick={() => { setSearch(''); setRole(''); setState(''); }}>مسح الفلاتر</Button>} />
+          : <EmptyState icon={<FiUsers />} title="لا يوجد مستخدمون بعد" />)
         : desktop ? (
-          <DataTable dim={refreshing} rows={users} maxHeight="calc(100vh - 320px)" columns={[
+          <DataTable dim={refreshing} rows={shownUsers} maxHeight="calc(100vh - 320px)" columns={[
             { key: 'name', header: 'المستخدم', render: u => {
               const self = String(u.id) === String(me?.id);
               return (
@@ -136,21 +197,14 @@ export default function Users() {
                 </div>
               );
             } },
-            { key: 'phone', header: 'الهاتف', render: u => <span className="num text-ink-2" dir="ltr">{u.phone}</span> },
+            { key: 'phone', header: 'الهاتف', render: u => <bdi className="num text-ink-2" dir="ltr">{u.phone}</bdi> },
             { key: 'role', header: 'الدور', render: u => <Badge className={roleColor[u.role] || 'bg-gray-100 text-gray-700 ring-gray-200'}>{roleLabel[u.role] || u.role}</Badge> },
-            { key: 'state', header: 'الحالة', render: u => isBlocked(u)
-              ? <Badge className="bg-red-50 text-red-600 ring-red-200">● محظور</Badge>
-              : <Badge className="bg-green-50 text-green-700 ring-green-200">● نشط</Badge> },
-            { key: 'act', header: '', align: 'end', render: u => canBlock(u) ? (
-              <button onClick={() => toggleBlock(u)} className={`btn btn-sm ${isBlocked(u) ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'btn-danger'}`}>
-                {isBlocked(u) ? <><FiCheck /> رفع الحظر</> : <><FiSlash /> حظر</>}
-              </button>
-            ) : null },
+            { key: 'state', header: 'الحالة', render: u => <StateBadge u={u} dot /> },
+            { key: 'act', header: '', align: 'end', render: u => actionFor(u) },
           ]} />
         ) : (
           <div className={`space-y-2 ${refreshing ? 'opacity-70' : ''} transition-opacity`}>
-            {users.map(u => {
-              const blocked = isBlocked(u);
+            {shownUsers.map(u => {
               const self = String(u.id) === String(me?.id);
               return (
                 <div key={u.id} className="card p-3.5 flex items-center justify-between gap-3">
@@ -161,16 +215,11 @@ export default function Users() {
                       <p className="text-xs text-ink-3 num" dir="ltr" style={{ textAlign: 'right' }}>{u.phone}</p>
                       <div className="flex gap-1 mt-1.5 flex-wrap">
                         <Badge className={roleColor[u.role] || 'bg-gray-100 text-gray-700 ring-gray-200'}>{roleLabel[u.role] || u.role}</Badge>
-                        <Badge className={blocked ? 'bg-red-50 text-red-600 ring-red-200' : 'bg-green-50 text-green-700 ring-green-200'}>{blocked ? 'محظور' : 'نشط'}</Badge>
+                        <StateBadge u={u} />
                       </div>
                     </div>
                   </div>
-                  {canBlock(u) && (
-                    <button onClick={() => toggleBlock(u)}
-                      className={`btn btn-sm flex-shrink-0 ${blocked ? 'bg-green-50 text-green-700' : 'btn-danger'}`}>
-                      {blocked ? 'رفع الحظر' : 'حظر'}
-                    </button>
-                  )}
+                  {actionFor(u, true)}
                 </div>
               );
             })}
@@ -194,7 +243,7 @@ export default function Users() {
           </button>
         </div>
         <form onSubmit={createUser} className="space-y-3.5">
-          <Field label="نوع الحساب">
+          <Field label="نوع الحساب" as="group">
             <Segmented full value={form.role} onChange={v => setForm(p => ({ ...p, role: v }))} options={[['customer', 'زبون'], ['admin', 'مدير']]} />
           </Field>
           <Field label="الاسم الكامل *"><input className="inp" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} /></Field>

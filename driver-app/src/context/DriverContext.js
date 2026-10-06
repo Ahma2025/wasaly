@@ -1,18 +1,19 @@
 // حالة السائق المركزية: الاتصال، الطلب النشط، عروض الطلبات، الإلغاء، السوكِت والإشعارات
 // 🧺 + الطلب المجمّع (عدة مطاعم — سائق واحد): عرض واحد للمجموعة، مهمة نشطة واحدة، تحديث/إلغاء المحطات
-import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Alert, AppState, Vibration } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import * as Haptics from 'expo-haptics';
-import api from '../utils/api';
+import api, { serverToDevice, noteServerNow } from '../utils/api';
 import { connectSocket, subscribe } from '../utils/socket';
 import { playOfferChime } from '../utils/pushNotifications';
-import { useAuth } from './AuthContext';
-import { useDriverLocation } from './LocationContext';
+import { useAuth, setActiveJobProbe } from './AuthContext';
+import { useDriverLocation, useDriverCoords } from './LocationContext';
 import { ONLINE_KEY } from '../utils/storage';
 import { DEFAULT_OFFER_SECONDS } from '../config';
 import { isAccepted, isPersonal, isRide, orderNo, money } from '../utils/format';
+import { arCount } from '../utils/plural';
 import { gid, groupKey, normalizeGroup, isGroupAccepted, groupNo, groupEarning, pickedCount } from '../utils/group';
 import { navigate, whenNavReady, closeDeliveryFor, closeDeliveryForGroup, currentRoute } from '../navigation/navRef';
 import OfferModal from '../components/OfferModal';
@@ -23,34 +24,80 @@ const DriverContext = createContext({});
 
 const OFFER_VIBRATION = [0, 700, 350, 700, 350, 700, 1200];
 const CHIME_EVERY_MS = 3500;
-const SEEN_TTL_MS = 10 * 60 * 1000;
+const SEEN_FALLBACK_TTL_MS = 60 * 1000; // عرض بلا expires_at (حمولة قديمة): نتجاهل تكراره دقيقة فقط
+const LOADING_STUCK_MS = 15000;
 const POLL_MS = 30000;
+const SUPPORT_UNREAD_KEY = 'driver_support_unread';
+
+// حالات نهائية لعرض سابق — يُقبل بعدها عرض جديد لنفس الطلب إن كان "نسخة" جديدة (expires_at مختلف)
+const TERMINAL = new Set(['rejected', 'expired', 'gone', 'failed', 'replaced', 'offline', 'closed', 'stale', 'taken']);
 
 const handledResponses = new Set(); // ردود الإشعارات المعالجة (حتى لا تُعالج مرتين)
 
 const sid = (v) => (v == null ? '' : String(v));
 const truthy = (v) => v === true || v === 'true' || v === 1 || v === '1';
-
-function computeDeadline(payload, order, receivedAt) {
-  const now = Date.now();
-  const candidates = [];
-  const exp = payload?.expires_at || order?.offer_expires_at || order?.expires_at;
-  if (exp) {
-    const t = Date.parse(exp);
-    if (Number.isFinite(t)) candidates.push(t);
+// هوية "نسخة" العرض = وقت انتهائها بتوقيت السيرفر (من offer_id "id|expires_at" أو expires_at)
+// تُقارن بتسامح ٤ ثوانٍ: السوكِت/الإشعار يحسب expires_at في JS والعرض من القاعدة بفارق أجزاء من الثانية،
+// بينما أي إعادة عرض حقيقية لنفس الطلب تأتي بعد ١٢ ثانية على الأقل
+const expOf = (...srcs) => {
+  for (const s of srcs) {
+    if (!s) continue;
+    const oid = s.offer_id != null ? String(s.offer_id) : '';
+    const raw = oid.includes('|') ? oid.slice(oid.lastIndexOf('|') + 1) : (s.expires_at || s.offer_expires_at);
+    const t = raw ? Date.parse(raw) : NaN;
+    if (Number.isFinite(t)) return t;
   }
-  const secs = parseInt(payload?.offer_seconds, 10);
-  if (Number.isFinite(secs) && secs > 0) candidates.push(receivedAt + secs * 1000);
-  // الأقرب يفوز (يحمي من اختلاف ساعة الجهاز عن السيرفر)
-  let deadline = candidates.length ? Math.min(...candidates) : receivedAt + DEFAULT_OFFER_SECONDS * 1000;
-  deadline = Math.min(deadline, now + 120000);
-  return deadline;
+  return null;
+};
+const sameInst = (a, b) => a != null && b != null && Math.abs(a - b) < 4000;
+const secsOf = (v) => {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
+
+// مهلة العرض بساعة الجهاز (D-02): نعتمد على "الثواني المتبقية" من السيرفر محسوبةً من لحظة الاستلام،
+// لا على expires_at الخام (ساعة الموبايل قد تكون مقدّمة/متأخرة فتختفي العروض كلها)
+//  - payload.offer_seconds + receivedAt (سوكِت/إشعار)
+//  - view.offer_seconds + viewAt (GET /orders/:id أو /drivers/me — الأدق لأنه محسوب لحظة الرد)
+//  - expires_at مصحّحاً بفرق الساعة (server_now / هيدر Date) فقط إن لم تتوفر الثواني
+function computeDeadline({ payload, view, receivedAt, viewAt }) {
+  const now = Date.now();
+  const cands = [];
+  const sp = secsOf(payload?.offer_seconds);
+  if (sp != null && sp > 0) cands.push(receivedAt + sp * 1000);
+  const sv = secsOf(view?.offer_seconds);
+  if (sv != null && viewAt) cands.push(viewAt + sv * 1000);
+  if (!cands.length) {
+    const exp = expOf(payload, view); // ms بتوقيت السيرفر
+    if (exp != null && Number.isFinite(exp)) {
+      const local = serverToDevice(exp);
+      if (local != null) cands.push(local);
+      else if (exp > now - 5000 && exp < now + 130000) cands.push(exp); // معقول بساعة الجهاز
+    }
+  }
+  const deadline = cands.length ? Math.min(...cands) : receivedAt + DEFAULT_OFFER_SECONDS * 1000;
+  return Math.min(deadline, now + 120000);
 }
 
 // بصمة عرض المجموعة — لمعرفة إن تغيّر شيء يراه السائق (محطات/أجر/تحصيل)
 const groupSig = (g) => (g ? [
   (g.stops || []).map(s => sid(s.order_id)).join(','), g.driver_fee, g.tip, g.cash_to_collect,
 ].join('|') : '');
+
+// نوافذ العروض في مكوّن منفصل: هو فقط من يتابع الإحداثيات والعدّاد (لا يعاد رسم كل التطبيق كل ثانية)
+function OfferLayer({ offer, remaining, onAccept, onReject, accepting, rejecting }) {
+  const coords = useDriverCoords();
+  const singleOffer = offer && !offer.isGroup ? offer : null;
+  const groupOffer = offer && offer.isGroup ? offer : null;
+  return (
+    <>
+      <OfferModal offer={singleOffer} remaining={singleOffer ? remaining : 0} onAccept={onAccept} onReject={onReject}
+        accepting={accepting} rejecting={rejecting} coords={coords} />
+      <GroupOfferModal offer={groupOffer} remaining={groupOffer ? remaining : 0} onAccept={onAccept} onReject={onReject}
+        accepting={accepting} rejecting={rejecting} coords={coords} />
+    </>
+  );
+}
 
 export function DriverProvider({ children }) {
   const { user } = useAuth();
@@ -61,10 +108,11 @@ export function DriverProvider({ children }) {
   const [driver, setDriver] = useState(null);
   const [activeOrder, setActiveOrder] = useState(null);
   const [activeGroup, setActiveGroupState] = useState(null);
-  const [offer, setOffer] = useState(null); // { order, deadline, totalSec, key, isGroup? }
+  const [offer, setOffer] = useState(null); // { order, deadline, totalSec, key, exp, isGroup? }
   const [remaining, setRemaining] = useState(0);
   const [accepting, setAccepting] = useState(false);
   const [rejecting, setRejecting] = useState(false);
+  const [supportUnread, setSupportUnread] = useState(false);
 
   const onlineRef = useRef(false);
   const onlineBusyRef = useRef(false);
@@ -72,13 +120,14 @@ export function DriverProvider({ children }) {
   const activeGroupRef = useRef(null);
   const doneGroupsRef = useRef(new Set()); // مجموعات انتهت (سُلّمت/أُلغيت) — لا نعيدها من استجابة قديمة
   const offerRef = useRef(null);
-  const seenRef = useRef(new Map());
+  const seenRef = useRef(new Map());       // key → { state, at, exp, rejectOk? }
   const cancelledRef = useRef(new Set());
   const timerRef = useRef(null);
   const chimeRef = useRef(null);
   const acceptingRef = useRef(false);
   const rejectingRef = useRef(false);
   const refreshingRef = useRef(null);
+  const lastAcceptRef = useRef(0);         // D-14: وقت آخر قبول — نتجاهل نتائج تحديث بدأ قبله
   const userRef = useRef(user);
   userRef.current = user;
   const locRef = useRef(location);
@@ -125,6 +174,26 @@ export function DriverProvider({ children }) {
     if (activeGroupRef.current && gid(activeGroupRef.current.id) === gid(id)) setGroup(null);
   }, [setGroup]);
 
+  // X-01: AuthContext يسألنا قبل تسجيل الخروج الإجباري إن كان هناك توصيل جارٍ
+  useEffect(() => {
+    setActiveJobProbe(() => !!(activeRef.current || activeGroupRef.current));
+    return () => setActiveJobProbe(null);
+  }, []);
+
+  // ── 💬 رسائل الدعم غير المقروءة (D-11) ──
+  useEffect(() => {
+    AsyncStorage.getItem(SUPPORT_UNREAD_KEY).then(v => { if (v === '1') setSupportUnread(true); }).catch(() => {});
+  }, []);
+  const markSupportUnread = useCallback(() => {
+    if (currentRoute()?.name === 'SupportChat') return; // المحادثة مفتوحة أصلاً
+    setSupportUnread(true);
+    AsyncStorage.setItem(SUPPORT_UNREAD_KEY, '1').catch(() => {});
+  }, []);
+  const markSupportRead = useCallback(() => {
+    setSupportUnread(false);
+    AsyncStorage.removeItem(SUPPORT_UNREAD_KEY).catch(() => {});
+  }, []);
+
   // ── عرض الطلب ──
   const stopAttention = useCallback(() => {
     try { Vibration.cancel(); } catch {}
@@ -135,11 +204,30 @@ export function DriverProvider({ children }) {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     stopAttention();
     const cur = offerRef.current;
-    if (cur) seenRef.current.set(cur.key || sid(cur.order.id), { state: reason, at: Date.now() });
+    if (cur) seenRef.current.set(cur.key || sid(cur.order.id), { state: reason, at: Date.now(), exp: cur.exp || null });
     offerRef.current = null;
     setOffer(null);
     setRemaining(0);
   }, [stopAttention]);
+
+  // هل نتجاهل عرضاً واصلاً؟ (D-01) — نفس "نسخة" العرض (نفس expires_at) تُتجاهل؛ نسخة جديدة تُفتح
+  const shouldSkipSeen = useCallback((key, exp, rejectUrl) => {
+    const seen = seenRef.current.get(key);
+    if (!seen) return false;
+    const age = Date.now() - seen.at;
+    if (seen.state === 'loading') return age < LOADING_STUCK_MS;
+    if (!TERMINAL.has(seen.state)) return age < SEEN_FALLBACK_TTL_MS; // accepted/group/open/cancelled
+    if (exp && seen.exp) {
+      if (!sameInst(exp, seen.exp)) return false; // عرض جديد لنفس الطلب (أُعيد إرساله بعد رفض/انتهاء)
+      // نفس النسخة التي رفضناها ولم يصل الرفض للسيرفر → نعيد الرفض حتى يتحرر الطلب لسائق آخر
+      if (seen.state === 'rejected' && !seen.rejectOk && rejectUrl) {
+        api.post(rejectUrl).then(() => { seen.rejectOk = true; }).catch(() => {});
+      }
+      return true;
+    }
+    if (exp && !seen.exp) return age < 3000;
+    return age < SEEN_FALLBACK_TTL_MS;
+  }, []);
 
   const startAttention = useCallback(() => {
     stopAttention();
@@ -159,7 +247,10 @@ export function DriverProvider({ children }) {
       if (!cur) return;
       const left = Math.max(0, Math.ceil((cur.deadline - Date.now()) / 1000));
       setRemaining(left);
-      if (left <= 0 && !acceptingRef.current) closeOffer('expired');
+      if (left <= 0 && !acceptingRef.current) {
+        closeOffer('expired');
+        showToast('انتهت مهلة العرض — سنرسل لك الطلب التالي فور توفّره', { tone: 'warn', icon: 'timer-outline' }); // D-22
+      }
     }, 500);
   }, [closeOffer]);
 
@@ -219,77 +310,113 @@ export function DriverProvider({ children }) {
     Alert.alert('تم إلغاء الطلب', lines.join('\n'));
   }, [closeOffer, setGroup]);
 
-  const openOffer = useCallback(async (payload, { receivedAt = Date.now(), preloaded = null } = {}) => {
+  // عرض لم يعد صالحاً قبل ظهوره (انتهت مهلته أثناء الوصول) — لا نسقطه بصمت (D-02)
+  const noteMissedOffer = useCallback(() => {
+    showToast('فاتك عرض طلب — انتهت مهلته قبل أن يصل لجهازك. ابقَ متصلاً وسيصلك التالي.', { tone: 'warn', icon: 'timer-outline', ms: 5000 });
+  }, []);
+
+  const openOffer = useCallback(async (payload, { receivedAt = Date.now(), preloaded = null, preloadedAt = null } = {}) => {
     const id = sid(payload?.order_id ?? payload?.id);
     if (!id) return;
+    const incomingExp = expOf(payload, preloaded);
     // نفس العرض ظاهر (سوكِت + إشعار لنفس الطلب) → لا نعيد ضبط المؤقت
     if (isSingleOffer(id)) {
-      const d = computeDeadline(payload, offerRef.current.order, receivedAt);
-      if (payload?.expires_at && d < offerRef.current.deadline) {
-        offerRef.current = { ...offerRef.current, deadline: d };
+      const cur = offerRef.current;
+      const d = computeDeadline({ payload, view: preloaded, receivedAt, viewAt: preloadedAt });
+      if (incomingExp && cur.exp && !sameInst(incomingExp, cur.exp) && d > Date.now() + 2000) {
+        // نسخة أحدث من العرض (أُعيد إرساله) → نعتمد مهلتها الجديدة
+        offerRef.current = { ...cur, exp: incomingExp, deadline: d, totalSec: Math.max(1, Math.round((d - Date.now()) / 1000)) };
+        setOffer(offerRef.current);
+      } else if (d < cur.deadline - 1000) {
+        offerRef.current = { ...cur, deadline: d };
         setOffer(offerRef.current);
       }
       return;
     }
     if (activeRef.current && sid(activeRef.current.id) === id) return;
     if (cancelledRef.current.has(id)) return;
-    const seen = seenRef.current.get(id);
-    if (seen && (seen.state === 'loading' || Date.now() - seen.at < SEEN_TTL_MS)) return;
-    seenRef.current.set(id, { state: 'loading', at: Date.now() });
+    if (shouldSkipSeen(id, incomingExp, `/orders/${id}/reject`)) return;
+    seenRef.current.set(id, { state: 'loading', at: Date.now(), exp: incomingExp });
 
     let order = null;
-    try {
-      const r = await api.get(`/orders/${id}`);
-      order = r?.data || null;
-    } catch { order = preloaded; }
-    if (!order) { seenRef.current.delete(id); return; }
+    let viewAt = null;
+    let fetched = false;
+    let netFail = false;
+    for (let attempt = 0; attempt < 2 && !fetched; attempt++) {
+      try {
+        const t0 = Date.now();
+        const r = await api.get(`/orders/${id}`);
+        order = r?.data || null;
+        viewAt = Math.round((t0 + Date.now()) / 2); // الثواني المتبقية محسوبة لحظة الرد تقريباً
+        fetched = !!order;
+        netFail = false;
+        break;
+      } catch (e) {
+        netFail = !e?.status || e.status >= 500;
+        if (!netFail || attempt > 0) break;
+        await new Promise(r => setTimeout(r, 1200)); // خطأ شبكة عابر → محاولة ثانية واحدة
+      }
+    }
+    if (!fetched) { order = preloaded; viewAt = preloadedAt; }
+    const exp = expOf(order, payload) || incomingExp;
+    const mark = (state) => seenRef.current.set(id, { state, at: Date.now(), exp });
+    if (!order) {
+      seenRef.current.delete(id);
+      // لا نُسقط العرض بصمت (D-02): نخبر السائق، والاستطلاع/إعادة الإرسال سيعيد فتحه إن بقي متاحاً
+      if (netFail) showToast('وصلك عرض طلب لكن تعذّر تحميل تفاصيله — تحقّق من الإنترنت', { tone: 'warn', icon: 'cloud-offline-outline', ms: 5000 });
+      return;
+    }
     // ابن طلب مجمّع وصلنا كعرض عادي (توافق) → يُعالج كمجموعة
-    if (order.group_id || order.is_group) { seenRef.current.set(id, { state: 'group', at: Date.now() }); return; }
+    if (order.group_id || order.is_group) { mark('group'); return; }
 
-    if (['cancelled', 'delivered', 'on_the_way', 'pending'].includes(order.status)) {
-      seenRef.current.set(id, { state: 'stale', at: Date.now() }); return;
-    }
-    if (isAccepted(order)) { seenRef.current.set(id, { state: 'accepted', at: Date.now() }); setActive(order); return; }
+    if (['cancelled', 'delivered', 'on_the_way', 'pending'].includes(order.status)) { mark('stale'); return; }
+    if (isAccepted(order)) { mark('accepted'); setActive(order); return; }
     const me = userRef.current?.id;
-    if (order.driver_id && me && sid(order.driver_id) !== sid(me)) {
-      seenRef.current.set(id, { state: 'taken', at: Date.now() }); return;
-    }
-    const deadline = computeDeadline(payload, order, receivedAt);
-    if (deadline - Date.now() < 2000) { seenRef.current.set(id, { state: 'expired', at: Date.now() }); return; }
+    if (order.driver_id && me && sid(order.driver_id) !== sid(me)) { mark('taken'); return; }
+    // السيرفر لم يعد يعرضه على أحد (انتهت مهلته أو رُفض) — عرض قديم
+    if (fetched && !order.driver_id) { mark('gone'); return; }
+
+    const deadline = computeDeadline({ payload, view: order, receivedAt, viewAt });
+    if (deadline - Date.now() < 2000) { mark('expired'); noteMissedOffer(); return; }
 
     if (offerRef.current) closeOffer('replaced');
-    const totalSec = Math.max(1, Math.round((deadline - receivedAt) / 1000));
-    offerRef.current = { order, deadline, totalSec, openedAt: Date.now(), key: id };
-    seenRef.current.set(id, { state: 'open', at: Date.now() });
+    const totalSec = Math.max(1, Math.round((deadline - Date.now()) / 1000));
+    offerRef.current = { order, deadline, totalSec, openedAt: Date.now(), key: id, exp };
+    mark('open');
     setOffer(offerRef.current);
     setRemaining(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
     startOfferTimer();
     startAttention();
-  }, [closeOffer, setActive, startAttention, startOfferTimer]);
+  }, [closeOffer, setActive, startAttention, startOfferTimer, shouldSkipSeen, noteMissedOffer]);
 
   // ── 🧺 عرض الطلب المجمّع ──
   // تحديث العرض الظاهر في مكانه (نفس المجموعة): محطات/أجر/مهلة — بلا إعادة رنين
-  const updateGroupOffer = useCallback((key, src, { payload = null, receivedAt = Date.now(), note = null, flag = true } = {}) => {
+  const updateGroupOffer = useCallback((key, src, { payload = null, receivedAt = Date.now(), view = null, viewAt = null, note = null, flag = true } = {}) => {
     const cur = offerRef.current;
     if (!cur || !cur.isGroup || cur.key !== key) return false;
     const group = src ? normalizeGroup(src, cur.order) : cur.order;
-    let { deadline, totalSec } = cur;
-    if (payload && (payload.expires_at || payload.offer_seconds)) {
-      const d = computeDeadline(payload, null, receivedAt);
-      if (d < deadline - 500) deadline = d;
+    let { deadline, totalSec, exp } = cur;
+    const incomingExp = expOf(payload, view);
+    if ((payload && (payload.expires_at || payload.offer_seconds)) || (view && view.offer_seconds != null)) {
+      const d = computeDeadline({ payload, view, receivedAt, viewAt });
+      const newInstance = incomingExp && exp && !sameInst(incomingExp, exp);
+      if (newInstance && d > Date.now() + 2000) {
+        deadline = d; exp = incomingExp;
+        totalSec = Math.max(1, Math.round((d - Date.now()) / 1000));
+      } else if (d < deadline - 1000) deadline = d;
       // إعادة إرسال حقيقية من السيرفر (بتفاصيل كاملة) بمهلة أطول → نمدّد
-      else if (Array.isArray(payload.stops) && d > deadline + 1500) {
+      else if (Array.isArray(payload?.stops) && d > deadline + 1500) {
         deadline = d;
         totalSec = Math.max(totalSec, Math.round((d - Date.now()) / 1000));
       }
     }
     const changed = groupSig(group) !== groupSig(cur.order);
-    const next = { ...cur, order: group, deadline, totalSec };
+    const next = { ...cur, order: group, deadline, totalSec, exp };
     if (flag && (changed || note)) {
       next.updatedAt = Date.now();
       const fewer = (group.stops || []).length < (cur.order.stops || []).length;
       next.updatedNote = note || (fewer
-        ? `اعتذر أحد المطاعم — العرض الآن ${(group.stops || []).length} مطاعم، أرباحك ${money(groupEarning(group))}`
+        ? `اعتذر أحد المطاعم — العرض الآن ${arCount((group.stops || []).length, 'restaurant')}، أرباحك ${money(groupEarning(group))}`
         : 'تم تحديث تفاصيل العرض');
     }
     offerRef.current = next;
@@ -306,71 +433,79 @@ export function DriverProvider({ children }) {
   // إثراء العرض بتفاصيل كاملة (هاتف المطعم، عدد الأصناف...) — بصمت
   const enrichGroupOffer = useCallback((id) => {
     const key = groupKey(id);
+    const t0 = Date.now();
     fetchGroupView(id).then((v) => {
       if (!v) return;
       if (v.status === 'cancelled') { handleGroupCancelled(v.id, v.cancelled_by, v.cancel_reason); return; }
       if (v.is_offer !== true && !isGroupAccepted(v)) { if (offerRef.current?.key === key && !acceptingRef.current) closeOffer('gone'); return; }
-      updateGroupOffer(key, v, { flag: true });
+      updateGroupOffer(key, v, { flag: true, view: v, viewAt: Math.round((t0 + Date.now()) / 2) });
     }).catch((e) => {
       if ((e?.status === 403 || e?.status === 404) && offerRef.current?.key === key && !acceptingRef.current) closeOffer('gone');
     });
   }, [fetchGroupView, updateGroupOffer, closeOffer, handleGroupCancelled]);
 
-  const openGroupOffer = useCallback(async (payload, { receivedAt = Date.now(), view = null } = {}) => {
+  const openGroupOffer = useCallback(async (payload, { receivedAt = Date.now(), view = null, viewAt = null } = {}) => {
     const id = gid(payload?.group_id ?? view?.id ?? view?.group_id);
     if (!id) return;
     const key = groupKey(id);
     // نفس المجموعة ظاهرة → تحديث في مكانه (عرض مُعاد/محدّث)
     if (offerRef.current?.isGroup && offerRef.current.key === key) {
       const hasDetails = Array.isArray(payload?.stops) || !!view;
-      updateGroupOffer(key, hasDetails ? (view || payload) : null, { payload, receivedAt });
+      updateGroupOffer(key, hasDetails ? (view || payload) : null, { payload, receivedAt, view, viewAt });
       return;
     }
     if (activeGroupRef.current && gid(activeGroupRef.current.id) === id) return;
     if (cancelledRef.current.has(key) || doneGroupsRef.current.has(key)) return;
-    const seen = seenRef.current.get(key);
-    if (seen && (seen.state === 'loading' || Date.now() - seen.at < SEEN_TTL_MS)) return;
-    seenRef.current.set(key, { state: 'loading', at: Date.now() });
+    const incomingExp = expOf(payload, view);
+    if (shouldSkipSeen(key, incomingExp, `/orders/groups/${id}/reject`)) return;
+    seenRef.current.set(key, { state: 'loading', at: Date.now(), exp: incomingExp });
 
     let v = view;
+    let vAt = viewAt;
     let fromPayload = false;
     if (!v) {
       if (Array.isArray(payload?.stops) && payload.stops.length) {
         v = payload; fromPayload = true; // حمولة السوكِت كافية للعرض فوراً
       } else {
-        try { v = await fetchGroupView(id); } catch (e) {
-          if (e?.status === 403 || e?.status === 404) seenRef.current.set(key, { state: 'stale', at: Date.now() });
+        try {
+          const t0 = Date.now();
+          v = await fetchGroupView(id);
+          vAt = Math.round((t0 + Date.now()) / 2);
+        } catch (e) {
+          if (e?.status === 403 || e?.status === 404) seenRef.current.set(key, { state: 'stale', at: Date.now(), exp: incomingExp });
           else seenRef.current.delete(key);
           return;
         }
       }
     }
     if (!v) { seenRef.current.delete(key); return; }
+    const exp = (fromPayload ? null : expOf(v)) || incomingExp;
+    const mark = (state) => seenRef.current.set(key, { state, at: Date.now(), exp });
 
     if (!fromPayload) {
-      if (['cancelled', 'delivered'].includes(v.status)) { seenRef.current.set(key, { state: 'stale', at: Date.now() }); return; }
+      if (['cancelled', 'delivered'].includes(v.status)) { mark('stale'); return; }
       const me = userRef.current?.id;
       if (isGroupAccepted(v)) {
-        if (!me || sid(v.driver_id) === sid(me)) { seenRef.current.set(key, { state: 'accepted', at: Date.now() }); setGroup(normalizeGroup(v)); }
-        else seenRef.current.set(key, { state: 'taken', at: Date.now() });
+        if (!me || sid(v.driver_id) === sid(me)) { mark('accepted'); setGroup(normalizeGroup(v)); }
+        else mark('taken');
         return;
       }
-      if (v.is_offer !== true || v.status !== 'confirmed') { seenRef.current.set(key, { state: 'stale', at: Date.now() }); return; }
+      if (v.is_offer !== true || v.status !== 'confirmed') { mark('stale'); return; }
     }
 
-    const deadline = computeDeadline(payload, fromPayload ? null : v, receivedAt);
-    if (deadline - Date.now() < 2000) { seenRef.current.set(key, { state: 'expired', at: Date.now() }); return; }
+    const deadline = computeDeadline({ payload, view: fromPayload ? null : v, receivedAt, viewAt: vAt });
+    if (deadline - Date.now() < 2000) { mark('expired'); noteMissedOffer(); return; }
 
     if (offerRef.current) closeOffer('replaced');
-    const totalSec = Math.max(1, Math.round((deadline - receivedAt) / 1000));
-    offerRef.current = { isGroup: true, key, order: normalizeGroup(v), deadline, totalSec, openedAt: Date.now() };
-    seenRef.current.set(key, { state: 'open', at: Date.now() });
+    const totalSec = Math.max(1, Math.round((deadline - Date.now()) / 1000));
+    offerRef.current = { isGroup: true, key, order: normalizeGroup(v), deadline, totalSec, openedAt: Date.now(), exp };
+    mark('open');
     setOffer(offerRef.current);
     setRemaining(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
     startOfferTimer();
     startAttention();
     if (fromPayload) enrichGroupOffer(id);
-  }, [closeOffer, setGroup, startAttention, startOfferTimer, updateGroupOffer, fetchGroupView, enrichGroupOffer]);
+  }, [closeOffer, setGroup, startAttention, startOfferTimer, updateGroupOffer, fetchGroupView, enrichGroupOffer, shouldSkipSeen, noteMissedOffer]);
 
   // ── 🧺 تحديث المجموعة النشطة من السيرفر ──
   const refreshActiveGroup = useCallback(async () => {
@@ -411,7 +546,7 @@ export function DriverProvider({ children }) {
     if (cur?.isGroup && cur.key === key) {
       const next = patch(cur.order);
       updateGroupOffer(key, next, {
-        note: `اعتذر مطعم ${name} — العرض الآن ${(next.stops || []).length} مطاعم، أرباحك ${money(groupEarning(next))}`,
+        note: `اعتذر مطعم ${name} — العرض الآن ${arCount((next.stops || []).length, 'restaurant')}، أرباحك ${money(groupEarning(next))}`,
       });
       enrichGroupOffer(id);
       return;
@@ -436,29 +571,43 @@ export function DriverProvider({ children }) {
     if (activeGroupRef.current && gid(activeGroupRef.current.id) === id) refreshActiveGroup();
   }, [enrichGroupOffer, refreshActiveGroup]);
 
+  // هل هذا الطلب محطة ضمن المجموعة النشطة؟ (إشعار "الطلب جاهز" لا يحمل group_id في السيرفر الحالي)
+  const groupHasChild = useCallback((orderId) => {
+    const g = activeGroupRef.current;
+    return !!(g && orderId != null && (g.stops || []).some(s => sid(s.order_id) === sid(orderId)));
+  }, []);
+
   // ── تحديث من السيرفر ──
   const refreshDriver = useCallback(async () => {
     if (refreshingRef.current) return refreshingRef.current;
     refreshingRef.current = (async () => {
       try {
+        const startedAt = Date.now();
         const r = await api.get('/drivers/me');
+        const respAt = Date.now();
         const d = r?.data || null;
         if (!d) return null;
         setDriver(d);
         const online = !!(d.is_online || d.isOnline);
         if (online !== onlineRef.current) applyOnline(online);
+        // D-14: قبلنا طلباً بعد بدء هذا الطلب → لقطة قديمة، لا نلمس المهمة الحالية
+        const staleSnapshot = startedAt <= lastAcceptRef.current || acceptingRef.current;
         let ao = d.active_order || null;
         if (ao && d.is_offer != null && ao.is_offer == null) ao = { ...ao, is_offer: !!d.is_offer };
         // 🧺 السيرفر الجديد: active_group له الأولوية؛ ابن المجموعة في active_order يُتجاهل
         const ag = d.active_group || null;
         if (ao && (ao.group_id || ao.is_group)) ao = null;
         // العرض الظاهر لم يعد مُسنداً لنا (انتهت مهلته على السيرفر) → أغلقه
+        // D-13: فقط عروض فُتحت قبل بدء هذا الطلب (وإلا قد نغلق عرضاً صحيحاً وصل أثناءه)
         const curOffer = offerRef.current;
-        if (curOffer && !acceptingRef.current && Date.now() - (curOffer.openedAt || 0) > 5000) {
+        if (curOffer && !acceptingRef.current && (curOffer.openedAt || 0) < startedAt - 1000) {
           const still = curOffer.isGroup
             ? !!(ag && ag.is_offer && gid(ag.id) === gid(curOffer.order.id))
             : !!(ao && sid(ao.id) === sid(curOffer.order.id));
-          if (!still) closeOffer('gone');
+          if (!still) {
+            closeOffer('gone');
+            showToast('لم يعد العرض متاحاً — انتهت مهلته', { tone: 'warn', icon: 'timer-outline' });
+          }
         }
 
         if (ag) {
@@ -466,33 +615,53 @@ export function DriverProvider({ children }) {
             const prev = activeGroupRef.current && gid(activeGroupRef.current.id) === gid(ag.id) ? activeGroupRef.current : null;
             setGroup(normalizeGroup(ag, prev));
           } else if (ag.is_offer && ag.status === 'confirmed' && !acceptingRef.current) {
-            openGroupOffer({ group_id: ag.id, expires_at: ag.expires_at, offer_seconds: ag.offer_seconds }, { view: ag });
+            openGroupOffer({ group_id: ag.id }, { view: ag, viewAt: respAt, receivedAt: respAt });
           }
-        } else if (activeGroupRef.current) {
-          // كانت عندنا مجموعة نشطة واختفت؟ تحقّق إن كانت أُلغيت
+        } else if (activeGroupRef.current && !staleSnapshot) {
+          // D-03: المجموعة النشطة غابت عن الرد — لا نحذفها إلا بتأكيد من السيرفر (خطأ مؤقت ≠ انتهاء المهمة)
           const prevG = activeGroupRef.current;
-          try {
-            const pv = await fetchGroupView(prevG.id);
-            if (pv?.status === 'cancelled') handleGroupCancelled(prevG.id, pv.cancelled_by, pv.cancel_reason);
-            else if (pv?.status === 'delivered') markGroupDone(prevG.id);
-          } catch {}
-          setGroup(null);
+          let pv = null; let unknown = false; let gone = false;
+          try { pv = await fetchGroupView(prevG.id); } catch (e) {
+            if (e?.status === 403 || e?.status === 404) gone = true; else unknown = true;
+          }
+          const stillSame = activeGroupRef.current && gid(activeGroupRef.current.id) === gid(prevG.id);
+          if (stillSame && !unknown) {
+            const me = userRef.current?.id;
+            if (gone || !pv) setGroup(null);
+            else if (pv.status === 'cancelled') handleGroupCancelled(prevG.id, pv.cancelled_by, pv.cancel_reason);
+            else if (pv.status === 'delivered') markGroupDone(prevG.id);
+            else if (pv.driver_id && me && sid(pv.driver_id) !== sid(me)) setGroup(null);
+            else if (isGroupAccepted(pv)) setGroup(normalizeGroup(pv, prevG)); // ما زالت مهمتنا
+            else setGroup(null);
+          }
         }
 
         if (ao && isAccepted(ao)) {
           setActive(activeRef.current && sid(activeRef.current.id) === sid(ao.id) ? { ...activeRef.current, ...ao } : ao);
         } else {
-          // كان عندنا طلب نشط واختفى؟ تحقّق إن كان أُلغي
           const prev = activeRef.current;
-          if (prev && (!ao || sid(ao.id) !== sid(prev.id))) {
-            try {
-              const pr = await api.get(`/orders/${prev.id}`);
-              if (pr?.data?.status === 'cancelled') handleCancelled(prev.id);
-            } catch {}
+          // D-14: نفس الطلب يظهر "غير مقبول" في لقطة قديمة → نبقيه (التحقق التالي سيصحّح)
+          const sameAsPrev = prev && ao && sid(ao.id) === sid(prev.id);
+          if (prev && !sameAsPrev && !staleSnapshot) {
+            // كان عندنا طلب نشط واختفى؟ نتحقق قبل الحذف
+            let pr = null; let unknown = false; let gone = false;
+            try { pr = (await api.get(`/orders/${prev.id}`))?.data || null; } catch (e) {
+              if (e?.status === 403 || e?.status === 404) gone = true; else unknown = true;
+            }
+            const stillSame = activeRef.current && sid(activeRef.current.id) === sid(prev.id);
+            if (stillSame && !unknown) {
+              const me = userRef.current?.id;
+              if (gone || !pr) setActive(null);
+              else if (pr.status === 'cancelled') { handleCancelled(prev.id, pr.cancelled_by); if (activeRef.current && sid(activeRef.current.id) === sid(prev.id)) setActive(null); }
+              else if (pr.status === 'delivered') setActive(null);
+              else if (pr.driver_id && me && sid(pr.driver_id) !== sid(me)) setActive(null);
+              else if (isAccepted(pr)) setActive({ ...prev, ...pr });
+              else setActive(null);
+            }
           }
-          setActive(null);
-          if (ao && ['confirmed', 'preparing', 'ready'].includes(ao.status)) {
-            openOffer({ order_id: ao.id }, { preloaded: ao });
+          if (ao && ['confirmed', 'preparing', 'ready'].includes(ao.status) && !isAccepted(ao) && !acceptingRef.current
+            && !(activeRef.current && sid(activeRef.current.id) === sid(ao.id))) {
+            openOffer({ order_id: ao.id }, { preloaded: ao, preloadedAt: respAt, receivedAt: respAt });
           }
         }
         return d;
@@ -521,6 +690,7 @@ export function DriverProvider({ children }) {
     const cur = offerRef.current;
     if (!cur || acceptingRef.current || rejectingRef.current) return;
     acceptingRef.current = true;
+    lastAcceptRef.current = Date.now();
     setAccepting(true);
     stopAttention();
     const o = cur.order;
@@ -528,6 +698,7 @@ export function DriverProvider({ children }) {
       if (cur.isGroup) {
         const r = await api.post(`/orders/groups/${o.id}/accept`);
         const data = r?.data || {};
+        lastAcceptRef.current = Date.now();
         closeOffer('accepted');
         const next = normalizeGroup({
           ...(Array.isArray(data.stops) ? { stops: data.stops } : {}),
@@ -538,13 +709,15 @@ export function DriverProvider({ children }) {
         setGroup(next);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         const n = (next.stops || []).length;
+        // D-16: إشعار القبول كـ Toast (لا نافذة تتراكب مع نافذة إذن الموقع بالخلفية على iOS)
         setTimeout(() => {
           navigate('Delivery', { groupId: o.id });
-          Alert.alert('✅ تم قبول الطلب المجمّع', `استلم من ${n} مطاعم حسب المسار المقترح، ثم سلّم الكل للزبون دفعة واحدة.`);
+          showToast(`تم قبول الطلب المجمّع ✅ استلم من ${arCount(n, 'restaurant')} حسب المسار المقترح، ثم سلّم الكل للزبون دفعة واحدة.`, { tone: 'success', icon: 'checkmark-circle', ms: 6000 });
         }, 650);
         return;
       }
       await api.post(`/orders/${o.id}/accept`);
+      lastAcceptRef.current = Date.now();
       closeOffer('accepted');
       setActive({ ...o, is_offer: false, status: o.status === 'confirmed' ? 'preparing' : o.status, driver_assigned_at: o.driver_assigned_at || new Date().toISOString() });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -554,7 +727,7 @@ export function DriverProvider({ children }) {
       // ننتظر حتى تُغلق نافذة العرض تماماً (iOS يرفض فتح شاشة أثناء إغلاق Modal)
       setTimeout(() => {
         navigate('Delivery', { orderId: o.id });
-        Alert.alert('✅ تم قبول الطلب', msg);
+        showToast(`تم قبول الطلب ✅ ${msg}`, { tone: 'success', icon: 'checkmark-circle', ms: 5000 });
       }, 650);
     } catch (e) {
       closeOffer('failed'); // لا نترك بطاقة لطلب لم يعد متاحاً
@@ -573,8 +746,11 @@ export function DriverProvider({ children }) {
     setRejecting(true);
     stopAttention();
     const url = cur.isGroup ? `/orders/groups/${cur.order.id}/reject` : `/orders/${cur.order.id}/reject`;
-    try { await api.post(url); } catch {}
+    let ok = false;
+    try { await api.post(url); ok = true; } catch {}
     closeOffer('rejected');
+    const seen = seenRef.current.get(cur.key || sid(cur.order.id));
+    if (seen) seen.rejectOk = ok;
     rejectingRef.current = false;
     setRejecting(false);
   }, [closeOffer, stopAttention]);
@@ -604,24 +780,28 @@ export function DriverProvider({ children }) {
         Alert.alert('تعذّر تحديد موقعك', 'فعّل خدمة الموقع (GPS) واسمح للتطبيق بالوصول لموقعك حتى تصلك الطلبات القريبة.');
       }
     } catch (e) {
-      Alert.alert('خطأ', e?.message || 'فشل في تغيير الحالة');
+      if (e?.status === 409) { Alert.alert('عندك طلب نشط', e?.message || 'أكمل التوصيل الحالي قبل إيقاف استقبال الطلبات.'); refreshDriver(); }
+      else Alert.alert('خطأ', e?.message || 'فشل في تغيير الحالة');
     } finally {
       onlineBusyRef.current = false;
       setOnlineBusy(false);
     }
-  }, [applyOnline, closeOffer]);
+  }, [applyOnline, closeOffer, refreshDriver]);
 
   // تتبّع الخلفية فقط أثناء توصيل نشط (طلب عادي أو مجمّع)
+  // D-16: نطلب إذن الخلفية بعد إغلاق نافذة العرض والانتقال للتوصيل (لا يتراكب مع أي نافذة أخرى)
   const activeId = activeOrder?.id || (activeGroup ? groupKey(activeGroup.id) : null);
   useEffect(() => {
-    if (activeId) locRef.current.ensureBackgroundTracking();
-    else locRef.current.stopBackground();
+    if (!activeId) { locRef.current.stopBackground(); return undefined; }
+    const t = setTimeout(() => { locRef.current.ensureBackgroundTracking(); }, 1600);
+    return () => clearTimeout(t);
   }, [activeId]);
 
   // ── معالجة الإشعارات ──
   const handleNotificationData = useCallback((data, receivedAt) => {
     if (!data || data._offerChime) return;
     const groupId = data.group_id ? sid(data.group_id) : '';
+    if (data.type === 'support') { markSupportUnread(); return; }
     if (data.type === 'new_order_request' && groupId && (truthy(data.is_group) || !data.order_id)) {
       openGroupOffer(data, { receivedAt: receivedAt || Date.now() });
     } else if (data.type === 'new_order_request' && data.order_id) {
@@ -629,12 +809,15 @@ export function DriverProvider({ children }) {
     } else if (groupId) {
       // تحديث/إلغاء محطة/إلغاء مجموعة: المصدر الموثوق هو السيرفر
       handleGroupChildChanged(groupId);
+    } else if (data.order_id && groupHasChild(data.order_id)) {
+      // D-15: محطة ضمن مجموعتنا (مثلاً "الطلب جاهز") بلا group_id في الحمولة
+      refreshActiveGroup();
     } else if (data.type === 'order_cancelled' || (data.type === 'order_status' && data.status === 'cancelled')) {
       handleCancelled(data.order_id, data.by);
     } else if (data.order_id && activeRef.current && sid(activeRef.current.id) === sid(data.order_id)) {
       refreshActiveOrder();
     }
-  }, [openOffer, openGroupOffer, handleCancelled, handleGroupChildChanged, refreshActiveOrder]);
+  }, [openOffer, openGroupOffer, handleCancelled, handleGroupChildChanged, refreshActiveOrder, refreshActiveGroup, groupHasChild, markSupportUnread]);
 
   const handleResponse = useCallback((response) => {
     if (!response) return;
@@ -644,14 +827,17 @@ export function DriverProvider({ children }) {
     const data = response.notification?.request?.content?.data || {};
     if (data._offerChime) return;
     const at = Number(response.notification?.date) || Date.now();
+    // D-11: رد الدعم → فتح المحادثة مباشرة
+    if (data.type === 'support') { navigate('SupportChat'); return; }
     handleNotificationData(data, at);
     if (data.type === 'new_order_request') return;
-    if (data.group_id && activeGroupRef.current && gid(activeGroupRef.current.id) === gid(data.group_id)) {
-      navigate('Delivery', { groupId: activeGroupRef.current.id });
+    const g = activeGroupRef.current;
+    if (g && ((data.group_id && gid(g.id) === gid(data.group_id)) || groupHasChild(data.order_id))) {
+      navigate('Delivery', { groupId: g.id }); // D-15
     } else if (data.order_id && activeRef.current && sid(activeRef.current.id) === sid(data.order_id)) {
       navigate('Delivery', { orderId: activeRef.current.id });
     }
-  }, [handleNotificationData]);
+  }, [handleNotificationData, groupHasChild]);
 
   // ── الإقلاع: كاش، سوكِت، مستمعين ──
   useEffect(() => {
@@ -660,13 +846,9 @@ export function DriverProvider({ children }) {
     refreshDriver();
     connectSocket();
 
-    const groupHasChild = (orderId) => {
-      const g = activeGroupRef.current;
-      return !!(g && (g.stops || []).some(s => sid(s.order_id) === sid(orderId)));
-    };
-
     const unsubs = [
       subscribe('new_order_request', (d) => {
+        if (d?.server_now) noteServerNow(d.server_now); // تصحيح فرق ساعة الجهاز (D-02)
         if (d && (d.is_group || (d.group_id && Array.isArray(d.stops)))) openGroupOffer(d, { receivedAt: Date.now() });
         else openOffer(d, { receivedAt: Date.now() });
       }),
@@ -709,6 +891,7 @@ export function DriverProvider({ children }) {
       subscribe('group_updated', (d) => handleGroupUpdated(d)),
       subscribe('group_cancelled', (d) => handleGroupCancelled(d?.group_id, d?.by, d?.reason)),
       subscribe('order_updated', () => refreshActiveOrder()), // توافق مع السيرفر القديم
+      subscribe('support_message', () => markSupportUnread()), // D-11
       subscribe('__reconnected', () => refreshDriver()),       // التقاط ما فاتنا أثناء الانقطاع
     ];
 
@@ -747,40 +930,23 @@ export function DriverProvider({ children }) {
     return () => clearInterval(t);
   }, [isOnline, refreshDriver]);
 
-  const value = {
+  // D-19: قيمة السياق ثابتة ما لم يتغيّر شيء يخص المستهلكين (العدّاد "remaining" ليس هنا)
+  const value = useMemo(() => ({
     isOnline, onlineBusy, setOnline,
     driver, refreshDriver,
     activeOrder, setActive, refreshActiveOrder,
     activeGroup, setActiveGroup: setGroup, refreshActiveGroup, markGroupDone,
-    offer, remaining,
+    offer,
+    supportUnread, markSupportRead,
     notifyCancelled: handleCancelled,
     notifyGroupCancelled: handleGroupCancelled,
-  };
-
-  const singleOffer = offer && !offer.isGroup ? offer : null;
-  const groupOffer = offer && offer.isGroup ? offer : null;
+  }), [isOnline, onlineBusy, setOnline, driver, refreshDriver, activeOrder, setActive, refreshActiveOrder,
+    activeGroup, setGroup, refreshActiveGroup, markGroupDone, offer, supportUnread, markSupportRead, handleCancelled, handleGroupCancelled]);
 
   return (
     <DriverContext.Provider value={value}>
       {children}
-      <OfferModal
-        offer={singleOffer}
-        remaining={remaining}
-        onAccept={acceptOffer}
-        onReject={rejectOffer}
-        accepting={accepting}
-        rejecting={rejecting}
-        coords={location.coords}
-      />
-      <GroupOfferModal
-        offer={groupOffer}
-        remaining={remaining}
-        onAccept={acceptOffer}
-        onReject={rejectOffer}
-        accepting={accepting}
-        rejecting={rejecting}
-        coords={location.coords}
-      />
+      <OfferLayer offer={offer} remaining={remaining} onAccept={acceptOffer} onReject={rejectOffer} accepting={accepting} rejecting={rejecting} />
       <ToastHost />
     </DriverContext.Provider>
   );

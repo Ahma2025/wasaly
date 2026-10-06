@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Share, Alert, RefreshControl } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Share, Alert, RefreshControl, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
-import api from '../utils/api';
+import api, { isNetworkError, NETWORK_MESSAGE } from '../utils/api';
+import { plural } from '../utils/plural';
+import { shareDownloadText } from '../config';
 import { Skeleton } from '../components/Skeleton';
 import GradientHeader from '../components/GradientHeader';
 import EmptyState from '../components/EmptyState';
@@ -35,21 +37,39 @@ export default function GroupOrderScreen() {
   const [group, setGroup] = useState(null);
   const [loading, setLoading] = useState(!!route.params?.code);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [excludedIds, setExcludedIds] = useState([]);
+  const groupRef = useRef(null);
+  const inFlight = useRef(null);
 
+  /*
+    جلب المجموعة: قطعة نت لحظة الرجوع للشاشة ما بتطلّع الزبون من المجموعة —
+    منمسح الكود فقط لو السيرفر قال صراحة إنها مش موجودة (404)
+  */
   const fetchGroup = useCallback(async (c, { silent } = {}) => {
     if (!c) return;
+    if (inFlight.current === c) return; // طلب لنفس الكود شغّال (يمنع رسالتين خطأ ورا بعض)
+    inFlight.current = c;
+    const quiet = silent ?? !!groupRef.current;
     try {
       const data = await api.get(`/group-orders/${c}`);
-      setGroup(data.data || data);
+      const g = data.data || data;
+      groupRef.current = g;
+      setGroup(g);
+      setLoadError('');
     } catch (e) {
-      if (!silent) {
-        Alert.alert('المجموعة غير متاحة', e?.message === 'Network error' ? 'تعذّر الاتصال — تأكد من الإنترنت' : 'المجموعة غير موجودة أو انتهت');
+      if (e?.status === 404) {
+        Alert.alert('السلة المشتركة غير متاحة', 'الكود غير موجود أو السلة انتهت — تأكد من الكود.');
+        groupRef.current = null;
         setCode(null); setGroup(null);
+      } else {
+        setLoadError(isNetworkError(e) ? NETWORK_MESSAGE : (e?.message || 'تعذّر تحميل السلة المشتركة'));
+        if (!quiet) Alert.alert('تعذّر التحميل', isNetworkError(e) ? NETWORK_MESSAGE : (e?.message || 'حاول مرة ثانية'));
       }
-    } finally { setLoading(false); setRefreshing(false); }
+    } finally { inFlight.current = null; setLoading(false); setRefreshing(false); }
   }, []);
 
-  useFocusEffect(useCallback(() => { if (code) fetchGroup(code, { silent: !!group }); }, [code, fetchGroup]));
+  useFocusEffect(useCallback(() => { if (code) fetchGroup(code, { silent: !!groupRef.current }); }, [code, fetchGroup]));
 
   // تحديث لحظي عبر السوكِت
   useEffect(() => {
@@ -61,23 +81,30 @@ export default function GroupOrderScreen() {
         if (!token) return;
         sock = io(SOCKET_URL, { auth: { token }, transports: ['websocket'] });
         sock.on('group:updated', (p) => {
-          if (!p?.code || String(p.code).toUpperCase() === String(code).toUpperCase()) fetchGroup(code, { silent: true });
+          if (!p?.code || String(p.code).toUpperCase() === String(code).toUpperCase()) {
+            // المضيف طلب: أصناف ما دخلت بالطلب (السيرفر الأحدث يبعتها مع الإغلاق)
+            if (Array.isArray(p?.excluded)) setExcludedIds(p.excluded.map(x => String(x.item_id ?? x.id)));
+            fetchGroup(code, { silent: true });
+          }
         });
       } catch {}
     })();
     return () => { sock?.disconnect(); };
   }, [code, fetchGroup]);
 
+  // الجلب يصير من useFocusEffect لما يتغيّر الكود (بدون طلب مكرر)
   const joinByCode = () => {
     const c = codeInput.trim().toUpperCase();
-    if (c.length < 4) return Alert.alert('كود غير صحيح', 'اكتب كود المجموعة الصحيح');
-    setLoading(true); setCode(c); fetchGroup(c);
+    if (c.length < 4) return Alert.alert('كود غير صحيح', 'اكتب كود السلة المشتركة الصحيح');
+    Keyboard.dismiss();
+    groupRef.current = null;
+    setLoading(true); setCode(c);
   };
 
   const shareCode = () => {
     if (!group) return;
     Share.share({
-      message: `🍔 تعال نطلب سوا من ${group.restaurant_name || 'المطعم'} على تطبيق وصلّي!\n\nافتح التطبيق → طلب جماعي → أدخل الكود:\n\n🔑 ${group.code}\n\nكل واحد بيزيد أكله وبيشوف حسابه 😋`,
+      message: `🛒 تعال نطلب سوا من ${group.restaurant_name || 'المحل'} على تطبيق وصلّي!\n\nافتح التطبيق → اطلب مع أصحابك (سلة مشتركة) → أدخل الكود:\n\n🔑 ${group.code}\n\nكل واحد بيضيف طلبه وبيشوف حسابه 😋\n\n${shareDownloadText()}`,
     }).catch(() => {});
   };
 
@@ -87,7 +114,7 @@ export default function GroupOrderScreen() {
   };
 
   const removeItem = (it) => {
-    Alert.alert('حذف الصنف', `بدك تحذف «${it.name}» من المجموعة؟`, [
+    Alert.alert('حذف الصنف', `بدك تحذف «${it.name}» من السلة المشتركة؟`, [
       { text: 'إلغاء', style: 'cancel' },
       {
         text: 'حذف', style: 'destructive', onPress: async () => {
@@ -98,7 +125,10 @@ export default function GroupOrderScreen() {
     ]);
   };
 
-  // المضيف: نقل الأصناف للسلة — المجموعة تُقفل فقط بعد نجاح الطلب (من السلة)
+  /*
+    المضيف: نقل الأصناف للسلة. نقفل السلة المشتركة للإضافة (lock) حتى ما ينضاف شي ما بيدخل بالطلب،
+    ونحفظ أرقام الأصناف المنقولة لنقارنها بعد الطلب. القفل النهائي (ordered) بعد نجاح الطلب من السلة.
+  */
   const doCheckout = () => {
     const items = group.items.map(it => ({
       id: it.menu_item_id,
@@ -109,16 +139,18 @@ export default function GroupOrderScreen() {
       addons: (it.options || []).map(o => ({ ...o, price: parseFloat(o.price) || 0 })),
       notes: it.notes || '',
     }));
-    reorder(items, { id: group.restaurant_id, name_ar: group.restaurant_name }, { groupOrder: { id: group.id, code: group.code } });
+    api.post(`/group-orders/${group.id}/lock`).catch(() => {}); // سيرفر قديم بلا قفل → نعتمد على المقارنة بعد الطلب
+    reorder(items, { id: group.restaurant_id, name_ar: group.restaurant_name },
+      { groupOrder: { id: group.id, code: group.code, itemIds: group.items.map(it => String(it.id)) } });
     navigation.navigate('Main', { screen: 'سلتي' });
   };
 
   const checkoutAll = () => {
-    if (!group || !group.items?.length) return Alert.alert('المجموعة فارغة', 'ما في أصناف بالمجموعة بعد');
+    if (!group || !group.items?.length) return Alert.alert('السلة المشتركة فاضية', 'ما في أصناف بالسلة المشتركة بعد');
     const hasCart = cartItems.length > 0;
     Alert.alert(
       'اطلب الكل',
-      `رح ننقل ${group.items.length} صنف لسلّتك لتكمل الدفع.${hasCart ? '\n\n⚠️ سلتك الحالية فيها أصناف ورح تُستبدل.' : ''}\nالمجموعة بتتقفل بعد ما يتأكد الطلب.`,
+      `رح ننقل ${plural(group.items.length, 'item')} لسلّتك لتكمل الدفع.${hasCart ? '\n\n⚠️ سلتك الحالية فيها أصناف ورح تُستبدل.' : ''}\nالإضافة بتوقف هلّق، والسلة المشتركة بتتقفل بعد ما يتأكد الطلب.`,
       [
         { text: 'إلغاء', style: 'cancel' },
         { text: hasCart ? 'استبدل السلة واطلب' : 'نعم، كمّل', style: hasCart ? 'destructive' : 'default', onPress: doCheckout },
@@ -130,7 +162,7 @@ export default function GroupOrderScreen() {
   if (!code) {
     return (
       <View style={styles.container}>
-        <GradientHeader title="طلب جماعي" colors={COLORS.gradients.violet} />
+        <GradientHeader title="اطلب مع أصحابك" subtitle="سلة مشتركة" colors={COLORS.gradients.violet} />
         <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center' }} keyboardShouldPersistTaps="handled">
           <PopIn>
             <LinearGradient colors={COLORS.gradients.violet} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.heroIcon}>
@@ -138,8 +170,8 @@ export default function GroupOrderScreen() {
             </LinearGradient>
           </PopIn>
           <FadeIn delay={80} style={{ alignItems: 'center' }}>
-            <Text style={styles.bigTitle}>اطلبوا سوا من نفس المطعم</Text>
-            <Text style={styles.sub}>واحد يفتح مجموعة من صفحة المطعم، وكل واحد يزيد أكله من موبايله، وكل شخص بيشوف حسابه 😋</Text>
+            <Text style={styles.bigTitle}>سلة مشتركة من نفس المحل</Text>
+            <Text style={styles.sub}>واحد يفتح سلة مشتركة من صفحة المطعم أو المتجر، وكل واحد يضيف طلبه من موبايله، وكل شخص بيشوف حسابه 😋</Text>
           </FadeIn>
           <FadeIn delay={140} style={styles.steps}>
             {[['storefront', 'افتح مطعم'], ['share-social', 'شارك الكود'], ['bag-add', 'كل واحد يضيف']].map(([ic, l], i) => (
@@ -151,23 +183,26 @@ export default function GroupOrderScreen() {
           </FadeIn>
 
           <FadeIn delay={200} style={styles.joinCard}>
-            <Text style={styles.joinLbl}>عندك كود مجموعة؟</Text>
+            <Text style={styles.joinLbl}>عندك كود سلة مشتركة؟</Text>
             <TextInput
               value={codeInput}
               onChangeText={t => setCodeInput(t.toUpperCase())}
-              placeholder="مثال: A7K9P2"
+              placeholder="A7K9P2"
               placeholderTextColor={COLORS.faint}
               autoCapitalize="characters"
+              autoCorrect={false}
               maxLength={8}
-              style={styles.codeInput}
+              // المسافات بين الحروف للكود اللاتيني فقط (ما بتقطّع النص العربي)
+              style={[styles.codeInput, !!codeInput && styles.codeInputFilled]}
               onSubmitEditing={joinByCode}
+              accessibilityLabel="كود السلة المشتركة"
             />
-            <GradientButton title="انضم للمجموعة" onPress={joinByCode} disabled={!codeInput.trim()} icon={<Ionicons name="enter-outline" size={19} color="#FFF" />} />
+            <GradientButton title="انضم للسلة" onPress={joinByCode} disabled={!codeInput.trim()} icon={<Ionicons name="enter-outline" size={19} color="#FFF" />} />
           </FadeIn>
 
           <View style={styles.hintBox}>
             <Ionicons name="information-circle-outline" size={18} color={COLORS.primary} />
-            <Text style={styles.hintTxt}>لبدء مجموعة جديدة: افتح أي مطعم واضغط "اطلبوا سوا 👥"</Text>
+            <Text style={styles.hintTxt}>لبدء سلة مشتركة جديدة: افتح أي مطعم واضغط "اطلب مع أصحابك 👥"</Text>
           </View>
         </ScrollView>
       </View>
@@ -176,7 +211,7 @@ export default function GroupOrderScreen() {
 
   if (loading) return (
     <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
-      <GradientHeader title="طلب جماعي" />
+      <GradientHeader title="سلة مشتركة" colors={COLORS.gradients.violet} />
       <View style={{ padding: 16, gap: 12 }}>
         <Skeleton w={'100%'} h={150} r={20} />
         {[0, 1, 2].map(i => <Skeleton key={i} w={'100%'} h={70} r={16} />)}
@@ -185,18 +220,20 @@ export default function GroupOrderScreen() {
   );
   if (!group) return (
     <View style={styles.container}>
-      <GradientHeader title="طلب جماعي" />
-      <EmptyState emoji="😕" title="تعذّر فتح المجموعة" subtitle="حاول مرة ثانية" ctaLabel="إعادة المحاولة" onCta={() => { setLoading(true); fetchGroup(code); }} />
+      <GradientHeader title="سلة مشتركة" colors={COLORS.gradients.violet} />
+      <EmptyState emoji="📡" title="تعذّر فتح السلة المشتركة" subtitle={loadError || 'حاول مرة ثانية'} ctaLabel="إعادة المحاولة" onCta={() => { setLoading(true); fetchGroup(code, { silent: false }); }} />
     </View>
   );
 
   const isOrdered = group.status === 'ordered';
-  const isClosed = group.status && group.status !== 'open' && !isOrdered;
-  // تجميع الأصناف حسب المشارك + مجموع كل شخص
+  // المضيف عم يكمّل الطلب (قفل مؤقت من السيرفر) → الإضافة موقفة
+  const isLocked = group.is_locked === true || ['locked', 'checkout'].includes(group.status);
+  const isClosed = group.status && group.status !== 'open' && !isOrdered && !isLocked;
+  // تجميع الأصناف حسب المشارك (برقم المستخدم — شخصين بنفس الاسم ما بيندمجوا) + مجموع كل شخص
   const byUser = {};
   (group.items || []).forEach(it => {
-    const k = it.user_name || 'مشارك';
-    if (!byUser[k]) byUser[k] = { items: [], total: 0, mine: false };
+    const k = it.user_id != null ? String(it.user_id) : `name:${it.user_name || 'مشارك'}`;
+    if (!byUser[k]) byUser[k] = { name: it.user_name || 'مشارك', items: [], total: 0, mine: false };
     byUser[k].items.push(it);
     byUser[k].total += lineTotal(it);
     if (it.is_mine) byUser[k].mine = true;
@@ -204,33 +241,47 @@ export default function GroupOrderScreen() {
   const people = Object.entries(byUser);
   const itemsTotal = people.reduce((s, [, v]) => s + v.total, 0);
   const groupTotal = parseFloat(group.total) || itemsTotal;
+  // أصناف ما دخلت بالطلب (من حدث الإغلاق المباشر أو من رد السيرفر لو بيرجّعها)
+  const excluded = new Set([...(group.excluded_item_ids || []), ...((group.excluded || []).map(x => x?.item_id ?? x)), ...excludedIds].map(String));
 
   return (
     <View style={styles.container}>
-      <GradientHeader title={group.restaurant_name || 'طلب جماعي'} subtitle="طلب جماعي" colors={COLORS.gradients.violet} />
+      <GradientHeader title={group.restaurant_name || 'سلة مشتركة'} subtitle="سلة مشتركة" colors={COLORS.gradients.violet} />
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 120 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchGroup(code, { silent: true }); }} tintColor={COLORS.primary} colors={[COLORS.primary]} progressBackgroundColor={COLORS.card} />}>
         <PopIn from={0.94} style={styles.codeCard}>
-          <View style={styles.codeLblRow}><Ionicons name="key" size={14} color={COLORS.primary} /><Text style={styles.codeCardLbl}>كود المجموعة</Text></View>
+          <View style={styles.codeLblRow}><Ionicons name="key" size={14} color={COLORS.primary} /><Text style={styles.codeCardLbl}>كود السلة المشتركة</Text></View>
           <View style={styles.codeBox}><Text style={styles.codeBig} selectable>{group.code}</Text></View>
-          {!isOrdered && (
+          {!isOrdered && !isLocked && (
             <Press style={styles.shareBtn} onPress={shareCode} accessibilityRole="button" accessibilityLabel="شارك الكود">
               <LinearGradient colors={COLORS.gradients.violet} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
               <Ionicons name="share-social" size={18} color="#FFF" />
-              <Text style={styles.shareBtnTxt}>شارك الكود مع الشباب</Text>
+              <Text style={styles.shareBtnTxt}>شارك الكود مع أصحابك</Text>
             </Press>
           )}
           <View style={styles.partRow}>
-            <View style={styles.partChip}><Ionicons name="people" size={13} color={COLORS.primary} /><Text style={styles.partCount}>{group.participant_count || people.length} مشارك</Text></View>
-            <View style={styles.partChip}><Ionicons name="fast-food" size={13} color={COLORS.primary} /><Text style={styles.partCount}>{(group.items || []).length} صنف</Text></View>
+            <View style={styles.partChip}><Ionicons name="people" size={13} color={COLORS.primary} /><Text style={styles.partCount}>{plural(group.participant_count || people.length, 'participant')}</Text></View>
+            <View style={styles.partChip}><Ionicons name="fast-food" size={13} color={COLORS.primary} /><Text style={styles.partCount}>{plural((group.items || []).length, 'item')}</Text></View>
           </View>
         </PopIn>
 
+        {isLocked && (
+          <View style={[styles.orderedBanner, { backgroundColor: COLORS.warnBg, borderColor: COLORS.warnBorder }]}>
+            <Ionicons name="lock-closed" size={18} color={COLORS.warnFill} />
+            <Text style={[styles.orderedTxt, { color: COLORS.text, flex: 1 }]}>المضيف عم يكمّل الطلب — الإضافة موقفة هلّق</Text>
+          </View>
+        )}
         {(isOrdered || isClosed) && (
           <View style={[styles.orderedBanner, { backgroundColor: COLORS.successBg, borderColor: COLORS.successBorder }]}>
             <Ionicons name="checkmark-circle" size={20} color={COLORS.green} />
-            <Text style={[styles.orderedTxt, { color: COLORS.successText }]}>{isOrdered ? 'تم الطلب ✅ — المجموعة مقفلة' : 'المجموعة مقفلة'}</Text>
+            <Text style={[styles.orderedTxt, { color: COLORS.successText, flex: 1 }]}>{isOrdered ? 'تم الطلب ✅ — السلة المشتركة مقفلة' : 'السلة المشتركة مقفلة'}</Text>
+          </View>
+        )}
+        {isOrdered && excluded.size > 0 && (
+          <View style={[styles.orderedBanner, { backgroundColor: COLORS.dangerBg, borderColor: COLORS.dangerBorder }]}>
+            <Ionicons name="alert-circle" size={18} color={COLORS.red} />
+            <Text style={[styles.orderedTxt, { color: COLORS.red, flex: 1 }]}>{plural(excluded.size, 'item')} انضافت بعد ما المضيف طلب وما دخلت بالطلب</Text>
           </View>
         )}
 
@@ -239,29 +290,31 @@ export default function GroupOrderScreen() {
             <View style={styles.emptyIcon}><Ionicons name="bag-handle-outline" size={30} color={COLORS.primary} /></View>
             <Text style={styles.sub}>لسه ما حدا أضاف أصناف — ابدأ أنت!</Text>
           </View>
-        ) : people.map(([userName, info], pi) => (
-          <FadeIn key={userName} delay={stagger(pi)} from={14} style={[styles.userGroup, info.mine && { borderColor: COLORS.primary, borderWidth: 1.5 }]}>
+        ) : people.map(([key, info], pi) => (
+          <FadeIn key={key} delay={stagger(pi)} from={14} style={[styles.userGroup, info.mine && { borderColor: COLORS.primary, borderWidth: 1.5 }]}>
             <View style={styles.userHead}>
               <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 8, flex: 1 }}>
                 <LinearGradient colors={info.mine ? COLORS.gradients.sunset : COLORS.gradients.violet} style={styles.userAvatar}>
-                  <Text style={styles.userInitial}>{String(userName).trim().charAt(0) || '؟'}</Text>
+                  <Text style={styles.userInitial}>{String(info.name).trim().charAt(0) || '؟'}</Text>
                 </LinearGradient>
-                <Text style={styles.userName} numberOfLines={1}>{userName}{info.mine ? ' (أنت)' : ''}</Text>
+                <Text style={styles.userName} numberOfLines={1}>{info.name}{info.mine ? ' (أنت)' : ''}</Text>
               </View>
               <View style={styles.userTotalPill}>
                 <Text style={styles.userTotalTxt}>{info.total.toFixed(2)}₪</Text>
               </View>
             </View>
             {info.items.map(it => (
-              <View key={it.id} style={styles.itemRow}>
+              <View key={it.id} style={[styles.itemRow, excluded.has(String(it.id)) && { opacity: 0.55 }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.itemName}>{it.name} × {it.quantity}</Text>
                   {it.options?.length > 0 && <Text style={styles.itemOpts}>{it.options.map(o => o.name).join(' • ')}</Text>}
+                  {excluded.has(String(it.id)) && <Text style={[styles.itemOpts, { color: COLORS.red }]}>ما دخل بالطلب</Text>}
                 </View>
                 <Text style={styles.itemPrice}>{lineTotal(it).toFixed(2)}₪</Text>
-                {!isOrdered && !isClosed && (it.is_mine || group.is_host) && (
-                  <TouchableOpacity onPress={() => removeItem(it)} style={styles.delBtn} accessibilityLabel={`حذف ${it.name}`}>
-                    <Ionicons name="close-circle" size={20} color={COLORS.red} />
+                {!isOrdered && !isClosed && !isLocked && (it.is_mine || group.is_host) && (
+                  <TouchableOpacity onPress={() => removeItem(it)} style={styles.delBtn} accessibilityRole="button" accessibilityLabel={`حذف ${it.name}`}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Ionicons name="close-circle" size={22} color={COLORS.red} />
                   </TouchableOpacity>
                 )}
               </View>
@@ -280,12 +333,14 @@ export default function GroupOrderScreen() {
         </View>
       </ScrollView>
 
-      {!isOrdered && !isClosed && (
+      {!isOrdered && !isClosed && (!isLocked || group.is_host) && (
         <View style={[styles.footer, { paddingBottom: insets.bottom + 14 }]}>
-          <TouchableOpacity style={styles.addBtn} onPress={addMyItems} accessibilityRole="button">
-            <Ionicons name="add-circle" size={20} color={COLORS.primary} />
-            <Text style={styles.addBtnTxt}>أضف أصنافك</Text>
-          </TouchableOpacity>
+          {!isLocked && (
+            <TouchableOpacity style={styles.addBtn} onPress={addMyItems} accessibilityRole="button">
+              <Ionicons name="add-circle" size={20} color={COLORS.primary} />
+              <Text style={styles.addBtnTxt}>أضف أصنافك</Text>
+            </TouchableOpacity>
+          )}
           {group.is_host && (
             <GradientButton title="اطلب الكل وادفع" onPress={checkoutAll} style={{ flex: 1.2 }} icon={<Ionicons name="card" size={18} color="#FFF" />} />
           )}
@@ -313,7 +368,8 @@ const makeStyles = (C) => StyleSheet.create({
   sub: { fontSize: 13, color: C.gray, textAlign: 'center', marginTop: 8, lineHeight: 20 },
   joinCard: { backgroundColor: C.card, borderRadius: 24, padding: 18, width: '100%', marginTop: 20, gap: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, ...C.shadow.card },
   joinLbl: { fontSize: 14, fontWeight: '800', color: C.text, textAlign: 'center' },
-  codeInput: { backgroundColor: C.inputBg, borderRadius: 14, paddingVertical: 14, fontSize: 22, fontWeight: '900', textAlign: 'center', letterSpacing: 4, color: C.text, borderWidth: 1, borderColor: C.border },
+  codeInput: { backgroundColor: C.inputBg, borderRadius: 14, paddingVertical: 14, fontSize: 22, fontWeight: '900', textAlign: 'center', color: C.text, borderWidth: 1, borderColor: C.border },
+  codeInputFilled: { letterSpacing: 4 },
   joinBtn: { borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
   joinBtnTxt: { color: '#FFF', fontWeight: '900', fontSize: 16 },
   hintBox: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, backgroundColor: C.tint, borderRadius: 12, padding: 12, marginTop: 20 },
@@ -336,7 +392,7 @@ const makeStyles = (C) => StyleSheet.create({
   itemName: { fontSize: 13.5, fontWeight: '700', color: C.text, textAlign: 'right' },
   itemOpts: { fontSize: 11.5, color: C.gray, marginTop: 2, textAlign: 'right' },
   itemPrice: { fontSize: 13.5, fontWeight: '800', color: C.primary },
-  delBtn: { padding: 2 },
+  delBtn: { padding: 6, minWidth: 34, minHeight: 34, alignItems: 'center', justifyContent: 'center' },
   totalCard: { backgroundColor: C.card, borderRadius: 22, padding: 16, marginTop: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, ...C.shadow.soft },
   totalRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center' },
   totalLbl: { fontSize: 15, fontWeight: '800', color: C.text },

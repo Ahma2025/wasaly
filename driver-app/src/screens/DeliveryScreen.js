@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, Linking, Alert, ScrollView, RefreshControl, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, Alert, ScrollView, RefreshControl, Animated, Easing } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -14,7 +14,8 @@ import api from '../utils/api';
 import { useSocketEvent } from '../utils/socket';
 import { useAuth } from '../context/AuthContext';
 import { useDriver } from '../context/DriverContext';
-import { useDriverLocation } from '../context/LocationContext';
+import { useDriverCoords } from '../context/LocationContext';
+import { openNavigation, callPhone } from '../utils/group';
 import { COLORS, GRADIENTS, SHADOW, RTL, RADIUS } from '../theme';
 import { SERVER_URL } from '../config';
 import GroupDeliveryScreen from './GroupDeliveryScreen';
@@ -145,7 +146,7 @@ function SingleDeliveryScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { setActive, notifyCancelled } = useDriver();
-  const { coords } = useDriverLocation();
+  const coords = useDriverCoords();
   const [order, setOrder] = useState(null);
   const [loadError, setLoadError] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -169,7 +170,7 @@ function SingleDeliveryScreen({ route, navigation }) {
     try {
       const r = await api.get(`/orders/${orderId}`);
       const o = r?.data || null;
-      if (!mounted.current || !o) return o;
+      if (!mounted.current || !o || leftRef.current) return o;
       setLoadError(false);
       setOrder(o);
       if (o.status === 'cancelled') {
@@ -178,7 +179,7 @@ function SingleDeliveryScreen({ route, navigation }) {
         return o;
       }
       if (o.driver_id && user?.id && String(o.driver_id) !== String(user.id)) {
-        Alert.alert('الطلب غير متاح', 'لم يعد هذا الطلب مُسنداً إليك.');
+        if (!leftRef.current) Alert.alert('الطلب غير متاح', 'لم يعد هذا الطلب مُسنداً إليك.'); // D-23
         setActive(null);
         leave();
         return o;
@@ -186,7 +187,8 @@ function SingleDeliveryScreen({ route, navigation }) {
       if (isAccepted(o)) setActive(o);
       return o;
     } catch (e) {
-      if (mounted.current) setLoadError(true);
+      if (!mounted.current || leftRef.current) return null;
+      setLoadError(true);
       if (e?.status === 403 || e?.status === 404) {
         Alert.alert('الطلب غير متاح', e?.message || 'لم يعد بإمكانك عرض هذا الطلب.');
         setActive(null);
@@ -285,15 +287,9 @@ function SingleDeliveryScreen({ route, navigation }) {
     doAdvance(step.next);
   };
 
-  const openMaps = (lat, lng) => {
-    if (!lat || !lng) return Alert.alert('الموقع غير متوفر', 'لا توجد إحداثيات لهذه النقطة');
-    Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`)
-      .catch(() => Linking.openURL(`geo:${lat},${lng}?q=${lat},${lng}`).catch(() => {}));
-  };
-  const callNumber = (phone) => {
-    if (!phone) return Alert.alert('غير متوفر', 'رقم الهاتف غير متوفر');
-    Linking.openURL(`tel:${phone}`).catch(() => {});
-  };
+  // D-17: نفس مساعد الملاحة للطلب العادي والمجمّع (يتذكّر تطبيق الملاحة المختار)
+  const openMaps = (lat, lng, label) => openNavigation(lat, lng, label);
+  const callNumber = callPhone;
 
   const target = current === 0 ? pick : { lat: dropLat, lng: dropLng };
   const onRefresh = async () => { setRefreshing(true); await loadOrder(); setRefreshing(false); };
@@ -339,7 +335,7 @@ function SingleDeliveryScreen({ route, navigation }) {
             <Ionicons name="locate" size={21} color={COLORS.primary} />
           </Press>
           {order && current < 2 && (
-            <Press style={[styles.navBtn, SHADOW.float]} onPress={() => openMaps(target.lat, target.lng)} hapticStyle="medium"
+            <Press style={[styles.navBtn, SHADOW.float]} onPress={() => openMaps(target.lat, target.lng, current === 0 ? (personal ? 'نقطة الاستلام' : (order.restaurant_name || 'المطعم')) : (personal ? 'نقطة التسليم' : 'الزبون'))} hapticStyle="medium"
               accessibilityLabel={current === 0 ? 'ملاحة إلى نقطة الاستلام' : 'ملاحة إلى نقطة التسليم'}>
               <LinearGradient colors={GRADIENTS.sunset} start={{ x: 1, y: 0 }} end={{ x: 0, y: 1 }} style={styles.navBtnGrad}>
                 <Ionicons name="navigate" size={17} color="#FFF" />

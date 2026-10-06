@@ -6,6 +6,7 @@ import { onLogout } from '../utils/session';
 import { scheduleLocal } from '../utils/pushNotifications';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
+import { plural } from '../utils/plural';
 
 /*
   السلة تدعم الطلب المجمّع (طلب من أكثر من مطعم بسائق واحد):
@@ -193,7 +194,7 @@ export const CartProvider = ({ children }) => {
   const isMulti = carts.length > 1;
 
   // تذكير السلة المتروكة — إشعار محلي بعد 90 دقيقة؛ يُعاد جدولته فقط عند تغيّر العدد (مع تأخير بسيط)
-  const reminderFrom = isMulti ? `${carts.length} مطاعم` : restaurantName;
+  const reminderFrom = isMulti ? plural(carts.length, 'restaurant') : restaurantName;
   useEffect(() => {
     if (!hydrated) return;
     clearTimeout(reminderTimer.current);
@@ -203,7 +204,7 @@ export const CartProvider = ({ children }) => {
         try {
           const id = await scheduleLocal({
             title: '🛒 سلتك بتنطرك!',
-            body: `عندك ${count} صنف بالسلة${reminderFrom ? ' من ' + reminderFrom : ''} — كمّل طلبك قبل ما يبرد 😋`,
+            body: `عندك ${plural(count, 'item')} بالسلة${reminderFrom ? ' من ' + reminderFrom : ''} — كمّل طلبك بضغطة 😋`,
             data: { type: 'cart_reminder' },
           }, 90 * 60);
           if (id) await AsyncStorage.setItem(REMINDER_KEY, id);
@@ -217,6 +218,23 @@ export const CartProvider = ({ children }) => {
     setCarts([]); setGroupOrder(null);
     AsyncStorage.removeItem(CART_KEY).catch(() => {});
   }, []);
+
+  /*
+    السلة المشتركة: المضيف نقل الأصناف للسلة → المجموعة مقفلة للإضافة (lock بالسيرفر).
+    لو السلة تفرّغت/تبدّلت بدون ما ينطلب → نفك القفل حتى يرجعوا يضيفوا.
+  */
+  const orderedGroups = useRef(new Set());
+  const lastGroupId = useRef(null);
+  const markGroupOrdered = useCallback((id) => { if (id != null) orderedGroups.current.add(String(id)); }, []);
+  useEffect(() => {
+    if (!hydrated) return;
+    const cur = groupOrder?.id != null ? String(groupOrder.id) : null;
+    const prev = lastGroupId.current;
+    if (prev && prev !== cur && !orderedGroups.current.has(prev)) {
+      api.post(`/group-orders/${prev}/unlock`).catch(() => {});
+    }
+    lastGroupId.current = cur;
+  }, [groupOrder?.id, hydrated]);
 
   // تسجيل الخروج → إفراغ السلة + إلغاء التذكير
   useEffect(() => onLogout(async () => {
@@ -335,6 +353,7 @@ export const CartProvider = ({ children }) => {
       // الطلب المجمّع
       carts, restaurantsCount, isMulti, multiConfig, multiEnabled, maxRestaurants,
       canAddRestaurant, removeRestaurant, updateRestaurantInfo, refreshMultiConfig,
+      markGroupOrdered,
     }}>
       {children}
     </CartContext.Provider>

@@ -17,10 +17,11 @@ import api from '../utils/api';
 import { useSocketEvent } from '../utils/socket';
 import { useAuth } from '../context/AuthContext';
 import { useDriver } from '../context/DriverContext';
-import { useDriverLocation } from '../context/LocationContext';
+import { useDriverCoords } from '../context/LocationContext';
 import { COLORS, GRADIENTS, SHADOW, RTL, RADIUS } from '../theme';
 import { SERVER_URL } from '../config';
-import { money, num, km, haversineKm, parseItems } from '../utils/format';
+import { money, num, km, haversineKm, parseItems, TERMS } from '../utils/format';
+import { arCount } from '../utils/plural';
 import {
   gid, normalizeGroup, groupNo, groupEarning, allPicked, nextStop, pickedCount, stopState,
   openNavigation, callPhone,
@@ -30,18 +31,31 @@ const POLL_MS = 15000;
 // التخطيط الأصلي مثبّت LTR (App.js) فنقلب الصفوف صراحةً؛ يبقى صحيحاً إن فُعّل RTL الأصلي
 const ROW = I18nManager.isRTL ? 'row' : 'row-reverse';
 
+// ألوان حالة المحطة من الجدول الموحّد (utils/format STATUS)
 const TONE = {
   green: { c: COLORS.greenDeep, bg: COLORS.greenSoft },
-  purple: { c: COLORS.purple, bg: COLORS.purpleSoft },
+  purple: { c: COLORS.purpleDeep, bg: COLORS.purpleSoft },
   amber: { c: COLORS.amberDeep, bg: COLORS.amberSoft },
+  brand: { c: COLORS.brandText, bg: COLORS.brandSoft },
   gray: { c: COLORS.gray, bg: COLORS.inputBg },
 };
 
-// خريطة Leaflet: المحطات مرقّمة بالترتيب المقترح + الزبون + السائق، وخط المسار عبر المحطات غير المستلمة
+// بيانات الخريطة: الرقم n يُعطى قبل استبعاد المحطات بلا إحداثيات (D-21) فيطابق رقم المحطة في القائمة
+function groupMapData(stops, next, drop) {
+  return {
+    stops: (stops || [])
+      .map((s, i) => ({ lat: s.lat, lng: s.lng, n: i + 1, name: s.name || 'مطعم', picked: !!s.picked, next: !!next && gid(next.order_id) === gid(s.order_id) }))
+      .filter(s => s.lat && s.lng),
+    drop: drop && drop.lat && drop.lng ? { lat: drop.lat, lng: drop.lng } : null,
+  };
+}
+
+// خريطة Leaflet تُبنى مرة واحدة للمجموعة (D-04)؛ تحديث المحطات وموقع السائق بالرسائل (postMessage)
+// فلا تومض ولا يرجع الزوم ولا يقفز السكوتر بعد كل استلام
 function buildGroupMapHTML({ stops, drop, driver }) {
   const data = {
-    stops: stops.filter(s => s.lat && s.lng).map((s, i) => ({ lat: s.lat, lng: s.lng, n: i + 1, name: s.name || 'مطعم', picked: !!s.picked, next: !!s.next })),
-    drop: drop && drop.lat && drop.lng ? { lat: drop.lat, lng: drop.lng } : null,
+    stops: stops || [],
+    drop: drop || null,
     driver: driver && driver.lat && driver.lng ? { lat: driver.lat, lng: driver.lng } : null,
   };
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
@@ -75,30 +89,40 @@ function pin(html,size,bg){
     iconSize:[size,size],iconAnchor:[size/2,size/2],popupAnchor:[0,-(size/2)],className:''});
 }
 function label(t){var el=document.createElement('div');el.style.direction='rtl';el.style.fontWeight='700';el.textContent=t;return el;}
-var pts=[],route=[],driverMarker=null,curPos=null,animFrame=null,startPos=null,endPos=null,animStart=0,ANIM_MS=4800,followDriver=false;
-if(D.driver){curPos=[D.driver.lat,D.driver.lng];route.push(curPos);}
-D.stops.forEach(function(s){
-  var ll=[s.lat,s.lng];
-  var bg=s.picked?'#1DB954':(s.next?'#FF6B00':'#8A8FA3');
-  L.marker(ll,{icon:pin(s.picked?'✓':String(s.n),s.next?44:36,bg),zIndexOffset:s.next?500:0}).addTo(map).bindPopup(label(s.n+'. '+s.name+(s.picked?' — تم الاستلام':'')));
-  pts.push(ll); if(!s.picked) route.push(ll);
-});
-if(D.drop){var dl=[D.drop.lat,D.drop.lng];L.marker(dl,{icon:pin('📍',40,'#F04438')}).addTo(map).bindPopup(label('موقع الزبون'));pts.push(dl);route.push(dl);}
-if(route.length>1){L.polyline(route,{color:'#FF6B00',weight:4,dashArray:'10 6',opacity:0.75}).addTo(map);}
-if(D.driver){driverMarker=L.marker(curPos,{icon:pin('🛵',44,'#FF6B00'),zIndexOffset:1000}).addTo(map).bindPopup(label('موقعك الحالي'));pts.push(curPos);}
-if(pts.length===1){map.setView(pts[0],15);} else if(pts.length>1){map.fitBounds(pts,{padding:[46,46]});}
+var layer=L.layerGroup().addTo(map),routeLine=null,routeStops=[],pts=[],fitted=false;
+var driverMarker=null,curPos=null,animFrame=null,startPos=null,endPos=null,animStart=0,ANIM_MS=4800,followDriver=false;
+if(D.driver){curPos=[D.driver.lat,D.driver.lng];driverMarker=L.marker(curPos,{icon:pin('🛵',44,'#FF6B00'),zIndexOffset:1000}).addTo(map).bindPopup(label('موقعك الحالي'));}
+function drawRoute(){
+  var r=(curPos?[curPos]:[]).concat(routeStops);
+  if(routeLine){routeLine.setLatLngs(r.length>1?r:[]);}
+  else if(r.length>1){routeLine=L.polyline(r,{color:'#FF6B00',weight:4,dashArray:'10 6',opacity:0.75}).addTo(layer);}
+}
+function fitAll(){var all=pts.slice(); if(curPos) all.push(curPos); if(all.length>1) map.fitBounds(all,{padding:[46,46]}); else if(all.length) map.setView(all[0],15);}
+function render(data){
+  layer.clearLayers(); routeLine=null; pts=[]; routeStops=[];
+  (data.stops||[]).forEach(function(s){
+    var ll=[s.lat,s.lng];
+    var bg=s.picked?'#1DB954':(s.next?'#FF6B00':'#8A8FA3');
+    L.marker(ll,{icon:pin(s.picked?'✓':String(s.n),s.next?44:36,bg),zIndexOffset:s.next?500:0}).addTo(layer).bindPopup(label(s.n+'. '+s.name+(s.picked?' — تم الاستلام':'')));
+    pts.push(ll); if(!s.picked) routeStops.push(ll);
+  });
+  if(data.drop){var dl=[data.drop.lat,data.drop.lng];L.marker(dl,{icon:pin('📍',40,'#F04438')}).addTo(layer).bindPopup(label('موقع الزبون'));pts.push(dl);routeStops.push(dl);}
+  drawRoute();
+  if(!fitted){fitted=true;fitAll();} // الزوم الأول فقط — التحديثات اللاحقة لا تحرّك الخريطة
+}
+render(D);
 map.on('dragstart',function(){followDriver=false;});
 function animStep(){
   var t=(Date.now()-animStart)/ANIM_MS; if(t>1)t=1;
   curPos=[startPos[0]+(endPos[0]-startPos[0])*t,startPos[1]+(endPos[1]-startPos[1])*t];
   driverMarker.setLatLng(curPos);
   if(followDriver) map.panTo(curPos,{animate:false});
-  if(t<1){animFrame=requestAnimationFrame(animStep);}
+  if(t<1){animFrame=requestAnimationFrame(animStep);} else {drawRoute();}
 }
 function moveDriver(lat,lng){
   if(isNaN(lat)||isNaN(lng)) return;
   var ll=[lat,lng];
-  if(!driverMarker){driverMarker=L.marker(ll,{icon:pin('🛵',44,'#FF6B00'),zIndexOffset:1000}).addTo(map).bindPopup(label('موقعك الحالي'));curPos=ll;return;}
+  if(!driverMarker){driverMarker=L.marker(ll,{icon:pin('🛵',44,'#FF6B00'),zIndexOffset:1000}).addTo(map).bindPopup(label('موقعك الحالي'));curPos=ll;drawRoute();return;}
   startPos=curPos?[curPos[0],curPos[1]]:ll; endPos=ll; animStart=Date.now();
   if(animFrame) cancelAnimationFrame(animFrame);
   animStep();
@@ -107,7 +131,8 @@ function handleMsg(e){
   try{
     var d=JSON.parse(e.data||e);
     if(d.type==='driver_location'){moveDriver(parseFloat(d.lat),parseFloat(d.lng));}
-    else if(d.type==='recenter'){followDriver=false; var all=pts.slice(); if(curPos) all.push(curPos); if(all.length>1) map.fitBounds(all,{padding:[46,46]}); else if(all.length) map.setView(all[0],15);}
+    else if(d.type==='stops'){render(d.data||{});}
+    else if(d.type==='recenter'){followDriver=false; fitAll();}
     else if(d.type==='follow'){followDriver=true; if(curPos) map.setView(curPos,16,{animate:true});}
   }catch(err){}
 }
@@ -124,7 +149,7 @@ export default function GroupDeliveryScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { activeGroup, setActiveGroup, notifyGroupCancelled, markGroupDone } = useDriver();
-  const { coords } = useDriverLocation();
+  const coords = useDriverCoords();
   const [group, setGroup] = useState(() => (activeGroup && gid(activeGroup.id) === gid(groupId) ? activeGroup : null));
   const [loadError, setLoadError] = useState(false);
   const [busyStop, setBusyStop] = useState(null);
@@ -152,12 +177,12 @@ export default function GroupDeliveryScreen({ route, navigation }) {
     if (activeGroup && gid(activeGroup.id) === gid(groupId) && !deliveredRef.current) setGroup(activeGroup);
   }, [activeGroup, groupId]);
 
-  const load = useCallback(async () => {
+  const loadOnce = useCallback(async () => {
     if (!groupId) return null;
     try {
       const r = await api.get(`/orders/groups/${groupId}`);
       const v = r?.data || null;
-      if (!mounted.current || !v) return v;
+      if (!mounted.current || !v || leftRef.current) return v;
       setLoadError(false);
       if (v.status === 'cancelled') {
         notifyGroupCancelled(v.id, v.cancelled_by, v.cancel_reason);
@@ -171,7 +196,7 @@ export default function GroupDeliveryScreen({ route, navigation }) {
         return v;
       }
       if (v.driver_id && user?.id && String(v.driver_id) !== String(user.id)) {
-        Alert.alert('الطلب غير متاح', 'لم يعد هذا الطلب مُسنداً إليك.');
+        if (!leftRef.current) Alert.alert('الطلب غير متاح', 'لم يعد هذا الطلب مُسنداً إليك.'); // D-23: مرة واحدة فقط
         setActiveGroup(null);
         leave();
         return v;
@@ -182,7 +207,8 @@ export default function GroupDeliveryScreen({ route, navigation }) {
       setActiveGroup(g);
       return v;
     } catch (e) {
-      if (mounted.current) setLoadError(true);
+      if (!mounted.current || leftRef.current) return null;
+      setLoadError(true);
       if (e?.status === 403 || e?.status === 404) {
         Alert.alert('الطلب غير متاح', e?.message || 'لم يعد بإمكانك عرض هذا الطلب.');
         setActiveGroup(null);
@@ -192,18 +218,29 @@ export default function GroupDeliveryScreen({ route, navigation }) {
     }
   }, [groupId, user?.id, notifyGroupCancelled, markGroupDone, setActiveGroup, leave, navigation]);
 
+  // D-20: تحميل واحد في نفس الوقت — الطلبات المتزامنة تُدمج في تحميل لاحق واحد
+  const inflight = useRef(null);
+  const pending = useRef(false);
+  const loadRef = useRef(null);
+  const load = useCallback(() => {
+    if (inflight.current) { pending.current = true; return inflight.current; }
+    const p = loadOnce().finally(() => {
+      inflight.current = null;
+      if (pending.current && mounted.current && !leftRef.current) { pending.current = false; loadRef.current && loadRef.current(); }
+    });
+    inflight.current = p;
+    return p;
+  }, [loadOnce]);
+  loadRef.current = load;
+
   useFocusEffect(useCallback(() => {
     load();
     const t = setInterval(load, POLL_MS);
     return () => clearInterval(t);
   }, [load]));
 
-  const isMine = (d) => gid(d?.group_id) === gid(groupId);
-  const hasStop = (orderId) => (groupRef.current?.stops || []).some(s => gid(s.order_id) === gid(orderId));
-  useSocketEvent('group_status', (d) => { if (isMine(d)) load(); });
-  useSocketEvent('group_updated', (d) => { if (isMine(d)) load(); }); // التنبيه (Toast) من DriverContext
-  useSocketEvent('order_status', (d) => { if (hasStop(d?.order_id)) load(); });
-  useSocketEvent('order_cancelled', (d) => { if (isMine(d)) load(); });
+  // أحداث السوكِت للمجموعة (حالة/محطة/اعتذار مطعم) يعالجها DriverContext ويحدّث activeGroup الذي تعكسه الشاشة
+  // — لا نكرر جلب نفس البيانات هنا (كان كل استلام يعمل ~٤ طلبات)
   useSocketEvent('__reconnected', () => load());
 
   useEffect(() => {
@@ -220,15 +257,25 @@ export default function GroupDeliveryScreen({ route, navigation }) {
   const earned = groupEarning(group);
   const drop = group?.dropoff || {};
 
-  const initialCoords = useRef(null);
-  if (!initialCoords.current && coords) initialCoords.current = coords;
-  const mapKey = stops.map(s => `${s.order_id}:${s.picked ? 1 : 0}`).join(',') + `|${drop.lat},${drop.lng}`;
-  const mapHtml = useMemo(() => buildGroupMapHTML({
-    stops: stops.map(s => ({ ...s, next: next && gid(next.order_id) === gid(s.order_id) })),
-    drop,
-    driver: initialCoords.current,
+  // D-04: آخر موقع دائماً من ref (لا موقع قديم)، والخريطة تُبنى مرة واحدة لكل مجموعة
+  const coordsRef = useRef(coords);
+  if (coords) coordsRef.current = coords;
+  const mapKey = stops.map(s => `${s.order_id}:${s.picked ? 1 : 0}:${s.lat},${s.lng}`).join(',') + `|${next ? next.order_id : ''}|${drop.lat},${drop.lng}`;
+  const mapDataRef = useRef(null);
+  mapDataRef.current = groupMapData(stops, next, drop);
+  const mapGroupId = group ? gid(group.id) : '';
+  const mapHtml = useMemo(() => (mapGroupId ? buildGroupMapHTML({
+    ...mapDataRef.current,
+    driver: coordsRef.current,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [mapKey]);
+  }) : null), [mapGroupId]);
+  const mapLoaded = useRef(false);
+  const postStops = useCallback(() => {
+    if (!webViewRef.current || !mapLoaded.current) return;
+    webViewRef.current.postMessage(JSON.stringify({ type: 'stops', data: mapDataRef.current }));
+  }, []);
+  // تغيّر محطة (استلام/اعتذار مطعم) → تحديث الدبابيس والمسار في مكانها بلا إعادة تحميل
+  useEffect(() => { postStops(); }, [mapKey, postStops]);
 
   // ── الاستلام من مطعم ──
   const doPickup = async (stop) => {
@@ -252,7 +299,7 @@ export default function GroupDeliveryScreen({ route, navigation }) {
       } else if (d.next_stop) {
         showToast(`تم الاستلام من ${stop.name} — التالي: ${d.next_stop.name || 'المطعم التالي'}`, { tone: 'success', icon: 'bag-check' });
       }
-      await load();
+      // لا تحميل إضافي هنا (D-20): أحداث السيرفر تحدّث المجموعة عبر DriverContext
     } catch (e) {
       Alert.alert('تعذّر تأكيد الاستلام', e?.message || 'حاول مرة أخرى');
       load();
@@ -319,7 +366,7 @@ export default function GroupDeliveryScreen({ route, navigation }) {
     <View style={styles.container}>
       <GradientHeader
         title={group ? `طلب مجمّع #${groupNo(group)}` : 'طلب مجمّع'}
-        subtitle={group ? `${stops.length} مطاعم • سائق واحد` : undefined}
+        subtitle={group ? `${arCount(stops.length, 'restaurant')} • سائق واحد` : undefined}
         rightIcon={group ? 'refresh' : undefined}
         onRightPress={onRefresh}
         rightLabel="تحديث الطلب"
@@ -328,7 +375,7 @@ export default function GroupDeliveryScreen({ route, navigation }) {
       {/* الخريطة */}
       <View style={[styles.mapShell, SHADOW.card]}>
         <View style={styles.mapWrap}>
-          {group ? (
+          {group && mapHtml ? (
             <WebView
               ref={webViewRef}
               source={{ html: mapHtml, baseUrl: SERVER_URL }}
@@ -339,7 +386,10 @@ export default function GroupDeliveryScreen({ route, navigation }) {
               mixedContentMode="always"
               onMessage={() => {}}
               onLoadEnd={() => {
-                if (coords) webViewRef.current?.postMessage(JSON.stringify({ type: 'driver_location', lat: coords.lat, lng: coords.lng }));
+                mapLoaded.current = true;
+                postStops(); // ما تغيّر بين بناء الخريطة واكتمال تحميلها
+                const c = coordsRef.current;
+                if (c) webViewRef.current?.postMessage(JSON.stringify({ type: 'driver_location', lat: c.lat, lng: c.lng }));
               }}
             />
           ) : <Skeleton height="100%" radius={0} />}
@@ -447,8 +497,8 @@ export default function GroupDeliveryScreen({ route, navigation }) {
             <FadeIn delay={260}>
               <View style={[styles.card, SHADOW.soft]}>
                 <Text style={[styles.cardTitle, RTL.text, { marginBottom: 6 }]}>الحساب</Text>
-                <MoneyRow icon="bicycle-outline" label={`أجرة التوصيل (${stops.length} محطات)`} value={money(group.driver_fee)} />
-                {num(group.tip) > 0 && <MoneyRow icon="heart-outline" label="إكرامية الزبون" value={money(group.tip)} color={COLORS.brandDeep} />}
+                <MoneyRow icon="bicycle-outline" label={`أجرة التوصيل (${arCount(stops.length, 'stop')})`} value={money(group.driver_fee)} />
+                {num(group.tip) > 0 && <MoneyRow icon="heart-outline" label={TERMS.tip} value={money(group.tip)} color={COLORS.brandDeep} />}
                 <MoneyRow icon="wallet-outline" label="أرباحك" value={money(earned)} color={COLORS.greenDeep} strong last={cash <= 0} />
                 {cash > 0 && <MoneyRow icon="cash-outline" label="إجمالي التحصيل من الزبون" value={money(cash)} color={COLORS.amberDeep} strong last />}
               </View>
@@ -471,8 +521,20 @@ export default function GroupDeliveryScreen({ route, navigation }) {
                 loadingLabel="جاري التأكيد..." colors={GRADIENTS.green} shadow={SHADOW.green} height={62} hapticStyle="medium" />
             </>
           ) : next ? (
-            <GradientButton label={`ملاحة إلى ${next.name}`} icon="navigate" onPress={() => openNavigation(next.lat, next.lng, next.name)}
-              height={58} hapticStyle="medium" />
+            // D-05: الزر الثابت = تأكيد الاستلام من المحطة التالية (الملاحة موجودة على الخريطة وفي البطاقة)
+            <GradientButton
+              label={`استلمت من ${next.name}`}
+              icon="bag-check"
+              onPress={() => onPickupPress(next)}
+              loading={busyStop != null && gid(busyStop) === gid(next.order_id)}
+              loadingLabel="جاري التأكيد..."
+              disabled={busyStop != null || delivering}
+              colors={next.status === 'ready' ? GRADIENTS.green : GRADIENTS.sunset}
+              shadow={next.status === 'ready' ? SHADOW.green : SHADOW.float}
+              height={58}
+              hapticStyle="medium"
+              accessibilityLabel={`تأكيد الاستلام من ${next.name}`}
+            />
           ) : null}
         </View>
       )}
@@ -499,12 +561,15 @@ export default function GroupDeliveryScreen({ route, navigation }) {
 
 // بطاقة محطة (مطعم): الحالة، الأصناف، اتصال/ملاحة، "استلمت من هالمطعم"
 function StopCard({ stop, index, isNext, child, coords, busy, disabled, onPickup }) {
+  const [expanded, setExpanded] = useState(false);
   const st = stopState(stop);
   const tone = TONE[st.tone] || TONE.gray;
   const items = child ? parseItems(child) : [];
   const count = stop.items_count != null ? stop.items_count : items.reduce((s, it) => s + it.qty, 0);
   const dist = coords && stop.lat ? haversineKm(coords.lat, coords.lng, stop.lat, stop.lng) : null;
-  const shown = items.slice(0, 4);
+  // D-06: كل الأصناف قابلة للعرض (+N يوسّع) مع الإضافات والملاحظات — ليراجع السائق الكيس كاملاً
+  const shown = expanded ? items : items.slice(0, 4);
+  const hidden = items.length - shown.length;
   return (
     <View style={[styles.card, SHADOW.soft, isNext && styles.cardHot, stop.picked && styles.cardDone]}>
       <View style={[styles.row, { gap: 12, alignItems: 'flex-start' }]}>
@@ -532,17 +597,33 @@ function StopCard({ stop, index, isNext, child, coords, busy, disabled, onPickup
 
       <View style={[styles.row, styles.metaRow]}>
         <Ionicons name="receipt-outline" size={14} color={COLORS.gray} />
-        <Text style={styles.metaText}>#{stop.order_number || stop.order_id}{count ? ` · ${count} ${count === 1 ? 'صنف' : 'أصناف'}` : ''}</Text>
+        <Text style={styles.metaText}>#{stop.order_number || stop.order_id}{count ? ` · ${arCount(count, 'piece')}` : ''}</Text>
       </View>
 
       {!stop.picked && shown.length > 0 && (
         <View style={styles.itemsBox}>
           {shown.map(it => (
-            <Text key={it.key} style={[styles.itemLine, RTL.text]} numberOfLines={1}>
-              {it.qty} × {it.name}{it.options.length ? ` (${it.options.join('، ')})` : ''}
-            </Text>
+            <View key={it.key}>
+              <Text style={[styles.itemLine, RTL.text]} numberOfLines={2}>
+                {it.qty} × {it.name}{it.options.length ? ` (${it.options.join('، ')})` : ''}
+              </Text>
+              {!!it.notes && (
+                <View style={[styles.row, { gap: 4, marginTop: 1 }]}>
+                  <Ionicons name="create-outline" size={12} color={COLORS.amberDeep} />
+                  <Text style={[styles.itemNote, RTL.text]} numberOfLines={2}>{it.notes}</Text>
+                </View>
+              )}
+            </View>
           ))}
-          {items.length > shown.length && <Text style={[styles.itemMore, RTL.text]}>+{items.length - shown.length} أصناف أخرى</Text>}
+          {(hidden > 0 || expanded) && items.length > 4 && (
+            <Press onPress={() => setExpanded(e => !e)} hapticStyle="select" style={styles.itemMoreBtn} hitSlop={8}
+              accessibilityLabel={expanded ? 'عرض أصناف أقل' : `عرض كل الأصناف، ${arCount(hidden, 'item')} مخفية`} accessibilityState={{ expanded }}>
+              <View style={[styles.row, { gap: 4, justifyContent: 'center' }]}>
+                <Text style={styles.itemMore}>{expanded ? 'عرض أقل' : `عرض كل الأصناف (+${hidden})`}</Text>
+                <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={COLORS.primary} />
+              </View>
+            </Press>
+          )}
         </View>
       )}
 
@@ -637,7 +718,9 @@ const styles = StyleSheet.create({
   metaText: { fontSize: 12.5, color: COLORS.gray, fontWeight: '700' },
   itemsBox: { marginTop: 10, backgroundColor: COLORS.inputBg, borderRadius: RADIUS.xs, paddingHorizontal: 12, paddingVertical: 8, gap: 3 },
   itemLine: { fontSize: 13, color: COLORS.text, fontWeight: '700' },
-  itemMore: { fontSize: 12, color: COLORS.gray, fontWeight: '700' },
+  itemMore: { fontSize: 12.5, color: COLORS.primary, fontWeight: '800' },
+  itemMoreBtn: { marginTop: 4, paddingVertical: 8, borderTopWidth: 1, borderTopColor: COLORS.line },
+  itemNote: { flex: 1, fontSize: 12, color: COLORS.amberDeep, fontWeight: '600' },
   stopActions: { gap: 8, marginTop: 12 },
   smallBtn: { flex: 1, height: 44, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   smallBtnText: { fontWeight: '800', fontSize: 13 },

@@ -7,15 +7,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import { LinearGradient } from 'expo-linear-gradient';
-import api from '../utils/api';
+import api, { isNetworkError, NETWORK_MESSAGE } from '../utils/api';
 import { Skeleton } from '../components/Skeleton';
+import { plural, ordinalOf } from '../utils/plural';
+import { readRated } from '../utils/rated';
 import GradientHeader from '../components/GradientHeader';
 import { FadeIn, PopIn, Press, Pulse, Ripple, GradientButton } from '../components/Anim';
 import { BottomSheet, Chip, ProgressRing } from '../components/UI';
 import EmptyState from '../components/EmptyState';
 import { haptic, isReducedMotion, EASE_OUT, SPRING_POP, stagger } from '../utils/motion';
 import { useTheme } from '../context/ThemeContext';
-import { SOCKET_URL, SUPPORT_PHONE } from '../config';
+import { SOCKET_URL, SUPPORT_PHONE, SERVER_URL } from '../config';
 import { leafletPage, TILE_URL } from '../utils/leaflet';
 import { statusLabel, statusMeta, softBg, groupStatusLabel } from '../utils/status';
 import { CheckoutSuccess } from './OrderTrackingScreen';
@@ -56,10 +58,14 @@ const BLOCKING_CHILD = ['preparing', 'ready', 'on_the_way', 'delivered'];
 const isPicked = (o) => !!o?.picked_up_at || o?.picked === true || ['on_the_way', 'delivered'].includes(o?.status);
 const stopStepIdx = (o) => (isPicked(o) ? 4 : Math.max(0, STOP_STEPS.indexOf(o?.status)));
 
+const nCoord = (v) => { const x = parseFloat(v); return Number.isFinite(x) && x !== 0 ? x : null; };
+// بيانات المحطات للخريطة (تُبعث بـ postMessage عند كل تغيّر — بدون إعادة بناء الخريطة)
+const mapStops = (stops) => (stops || []).map(s => ({ lat: nCoord(s.lat), lng: nCoord(s.lng), seq: s.seq, picked: !!s.picked, name: String(s.name || '').replace(/[<>'"\\]/g, '') }))
+  .filter(s => s.lat && s.lng);
+
 function buildGroupMapHTML({ stops, destLat, destLng, driverLat, driverLng, dark }) {
-  const n = (v) => { const x = parseFloat(v); return Number.isFinite(x) && x !== 0 ? x : null; };
-  const pts = (stops || []).map(s => ({ lat: n(s.lat), lng: n(s.lng), seq: s.seq, picked: !!s.picked, name: String(s.name || '').replace(/[<>'"\\]/g, '') }))
-    .filter(s => s.lat && s.lng);
+  const n = nCoord;
+  const pts = mapStops(stops);
   const dLat = n(destLat), dLng = n(destLng), vLat = n(driverLat), vLng = n(driverLng);
   const cLat = vLat || pts[0]?.lat || dLat || 31.9;
   const cLng = vLng || pts[0]?.lng || dLng || 35.2;
@@ -79,12 +85,16 @@ map.zoomControl.setPosition('topleft');
 function mkIcon(emoji,size,bg){size=size||32;return L.divIcon({html:'<div style="width:'+size+'px;height:'+size+'px;background:'+(bg||'#fff')+';border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:'+(size*0.55)+'px;border:3px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,0.35)">'+emoji+'</div>',iconSize:[size,size],iconAnchor:[size/2,size/2],popupAnchor:[0,-(size/2)],className:''});}
 function mkStop(seq,picked){return L.divIcon({html:'<div class="stop" style="background:'+(picked?'#1DB954':'#FF6B00')+'">'+(picked?'✓':seq)+'</div>',iconSize:[34,34],iconAnchor:[17,17],popupAnchor:[0,-17],className:''});}
 function mkDriverIcon(){return L.divIcon({html:'<div class="drv-wrap"><div class="drv-ring"></div><div class="drv-badge">🛵</div></div>',iconSize:[44,44],iconAnchor:[22,22],popupAnchor:[0,-22],className:''});}
-var pts=[],route=[],driverMarker=null,curPos=null,animFrame=null,startPos=null,endPos=null,animStart=0,ANIM_MS=5000,lastMoveAt=0,followDriver=false;
-var STOPS=${JSON.stringify(pts)};
-STOPS.forEach(function(s){L.marker([s.lat,s.lng],{icon:mkStop(s.seq,s.picked)}).addTo(map).bindPopup(s.name||'مطعم',{className:'pop'});pts.push([s.lat,s.lng]);route.push([s.lat,s.lng]);});
-${dLat && dLng ? `L.marker([${dLat},${dLng}],{icon:mkIcon('📍',40,'#FF3B30')}).addTo(map).bindPopup('موقع التوصيل',{className:'pop'});pts.push([${dLat},${dLng}]);route.push([${dLat},${dLng}]);` : ''}
+var pts=[],driverMarker=null,curPos=null,animFrame=null,startPos=null,endPos=null,animStart=0,ANIM_MS=5000,lastMoveAt=0,followDriver=false;
+var stopLayers=[],routeLine=null,DEST=${dLat && dLng ? `[${dLat},${dLng}]` : 'null'};
+function drawStops(list){stopLayers.forEach(function(m){map.removeLayer(m);});stopLayers=[];if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+  var route=[];(list||[]).forEach(function(s){var m=L.marker([s.lat,s.lng],{icon:mkStop(s.seq,s.picked)}).addTo(map).bindPopup(s.name||'مطعم',{className:'pop'});stopLayers.push(m);route.push([s.lat,s.lng]);});
+  if(DEST)route.push(DEST);
+  if(route.length>1){routeLine=L.polyline(route,{color:'#FF6B00',weight:4,dashArray:'10 6',opacity:0.7}).addTo(map);}
+  return route;}
+pts=drawStops(${JSON.stringify(pts)});
+if(DEST){L.marker(DEST,{icon:mkIcon('📍',40,'#FF3B30')}).addTo(map).bindPopup('موقع التوصيل',{className:'pop'});}
 ${vLat && vLng ? `driverMarker=L.marker([${vLat},${vLng}],{icon:mkDriverIcon()}).addTo(map).bindPopup('السائق',{className:'pop'});curPos=[${vLat},${vLng}];pts.push([${vLat},${vLng}]);` : ''}
-if(route.length>1){L.polyline(route,{color:'#FF6B00',weight:4,dashArray:'10 6',opacity:0.7}).addTo(map);}
 if(pts.length===1){map.setView(pts[0],15);}else if(pts.length>1){map.fitBounds(pts,{padding:[50,50]});}
 map.on('dragstart',function(){followDriver=false;});
 function animStep(){var t=(Date.now()-animStart)/ANIM_MS;if(t>1)t=1;var lat=startPos[0]+(endPos[0]-startPos[0])*t;var lng=startPos[1]+(endPos[1]-startPos[1])*t;curPos=[lat,lng];driverMarker.setLatLng(curPos);if(followDriver)map.panTo(curPos,{animate:false});if(t<1){animFrame=requestAnimationFrame(animStep);}}
@@ -92,7 +102,7 @@ function moveDriver(lat,lng){if(isNaN(lat)||isNaN(lng))return;var ll=[lat,lng];
   if(!driverMarker){driverMarker=L.marker(ll,{icon:mkDriverIcon()}).addTo(map).bindPopup('السائق',{className:'pop'});curPos=ll;lastMoveAt=Date.now();pts.push(ll);if(pts.length>1)map.fitBounds(pts,{padding:[50,50]});return;}
   var nowT=Date.now();var interval=lastMoveAt?(nowT-lastMoveAt):5000;lastMoveAt=nowT;ANIM_MS=Math.max(1500,Math.min(interval*1.2,14000));
   startPos=curPos?[curPos[0],curPos[1]]:[lat,lng];endPos=[lat,lng];animStart=Date.now();if(animFrame)cancelAnimationFrame(animFrame);animStep();}
-function handleMsg(raw){try{var d=JSON.parse(raw);if(d.type==='driver_location'){moveDriver(parseFloat(d.lat),parseFloat(d.lng));}else if(d.type==='recenter'){if(d.follow&&curPos){followDriver=true;map.setView(curPos,16,{animate:true});}else{followDriver=false;var all=pts.slice();if(curPos)all.push(curPos);if(all.length>1)map.fitBounds(all,{padding:[50,50]});else if(all.length)map.setView(all[0],15);}}}catch(err){}}
+function handleMsg(raw){try{var d=JSON.parse(raw);if(d.type==='driver_location'){moveDriver(parseFloat(d.lat),parseFloat(d.lng));}else if(d.type==='stops'){pts=drawStops(d.stops);}else if(d.type==='recenter'){if(d.follow&&curPos){followDriver=true;map.setView(curPos,16,{animate:true});}else{followDriver=false;var all=pts.slice();if(curPos)all.push(curPos);if(all.length>1)map.fitBounds(all,{padding:[50,50]});else if(all.length)map.setView(all[0],15);}}}catch(err){}}
 window.addEventListener('message',function(e){handleMsg(e.data);});
 document.addEventListener('message',function(e){handleMsg(e.data);});
 `,
@@ -124,6 +134,8 @@ export default function GroupTrackingScreen() {
   const webViewRef = useRef(null);
   const childIds = useRef(new Set());
   const soonTimer = useRef(null);
+  const lastSocketLoc = useRef(0);
+  const [ratedLocal, setRatedLocal] = useState({ orders: [], groups: [] });
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   const goBack = useCallback(() => {
@@ -158,9 +170,12 @@ export default function GroupTrackingScreen() {
       setGroup(g);
       setLoadError('');
       childIds.current = new Set((g.orders || []).map(o => String(o.id ?? o.order_id)));
-      if (g.driver_lat && g.driver_lng) setDriverLoc(prev => prev || { lat: parseFloat(g.driver_lat), lng: parseFloat(g.driver_lng) });
+      // التحديث الدوري يحرّك السائق كمان (لو الاتصال المباشر مقطوع) — إلا لو وصل تحديث مباشر قبل لحظات
+      if (g.driver_lat && g.driver_lng && g.driver_name && Date.now() - lastSocketLoc.current > 10000) {
+        setDriverLoc({ lat: parseFloat(g.driver_lat), lng: parseFloat(g.driver_lng) });
+      }
     } catch (e) {
-      setLoadError(e?.message === 'Network error' ? 'تعذّر الاتصال — تأكد من الإنترنت' : (e?.message || 'تعذّر تحميل الطلب'));
+      setLoadError(isNetworkError(e) ? NETWORK_MESSAGE : (e?.message || 'تعذّر تحميل الطلب'));
     } finally { setLoading(false); setRefreshing(false); }
   }, [id]);
 
@@ -170,9 +185,10 @@ export default function GroupTrackingScreen() {
   }, [fetchGroup]);
   useEffect(() => () => clearTimeout(soonTimer.current), []);
 
-  // تحديث عند كل رجوع للشاشة + كل 30 ثانية احتياطاً
+  // تحديث عند كل رجوع للشاشة (مثلاً بعد التقييم) + كل 30 ثانية احتياطاً
   useFocusEffect(useCallback(() => {
     fetchGroup();
+    readRated().then(setRatedLocal).catch(() => {});
     const interval = setInterval(fetchGroup, 30000);
     return () => clearInterval(interval);
   }, [fetchGroup]));
@@ -218,7 +234,10 @@ export default function GroupTrackingScreen() {
         socket.on('order_cancelled', (p) => { if (mine(p) || myChild(p?.order_id)) fetchSoon(); });
         socket.on('driver_assigned', (p) => { if (mine(p) || myChild(p?.order_id)) { haptic.success(); fetchSoon(); } });
         socket.on('driver:location', ({ lat, lng, group_id, orderId, order_id }) => {
-          if (sameId(group_id, id) || myChild(orderId ?? order_id)) setDriverLoc({ lat: parseFloat(lat), lng: parseFloat(lng) });
+          if (sameId(group_id, id) || myChild(orderId ?? order_id)) {
+            lastSocketLoc.current = Date.now();
+            setDriverLoc({ lat: parseFloat(lat), lng: parseFloat(lng) });
+          }
         });
       } catch {}
     })();
@@ -241,17 +260,34 @@ export default function GroupTrackingScreen() {
     if (ca !== cb) return ca - cb;
     return num(a.stop_sequence, 99) - num(b.stop_sequence, 99);
   }), [orders]);
+  // ترقيم المحطات محلياً بين المطاعم غير الملغاة (1..N) — ما يطلع «مطعم 3 من 2» لو انسحب مطعم قبل قبول السائق
+  const seqOf = useMemo(() => {
+    const m = {};
+    stopsSorted.filter(o => o.status !== 'cancelled').forEach((o, i) => { m[String(o.id ?? o.order_id)] = i + 1; });
+    return m;
+  }, [stopsSorted]);
+  const displaySeq = (o) => seqOf[String(o.id ?? o.order_id)] ?? null;
 
-  // الخريطة تُبنى مرة واحدة لكل تغيير بالمحطات؛ حركة السائق عبر postMessage
+  // الخريطة تُبنى مرة واحدة لكل طلب/ثيم؛ تحديث المحطات وحركة السائق عبر postMessage (بدون وميض وبدون ضياع الزوم)
   const showMap = !!group && !isCancelled && status !== 'pending';
-  const mapStopsKey = activeOrders.map(o => `${o.id}:${o.stop_sequence}:${isPicked(o) ? 1 : 0}`).join('|');
+  const stopsPayload = useMemo(() => mapStops(stopsSorted.filter(o => o.status !== 'cancelled')
+    .map(o => ({ lat: o.restaurant_lat, lng: o.restaurant_lng, seq: displaySeq(o), picked: isPicked(o), name: o.restaurant_name }))),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [stopsSorted, seqOf]);
+  const stopsKey = JSON.stringify(stopsPayload);
+  const stopsRef = useRef(stopsPayload);
+  stopsRef.current = stopsPayload;
   const mapHtml = useMemo(() => (showMap ? buildGroupMapHTML({
-    stops: activeOrders.map(o => ({ lat: o.restaurant_lat, lng: o.restaurant_lng, seq: o.stop_sequence, picked: isPicked(o), name: o.restaurant_name })),
+    stops: stopsRef.current,
     destLat: group.delivery_lat ?? group.dropoff?.lat, destLng: group.delivery_lng ?? group.dropoff?.lng,
     driverLat: group.driver_lat, driverLng: group.driver_lng, dark: isDark,
   }) : null),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [showMap, group?.id, mapStopsKey, group?.delivery_lat, group?.delivery_lng, isDark]);
+  [showMap, group?.id, isDark]);
+  useEffect(() => {
+    if (!mapHtml) return;
+    webViewRef.current?.postMessage(JSON.stringify({ type: 'stops', stops: stopsRef.current }));
+  }, [stopsKey, mapHtml]);
 
   const cancelGroup = async () => {
     setCancelling(true);
@@ -262,8 +298,8 @@ export default function GroupTrackingScreen() {
       setGroup(prev => (prev ? { ...prev, status: 'cancelled', cancelled_by: 'customer' } : prev));
       fetchGroup();
       const parts = [];
-      if (num(d.refunded_wallet) > 0) parts.push(`${money(d.refunded_wallet)} رجعت لمحفظتك`);
-      if (num(d.refunded_points) > 0) parts.push(`${parseInt(d.refunded_points, 10)} نقطة رجعت لحسابك`);
+      if (num(d.refunded_wallet) > 0) parts.push(`${money(d.refunded_wallet)} رجعت لمحفظة وصلّي`);
+      if (num(d.refunded_points) > 0) parts.push(`${plural(parseInt(d.refunded_points, 10), 'point')} رجعت لحسابك`);
       Alert.alert('تم إلغاء الطلب', `تم إلغاء طلبك المجمّع من كل المطاعم.${parts.length ? '\n' + parts.join(' · ') : ''}`);
     } catch (e) {
       Alert.alert('تعذّر الإلغاء', e?.message || 'حاول مرة أخرى');
@@ -296,8 +332,9 @@ export default function GroupTrackingScreen() {
 
   const stepIdx = GROUP_STEPS.findIndex(s => s.key === status);
   const currentStep = stepIdx >= 0 ? GROUP_STEPS[stepIdx] : null;
-  const stopsTotal = num(group.stops_total, activeOrders.length) || activeOrders.length;
-  const pickedCount = num(group.picked_count, activeOrders.filter(isPicked).length);
+  // عدد المحطات الفعلي = المطاعم غير الملغاة (stops_total من السيرفر ممكن يكون قبل انسحاب مطعم)
+  const stopsTotal = activeOrders.length || num(group.stops_total);
+  const pickedCount = Math.min(stopsTotal || Infinity, num(group.picked_count, activeOrders.filter(isPicked).length));
   const acceptedCount = activeOrders.filter(o => o.status !== 'pending').length;
   const canCancel = ['pending', 'confirmed'].includes(status) && !activeOrders.some(o => BLOCKING_CHILD.includes(o.status));
   const hero = isCancelled ? HERO.cancelled : (HERO[status] || HERO.pending);
@@ -307,8 +344,8 @@ export default function GroupTrackingScreen() {
   const heroDesc = isCancelled
     ? (allDeclined ? 'اعتذرت كل المطاعم عن طلبك — تم استرجاع ما دفعته من المحفظة والنقاط'
       : group.cancel_reason ? `السبب: ${group.cancel_reason}` : 'تم استرجاع أي مبلغ من المحفظة أو نقاط مستخدمة')
-    : status === 'pending' ? `وافق ${acceptedCount} من ${activeOrders.length} مطاعم — بنستنى الباقي`
-      : status === 'picking_up' ? `${group.driver_name || 'السائق'} استلم من ${pickedCount} من ${stopsTotal} مطاعم`
+    : status === 'pending' ? `وافق ${ordinalOf(acceptedCount, activeOrders.length) || '0'} — بنستنى باقي المطاعم`
+      : status === 'picking_up' ? `${group.driver_name || 'السائق'} استلم من ${ordinalOf(pickedCount, stopsTotal) || '0'} — ${plural(stopsTotal, 'restaurant')} بالطلب`
         : currentStep?.desc || 'نحدّث حالة طلبك — اسحب للتحديث';
   const ringProgress = status === 'pending' ? (activeOrders.length ? acceptedCount / activeOrders.length : 0)
     : status === 'picking_up' ? (stopsTotal ? pickedCount / stopsTotal : 0) : null;
@@ -322,8 +359,8 @@ export default function GroupTrackingScreen() {
 
   return (
     <View style={styles.container}>
-      <GradientHeader title="تتبع الطلب المجمّع" subtitle={`#${group.group_number || id} · ${stopsTotal} مطاعم`} onBack={goBack}
-        right={<TouchableOpacity onPress={() => navigation.navigate('SupportChat')} accessibilityLabel="الدعم" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}><Ionicons name="headset-outline" size={20} color="#FFF" /></TouchableOpacity>} />
+      <GradientHeader title="تتبع الطلب المجمّع" subtitle={`#${group.group_number || id} · ${plural(stopsTotal, 'restaurant')}`} onBack={goBack}
+        rightIcon="headset-outline" rightLabel="الدعم" onRight={() => navigation.navigate('SupportChat')} />
 
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 30 }} showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchGroup(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} progressBackgroundColor={COLORS.card} />}>
@@ -372,7 +409,7 @@ export default function GroupTrackingScreen() {
               ))}
               <Text style={styles.noticeSub}>
                 {notice && (notice.refundedWallet > 0 || notice.refundedPoints > 0)
-                  ? `رجعنالك ${[notice.refundedWallet > 0 ? `${money(notice.refundedWallet)} للمحفظة` : '', notice.refundedPoints > 0 ? `${parseInt(notice.refundedPoints, 10)} نقطة` : ''].filter(Boolean).join(' و ')} — والحساب الجديد تحت`
+                  ? `رجعنالك ${[notice.refundedWallet > 0 ? `${money(notice.refundedWallet)} لمحفظة وصلّي` : '', notice.refundedPoints > 0 ? plural(parseInt(notice.refundedPoints, 10), 'point') : ''].filter(Boolean).join(' و ')} — والحساب الجديد تحت`
                   : 'عدّلنا حسابك تلقائياً — ما بتدفع إلا على اللي رح يوصلك'}
                 {notice?.couponDropped ? ' · الكوبون ما عاد ينطبق على المبلغ الجديد' : ''}
               </Text>
@@ -385,7 +422,7 @@ export default function GroupTrackingScreen() {
           <FadeIn delay={60} style={styles.mapWrap}>
             <WebView
               ref={webViewRef}
-              source={{ html: mapHtml }}
+              source={{ html: mapHtml, baseUrl: SERVER_URL }}
               style={styles.map}
               javaScriptEnabled
               domStorageEnabled
@@ -395,7 +432,10 @@ export default function GroupTrackingScreen() {
               onMessage={(e) => {
                 try {
                   const d = JSON.parse(e.nativeEvent.data);
-                  if (d.type === 'map_ready' && driverLoc) webViewRef.current?.postMessage(JSON.stringify({ type: 'driver_location', lat: driverLoc.lat, lng: driverLoc.lng }));
+                  if (d.type === 'map_ready') {
+                    webViewRef.current?.postMessage(JSON.stringify({ type: 'stops', stops: stopsRef.current }));
+                    if (driverLoc) webViewRef.current?.postMessage(JSON.stringify({ type: 'driver_location', lat: driverLoc.lat, lng: driverLoc.lng }));
+                  }
                 } catch {}
               }}
               onError={() => setMapFailed(true)}
@@ -446,10 +486,10 @@ export default function GroupTrackingScreen() {
           <View style={styles.cardTitleRow}>
             <View style={styles.cardIcon}><Ionicons name="storefront" size={15} color={COLORS.primary} /></View>
             <Text style={[styles.cardTitle, { flex: 1 }]}>المطاعم</Text>
-            {!isCancelled && <View style={styles.countPill}><Text style={styles.countPillTxt}>{pickedCount}/{stopsTotal} استلم</Text></View>}
+            {!isCancelled && <View style={styles.countPill}><Text style={styles.countPillTxt}>استلم {ordinalOf(pickedCount, stopsTotal) || '0'}</Text></View>}
           </View>
           {stopsSorted.map((o, i) => (
-            <StopRow key={String(o.id ?? o.order_id)} order={o} index={i} last={i === stopsSorted.length - 1} C={COLORS} styles={styles}
+            <StopRow key={String(o.id ?? o.order_id)} order={o} seq={displaySeq(o)} index={i} last={i === stopsSorted.length - 1} C={COLORS} styles={styles}
               groupCancelled={isCancelled} open={!!expanded[o.id]} onToggle={() => setExpanded(p => ({ ...p, [o.id]: !p[o.id] }))} />
           ))}
         </FadeIn>
@@ -477,14 +517,14 @@ export default function GroupTrackingScreen() {
           <SumRow styles={styles} C={COLORS} label="المجموع الفرعي" value={money(group.subtotal)} />
           <SumRow styles={styles} C={COLORS} label="رسوم التوصيل" value={group.free_delivery || num(group.delivery_fee) === 0 ? 'مجاني' : money(group.delivery_fee)} green={group.free_delivery || num(group.delivery_fee) === 0} />
           {num(group.extra_stops_fee) > 0 && (
-            <SumRow styles={styles} C={COLORS} label={`رسوم توقف إضافي${num(group.extra_stop_unit) > 0 ? ` (${Math.round(num(group.extra_stops_fee) / num(group.extra_stop_unit))} × ${money(group.extra_stop_unit)})` : ''}`} value={money(group.extra_stops_fee)} />
+            <SumRow styles={styles} C={COLORS} label={`رسوم مطعم إضافي${num(group.extra_stop_unit) > 0 ? ` (${Math.round(num(group.extra_stops_fee) / num(group.extra_stop_unit))} × ${money(group.extra_stop_unit)})` : ''}`} value={money(group.extra_stops_fee)} />
           )}
           {num(group.first_order_discount) > 0 && <SumRow styles={styles} C={COLORS} label="🎁 خصم أول طلب" value={`-${money(group.first_order_discount)}`} green />}
           {num(group.coupon_discount) > 0 && <SumRow styles={styles} C={COLORS} label={`خصم الكوبون${group.coupon_code ? ` (${group.coupon_code})` : ''}`} value={`-${money(group.coupon_discount)}`} green />}
           {discount > 0 && num(group.first_order_discount) === 0 && num(group.coupon_discount) === 0 && <SumRow styles={styles} C={COLORS} label="الخصم" value={`-${money(discount)}`} green />}
           {num(group.points_value) > 0 && <SumRow styles={styles} C={COLORS} label="خصم النقاط" value={`-${money(group.points_value)}`} green />}
-          {num(group.tip) > 0 && <SumRow styles={styles} C={COLORS} label="بقشيش السائق" value={money(group.tip)} />}
-          {num(group.wallet_used) > 0 && <SumRow styles={styles} C={COLORS} label="من المحفظة" value={`-${money(group.wallet_used)}`} green />}
+          {num(group.tip) > 0 && <SumRow styles={styles} C={COLORS} label="إكرامية السائق" value={money(group.tip)} />}
+          {num(group.wallet_used) > 0 && <SumRow styles={styles} C={COLORS} label="من محفظة وصلّي" value={`-${money(group.wallet_used)}`} green />}
           <View style={styles.divider} />
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>الإجمالي</Text>
@@ -495,8 +535,8 @@ export default function GroupTrackingScreen() {
               <Ionicons name="cash-outline" size={15} color={COLORS.primary} />
               <Text style={styles.cashTxt}>
                 {group.payment_status === 'paid' ? 'تم الدفع ✅'
-                  : num(group.cash_to_collect, num(group.total)) > 0 ? `بتدفع للسائق كاش ${money(group.cash_to_collect ?? group.total)} مرة وحدة`
-                    : 'مدفوع بالكامل من محفظتك 💛'}
+                  : num(group.cash_to_collect, num(group.total)) > 0 ? `كاش عند الاستلام: بتدفع للسائق ${money(group.cash_to_collect ?? group.total)} مرة وحدة`
+                    : 'مدفوع بالكامل من محفظة وصلّي 💛'}
               </Text>
             </View>
           )}
@@ -524,16 +564,37 @@ export default function GroupTrackingScreen() {
               <View style={styles.cardIcon}><Ionicons name="star" size={15} color={COLORS.primary} /></View>
               <Text style={styles.cardTitle}>قيّم تجربتك</Text>
             </View>
-            {activeOrders.map(o => (
-              <View key={String(o.id)} style={styles.rateRow}>
-                <Text style={styles.rateName} numberOfLines={1}>{o.restaurant_name}</Text>
-                <TouchableOpacity style={styles.rateBtn} accessibilityRole="button"
-                  onPress={() => navigation.navigate('Rating', { orderId: o.id ?? o.order_id, restaurantName: o.restaurant_name, driverName: group.driver_name })}>
-                  <Ionicons name="star" size={13} color="#FFF" />
-                  <Text style={styles.rateBtnTxt}>قيّم</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
+            {(() => {
+              // السائق واحد للمجموعة → تقييمه مرة وحدة فقط (مع أول مطعم ما انقيّم)
+              const isRated = (o) => o.rating_restaurant != null || o.is_rated === true || o.rated === true || ratedLocal.orders.includes(String(o.id ?? o.order_id));
+              const driverRated = group.driver_rated === true || activeOrders.some(o => o.rating_driver != null) || ratedLocal.groups.includes(String(id));
+              const firstUnrated = activeOrders.find(o => !isRated(o));
+              return activeOrders.map(o => {
+                const oid = o.id ?? o.order_id;
+                const done = isRated(o);
+                return (
+                  <View key={String(oid)} style={styles.rateRow}>
+                    <Text style={styles.rateName} numberOfLines={1}>{o.restaurant_name}</Text>
+                    {done ? (
+                      <View style={[styles.ratedChip, { backgroundColor: COLORS.successBg }]}>
+                        <Ionicons name="checkmark-circle" size={13} color={COLORS.green} />
+                        <Text style={[styles.rateBtnTxt, { color: COLORS.successText }]}>تم التقييم</Text>
+                      </View>
+                    ) : (
+                      <TouchableOpacity style={styles.rateBtn} accessibilityRole="button" accessibilityLabel={`قيّم ${o.restaurant_name}`} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        onPress={() => navigation.navigate('Rating', {
+                          orderId: oid, groupId: id, restaurantName: o.restaurant_name, restaurantId: o.restaurant_id,
+                          storeType: o.store_type || o.restaurant_store_type,
+                          driverName: !driverRated && firstUnrated && sameId(firstUnrated.id ?? firstUnrated.order_id, oid) ? group.driver_name : undefined,
+                        })}>
+                        <Ionicons name="star" size={13} color="#FFF" />
+                        <Text style={styles.rateBtnTxt}>قيّم</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              });
+            })()}
           </FadeIn>
         )}
 
@@ -548,7 +609,7 @@ export default function GroupTrackingScreen() {
         <View style={{ paddingHorizontal: 20, alignItems: 'center' }}>
           <View style={styles.modalIcon}><Ionicons name="alert-circle" size={36} color={COLORS.red} /></View>
           <Text style={styles.modalTitle}>إلغاء الطلب المجمّع؟</Text>
-          <Text style={styles.modalSub}>رح ينلغي طلبك من كل المطاعم ({activeOrders.length}) وبيرجعلك أي مبلغ من المحفظة أو نقاط مستخدمة.</Text>
+          <Text style={styles.modalSub}>رح ينلغي طلبك من كل المطاعم ({plural(activeOrders.length, 'restaurant')}) وبيرجعلك أي مبلغ من محفظة وصلّي أو نقاط مستخدمة.</Text>
           <View style={styles.reasonsWrap}>
             {CANCEL_REASONS.map(r => (
               <Chip key={r} size="sm" label={r} selected={cancelReason === r} onPress={() => setCancelReason(cancelReason === r ? '' : r)} />
@@ -571,7 +632,7 @@ export default function GroupTrackingScreen() {
 }
 
 /* محطة (مطعم): رقم الترتيب + لوجو + حالة + شريط مراحل مصغّر + أصناف عند الضغط */
-function StopRow({ order, index, last, C, styles, groupCancelled, open, onToggle }) {
+function StopRow({ order, seq, index, last, C, styles, groupCancelled, open, onToggle }) {
   const cancelled = order.status === 'cancelled';
   const picked = isPicked(order);
   const idx = stopStepIdx(order);
@@ -588,9 +649,9 @@ function StopRow({ order, index, last, C, styles, groupCancelled, open, onToggle
             {order.restaurant_logo
               ? <Image source={{ uri: order.restaurant_logo }} style={styles.stopLogo} />
               : <View style={[styles.stopLogo, { alignItems: 'center', justifyContent: 'center', backgroundColor: C.tint }]}><Ionicons name="storefront" size={18} color={C.primary} /></View>}
-            {!cancelled && order.stop_sequence != null && (
+            {!cancelled && seq != null && (
               <View style={[styles.stopSeq, { borderColor: C.card, backgroundColor: picked ? C.green : C.primary }]}>
-                {picked ? <Ionicons name="checkmark" size={11} color="#FFF" /> : <Text style={styles.stopSeqTxt}>{order.stop_sequence}</Text>}
+                {picked ? <Ionicons name="checkmark" size={11} color="#FFF" /> : <Text style={styles.stopSeqTxt}>{seq}</Text>}
               </View>
             )}
           </View>
@@ -774,6 +835,7 @@ const makeStyles = (C) => StyleSheet.create({
   rateName: { flex: 1, fontSize: 14, fontWeight: '800', color: C.text, textAlign: 'right' },
   rateBtn: { flexDirection: 'row-reverse', alignItems: 'center', gap: 5, backgroundColor: C.primary, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
   rateBtnTxt: { color: '#FFF', fontWeight: '900', fontSize: 12.5 },
+  ratedChip: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
   helpRow: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8 },
   helpTxt: { color: C.gray, fontSize: 13, fontWeight: '600' },
   modalIcon: { width: 72, height: 72, borderRadius: 26, backgroundColor: C.dangerBg, alignItems: 'center', justifyContent: 'center', marginBottom: 10, marginTop: 6 },

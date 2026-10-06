@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import toast from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import {
   FiPackage, FiCheck, FiClock, FiPhone, FiMapPin, FiPrinter, FiXCircle, FiUser, FiChevronLeft,
-  FiStar, FiInbox, FiCreditCard, FiFileText, FiPlay, FiCheckCircle, FiTruck, FiRefreshCw, FiShoppingBag,
+  FiStar, FiInbox, FiCreditCard, FiFileText, FiPlay, FiCheckCircle, FiTruck, FiRefreshCw, FiShoppingBag, FiLayers,
 } from 'react-icons/fi';
 import { MdDeliveryDining, MdOutlineDirectionsWalk, MdOutlineSoupKitchen } from 'react-icons/md';
 import api from '../utils/api';
@@ -14,11 +16,15 @@ import { useRestaurant } from '../context/RestaurantContext';
 import { useLiveOrders } from '../context/LiveOrdersContext';
 import { PageHeader, EmptyState, ErrorState, ListSkeleton, Spinner, useConfirm, Tabs, Sheet, Button, useMediaQuery, cx } from '../components/ui';
 import {
-  statusLabel, STATUS_ACCENT, paymentLabel, money, num, orderNo, formatDateTime,
+  statusLabel, statusMeta, STATUS_ACCENT, paymentLabel, money, num, orderNo, formatDateTime,
   parseOptions, optionName, optionPrice, isGroupOrder,
 } from '../utils/format';
+import { pl } from '../utils/plural';
 
 const PAGE = 20;
+// تبويب «نشطة»: نجلب حتى 100 طلب دفعة واحدة حتى تكون أعمدة اللوحة وعدّاداتها دقيقة
+const ACTIVE_LIMIT = 100;
+const pageSize = (f) => (f === 'active' ? ACTIVE_LIMIT : PAGE);
 const STATUS_MAP = {
   active: 'pending,confirmed,preparing,ready',
   on_the_way: 'on_the_way',
@@ -39,19 +45,15 @@ const COLUMNS = [
 ];
 
 const STATUS_ICON = {
-  pending: FiClock, confirmed: FiCheck, preparing: MdOutlineSoupKitchen, ready: FiCheckCircle,
+  pending: FiClock, confirmed: FiCheck, preparing: MdOutlineSoupKitchen, ready: FiShoppingBag,
   on_the_way: MdDeliveryDining, delivered: FiCheckCircle, cancelled: FiXCircle,
-};
-const STATUS_CHIP = {
-  pending: 'bg-amber-50 text-amber-700', confirmed: 'bg-sky-50 text-sky-700', preparing: 'bg-brand-50 text-brand-700',
-  ready: 'bg-teal-50 text-teal-700', on_the_way: 'bg-violet-50 text-violet-700', delivered: 'bg-success-soft text-emerald-700',
-  cancelled: 'bg-danger-soft text-danger',
 };
 
 const dedupe = (list) => {
   const seen = new Set();
   return list.filter(o => (seen.has(o.id) ? false : (seen.add(o.id), true)));
 };
+const ts = (v) => { const t = new Date(v).getTime(); return Number.isFinite(t) ? t : 0; };
 
 // أزرار المطعم حسب الحالة — المطعم لا يضع «في الطريق» أبدًا (هذه مهمة السائق)
 // الطلب المجمّع: الاستلام يتم من السائق عبر مسار المجمّع — لا زر «في الطريق»/«تم التسليم» للمطعم
@@ -59,7 +61,7 @@ function nextAction(order) {
   const isDelivery = order.order_type === 'delivery' || isGroupOrder(order);
   if (order.status === 'pending') return { label: 'قبول الطلب', icon: FiCheck, variant: 'primary', kind: 'accept' };
   if (order.status === 'confirmed') return { label: 'بدء التحضير', icon: FiPlay, variant: 'sky', kind: 'status', to: 'preparing' };
-  if (order.status === 'preparing') return { label: 'جاهز للاستلام', icon: FiCheckCircle, variant: 'teal', kind: 'status', to: 'ready' };
+  if (order.status === 'preparing') return { label: 'جاهز للاستلام', icon: FiShoppingBag, variant: 'violet', kind: 'status', to: 'ready' };
   if (order.status === 'ready' && !isDelivery) return { label: 'تم التسليم للزبون', icon: FiCheckCircle, variant: 'success', kind: 'status', to: 'delivered' };
   return null;
 }
@@ -75,7 +77,9 @@ export default function Orders() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [openId, setOpenId] = useState(null);
-  const [busy, setBusy] = useState(null);
+  // الطلبات قيد التنفيذ (Set) — زر طلب لا يعود فعّالًا لأن طلبًا آخر ضُغط بعده
+  const [busyIds, setBusyIds] = useState(() => new Set());
+  const busyRef = useRef(new Set());
   const [fresh, setFresh] = useState(() => new Set());
   const [vipIds, setVipIds] = useState(() => new Set(readCache('rest_vips_' + restaurant.id) || []));
   const [dialog, confirm] = useConfirm();
@@ -88,37 +92,63 @@ export default function Orders() {
   countRef.current = orders.length;
   const reqId = useRef(0);
   const seenIds = useRef(null);
+  const freshTimers = useRef(new Map());
+
+  const startBusy = (id) => {
+    if (busyRef.current.has(id)) return false;
+    busyRef.current.add(id); setBusyIds(new Set(busyRef.current));
+    return true;
+  };
+  const endBusy = (id) => { busyRef.current.delete(id); setBusyIds(new Set(busyRef.current)); };
 
   const fetchOrders = useCallback(async ({ silent = false, append = false } = {}) => {
     const rid = restaurant.id;
     if (!rid) { setLoading(false); return; }
     const f = filterRef.current;
-    const myReq = ++reqId.current;
+    // «تحميل المزيد» لا يلغي التحديث الجاري؛ أي تحميل آخر يتجاوز ما قبله
+    const myReq = append ? reqId.current : ++reqId.current;
     const ckey = `rest_orders_${rid}_${f}`;
-    const cached = readCache(ckey);
+    const cached = !silent && !append ? readCache(ckey) : null;
     if (!silent && !append) {
-      if (cached) { setOrders(cached); setLoading(false); } else setLoading(true);
+      // تبويب بلا نسخة محفوظة: نفرّغ القائمة فورًا حتى لا تظهر طلبات التبويب السابق
+      if (cached) { setOrders(cached); setLoading(false); } else { setOrders([]); setLoading(true); }
     }
-    const limit = append ? PAGE : Math.min(100, Math.max(PAGE, silent ? countRef.current : PAGE));
-    const offset = append ? countRef.current : 0;
+    const size = pageSize(f);
+    const loaded = countRef.current;
+    const limit = append ? size : Math.min(100, Math.max(size, silent ? loaded : size));
+    const offset = append ? loaded : 0;
     try {
       const r = await api.get(`/restaurants/${rid}/orders`, { params: { status: STATUS_MAP[f], limit, offset } });
       if (filterRef.current !== f || (!append && myReq !== reqId.current)) return;
       const list = Array.isArray(r?.data) ? r.data : [];
-      setOrders(prev => (append ? dedupe([...prev, ...list]) : list));
-      setHasMore(list.length >= limit);
-      if (!append) writeCache(ckey, list.slice(0, PAGE));
+      setOrders(prev => {
+        if (append) return dedupe([...prev, ...list]);
+        // تحديث صامت يجلب 100 كحد أقصى: نبقي الصفحات الأقدم التي حُمّلت سابقًا بدل أن تختفي
+        if (silent && list.length >= limit && prev.length > list.length) {
+          const ids = new Set(list.map(o => o.id));
+          const oldest = ts(list[list.length - 1]?.created_at);
+          return dedupe([...list, ...prev.filter(o => !ids.has(o.id) && ts(o.created_at) <= oldest)]);
+        }
+        return list;
+      });
+      setHasMore(h => (append || !silent || loaded <= limit ? list.length >= limit : h));
+      if (!append) writeCache(ckey, list.slice(0, size));
       setError(false);
     } catch (e) {
       if (filterRef.current !== f) return;
       if (!silent && !append && !cached) setError(true);
       else if (!silent) toast.error(e.message || 'فشل تحميل الطلبات');
     } finally {
-      setLoading(false); setLoadingMore(false); setRefreshing(false);
+      if (append) setLoadingMore(false);
+      // نُنهي حالة التحميل فقط للطلب الأحدث (لا يغلق طلبٌ قديم مؤشر طلبٍ أحدث)
+      else if (myReq === reqId.current) { setLoading(false); setRefreshing(false); }
     }
   }, [restaurant.id]);
 
-  useEffect(() => { setOpenId(null); setHasMore(false); seenIds.current = null; fetchOrders(); }, [filter, fetchOrders]);
+  useEffect(() => {
+    setOpenId(null); setHasMore(false); setFresh(new Set()); seenIds.current = null;
+    fetchOrders();
+  }, [filter, fetchOrders]);
 
   // كل حدث (طلب جديد/تغيير حالة/إلغاء/تحديث دوري) يرفع tick → تحديث صامت للتبويب الحالي
   const firstTick = useRef(true);
@@ -127,7 +157,8 @@ export default function Orders() {
     fetchOrders({ silent: true });
   }, [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // تمييز الطلبات التي ظهرت للتو (حركة دخول + توهّج)
+  // تمييز الطلبات التي ظهرت للتو (حركة دخول + توهّج) — مؤقت لكل طلب لا يُلغى بتحديث القائمة
+  useEffect(() => () => { freshTimers.current.forEach(t => clearTimeout(t)); freshTimers.current.clear(); }, []);
   useEffect(() => {
     if (loading) return;
     if (seenIds.current === null) { seenIds.current = new Set(orders.map(o => o.id)); return; }
@@ -135,8 +166,13 @@ export default function Orders() {
     if (!added.length) return;
     added.forEach(id => seenIds.current.add(id));
     setFresh(s => new Set([...s, ...added]));
-    const t = setTimeout(() => setFresh(s => { const n = new Set(s); added.forEach(id => n.delete(id)); return n; }), 4000);
-    return () => clearTimeout(t);
+    added.forEach(id => {
+      clearTimeout(freshTimers.current.get(id));
+      freshTimers.current.set(id, setTimeout(() => {
+        freshTimers.current.delete(id);
+        setFresh(s => { if (!s.has(id)) return s; const n = new Set(s); n.delete(id); return n; });
+      }, 4000));
+    });
   }, [orders, loading]);
 
   // الزبائن المميزون (VIP) — لإظهار الحالة الصحيحة على الزر
@@ -152,7 +188,7 @@ export default function Orders() {
   const patchLocal = (id, patch) => setOrders(list => list.map(o => (o.id === id ? { ...o, ...patch } : o)));
 
   const acceptOrder = async (order) => {
-    setBusy(order.id);
+    if (!startBusy(order.id)) return;
     try {
       await api.patch(`/orders/${order.id}/confirm`);
       patchLocal(order.id, { status: 'confirmed' });
@@ -160,11 +196,11 @@ export default function Orders() {
         : order.order_type === 'delivery' ? 'تم قبول الطلب — جاري البحث عن سائق' : 'تم قبول الطلب');
       refreshNow();
     } catch (e) { toast.error(e.message || 'فشل قبول الطلب'); }
-    finally { setBusy(null); }
+    finally { endBusy(order.id); }
   };
 
   const updateStatus = async (order, status) => {
-    setBusy(order.id);
+    if (!startBusy(order.id)) return;
     try {
       await api.patch(`/orders/${order.id}/status`, { status });
       patchLocal(order.id, { status });
@@ -176,10 +212,11 @@ export default function Orders() {
       toast.success(msgs[status] || 'تم تحديث الحالة');
       refreshNow();
     } catch (e) { toast.error(e.message || 'تعذّر تحديث الحالة'); }
-    finally { setBusy(null); }
+    finally { endBusy(order.id); }
   };
 
   const cancelOrder = async (order) => {
+    if (busyRef.current.has(order.id)) return;
     const res = await confirm({
       title: `إلغاء الطلب #${orderNo(order)}؟`,
       message: isGroupOrder(order)
@@ -190,14 +227,16 @@ export default function Orders() {
       confirmText: 'نعم، إلغاء الطلب', cancelText: 'تراجع', danger: true, reasons: CANCEL_REASONS,
     });
     if (!res || !res.ok) return;
-    setBusy(order.id);
+    if (!startBusy(order.id)) return;
     try {
-      await api.patch(`/orders/${order.id}/status`, { status: 'cancelled', cancel_reason: res.reason || undefined });
+      // السيرفر يقرأ reason (ونرسل cancel_reason أيضًا للتوافق مع أي نسخة تقرأ الاسم القديم)
+      const reason = res.reason || undefined;
+      await api.patch(`/orders/${order.id}/status`, { status: 'cancelled', reason, cancel_reason: reason });
       toast.success('تم إلغاء الطلب');
       setOpenId(null);
       refreshNow();
     } catch (e) { toast.error(e.message || 'فشل الإلغاء'); }
-    finally { setBusy(null); }
+    finally { endBusy(order.id); }
   };
 
   const makeVip = async (order) => {
@@ -212,6 +251,15 @@ export default function Orders() {
   const runAction = (order, a) => (a.kind === 'accept' ? acceptOrder(order) : updateStatus(order, a.to));
   const onRefresh = () => { setRefreshing(true); refreshNow(); fetchOrders({ silent: true }); };
 
+  // «نشطة»: الطلبات الجديدة (بانتظار القبول) أولًا ثم الباقي، وداخل كل مجموعة الأقدم أولًا (الأكثر استعجالًا)
+  // — أعمدة اللوحة تبقى مرتّبة من الأقدم للأحدث. باقي التبويبات: الأحدث أولًا
+  const shown = useMemo(
+    () => (filter === 'active'
+      ? [...orders].sort((a, b) => ((a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1)) || (ts(a.created_at) - ts(b.created_at)))
+      : orders),
+    [orders, filter],
+  );
+
   // الطلب المفتوح في نافذة التفاصيل (نحتفظ بآخر نسخة أثناء حركة الإغلاق)
   const openOrder = orders.find(o => o.id === openId) || null;
   const lastOpen = useRef(null);
@@ -220,7 +268,7 @@ export default function Orders() {
 
   const card = (order) => (
     <div key={order.id} className={fresh.has(order.id) ? 'animate-new-order' : ''}>
-      <OrderCard order={order} busy={busy === order.id} fresh={fresh.has(order.id)}
+      <OrderCard order={order} busy={busyIds.has(order.id)} fresh={fresh.has(order.id)}
         onOpen={() => setOpenId(order.id)} onAction={(a) => runAction(order, a)} />
     </div>
   );
@@ -232,7 +280,7 @@ export default function Orders() {
     <div className="space-y-4" dir="rtl">
       {dialog}
       <PageHeader title="الطلبات" icon={FiPackage}
-        subtitle={pendingCount > 0 ? `${pendingCount} بانتظار القبول` : 'تتحدث تلقائيًا'}
+        subtitle={pendingCount > 0 ? `${pl(pendingCount, 'order')} بانتظار القبول` : 'تتحدث تلقائيًا'}
         onRefresh={onRefresh} refreshing={refreshing} />
 
       <Tabs ariaLabel="تصفية الطلبات" value={filter} onChange={setFilter} className="lg:max-w-md"
@@ -247,10 +295,10 @@ export default function Orders() {
         ) : kanban ? (
           <div className="grid grid-cols-3 gap-4 items-start">
             {COLUMNS.map(col => {
-              const list = orders.filter(o => col.statuses.includes(o.status));
+              const list = shown.filter(o => col.statuses.includes(o.status));
               const Icon = col.icon;
               return (
-                <section key={col.key} className="rounded-[24px] bg-white/60 border border-surface-line p-3 min-h-[60vh]" aria-label={col.title}>
+                <section key={col.key} className="rounded-[24px] bg-white/60 border border-surface-line p-3 min-h-[60vh]" aria-label={`${col.title}: ${pl(list.length, 'order')}`}>
                   <header className="flex items-center gap-2 px-1.5 pb-3 mb-1">
                     <span className="w-8 h-8 rounded-[10px] flex items-center justify-center text-white" style={{ background: col.accent }}><Icon size={16} aria-hidden /></span>
                     <h2 className="font-extrabold text-ink flex-1">{col.title}</h2>
@@ -267,7 +315,7 @@ export default function Orders() {
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 stagger">
-            {orders.map(card)}
+            {shown.map(card)}
           </div>
         )}
 
@@ -283,7 +331,7 @@ export default function Orders() {
           open={!!openOrder}
           order={sheetOrder}
           restaurant={restaurant}
-          busy={busy === sheetOrder.id}
+          busy={busyIds.has(sheetOrder.id)}
           isVip={vipIds.has(String(sheetOrder.customer_id))}
           onClose={() => setOpenId(null)}
           onAction={(a) => runAction(sheetOrder, a)}
@@ -324,7 +372,7 @@ function minutesAgo(v) {
 function StatusChip({ order, className = '' }) {
   const Icon = STATUS_ICON[order.status] || FiClock;
   return (
-    <span className={cx('inline-flex items-center gap-1 text-[11.5px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap', STATUS_CHIP[order.status] || 'bg-gray-100 text-ink-2', className)}>
+    <span className={cx('inline-flex items-center gap-1 text-[11.5px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap', statusMeta(order.status).chip, className)}>
       <Icon size={12} aria-hidden /> {statusLabel(order.status, order.order_type)}
     </span>
   );
@@ -341,7 +389,7 @@ function TypeChip({ order }) {
 
 function DriverChip({ order }) {
   if (order.order_type !== 'delivery') return null;
-  if (order.status === 'on_the_way') return <span className="chip bg-violet-50 text-violet-700"><MdDeliveryDining size={13} /> السائق في الطريق</span>;
+  if (order.status === 'on_the_way') return <span className="chip bg-coral-50 text-coral"><MdDeliveryDining size={13} aria-hidden /> السائق في الطريق</span>;
   if (!['confirmed', 'preparing', 'ready'].includes(order.status)) return null;
   return order.driver_id
     ? <span className="chip bg-success-soft text-emerald-700"><FiCheck size={12} /> تم تعيين سائق</span>
@@ -358,7 +406,7 @@ function OrderCard({ order, busy, fresh, onOpen, onAction }) {
     <article className={cx('bg-white rounded-[20px] border overflow-hidden flex transition-shadow',
       isPending ? 'border-brand-200 animate-highlight' : 'border-surface-line shadow-soft hover:shadow-card',
       fresh && !isPending && 'ring-2 ring-brand-200')}>
-      <div className="w-1.5 flex-shrink-0" style={{ background: STATUS_ACCENT[order.status] || '#CBD5E1' }} aria-hidden />
+      <div className="w-1.5 flex-shrink-0" style={{ background: statusMeta(order.status).accent }} aria-hidden />
       <div className="flex-1 min-w-0">
         <button type="button" onClick={onOpen} className="no-press w-full text-right p-4 pb-3 hover:bg-surface/50" aria-label={`تفاصيل الطلب ${orderNo(order)}`}>
           <div className="flex items-center justify-between gap-2">
@@ -378,7 +426,7 @@ function OrderCard({ order, busy, fresh, onOpen, onAction }) {
               <GroupHint order={order} />
             </div>
             <div className="text-left flex-shrink-0">
-              <p className="text-[10.5px] text-ink-3 font-bold leading-none mb-1">الإجمالي</p>
+              <p className="text-[10.5px] text-ink-3 font-bold leading-none mb-1">{isGroupOrder(order) ? 'قيمة أصنافك' : 'الإجمالي'}</p>
               <p className="font-black text-ink text-[19px] leading-none tnum">{money(order.total)}</p>
             </div>
           </div>
@@ -403,7 +451,7 @@ function Timeline({ order }) {
   const isDelivery = order.order_type === 'delivery';
   const steps = isDelivery
     ? [['pending', 'وصل الطلب'], ['confirmed', 'تم القبول'], ['preparing', 'التحضير'], ['ready', 'جاهز'], ['on_the_way', 'في الطريق'], ['delivered', 'تم التوصيل']]
-    : [['pending', 'وصل الطلب'], ['confirmed', 'تم القبول'], ['preparing', 'التحضير'], ['ready', 'جاهز للاستلام'], ['delivered', 'تم التسليم']];
+    : [['pending', 'وصل الطلب'], ['confirmed', 'تم القبول'], ['preparing', 'التحضير'], ['ready', 'جاهز للاستلام'], ['delivered', 'تم الاستلام']];
 
   if (order.status === 'cancelled') {
     return (
@@ -458,44 +506,63 @@ function Section({ title, children, className = '', action }) {
 }
 
 function OrderDetailsSheet({ open, order, restaurant, busy, isVip, onClose, onAction, onCancel, onVip }) {
+  const navigate = useNavigate();
   const isDelivery = order.order_type === 'delivery';
+  const grouped = isGroupOrder(order);
   const { details, loading: detailsLoading, failed, reload } = useOrderDetails(order.id, open, `${order.status}-${order.driver_id || ''}`);
   const [printing, setPrinting] = useState(false);
   const [vipBusy, setVipBusy] = useState(false);
   const full = details ? { ...order, ...details } : order;
   const action = nextAction(order);
   const canCancel = ['pending', 'confirmed', 'preparing', 'ready'].includes(order.status);
-  const canPrint = Printer.isPrinterSupported() && Printer.getSavedPrinter();
+  // الطباعة: ماكنة مربوطة (أندرويد) ← أو نافذة طباعة المتصفح (ويب) ← أو تلميح لربط ماكنة (أندرويد بدون ماكنة)
+  const native = Capacitor.isNativePlatform();
+  const hasPrinter = Printer.isPrinterSupported() && !!Printer.getSavedPrinter();
+  const webPrint = !native && Printer.canBrowserPrint();
+  const canPrint = hasPrinter || webPrint;
+  const needsPrinter = native && !hasPrinter;
 
   const print = async () => {
     setPrinting(true);
     try {
       const d = details || await reload();
       if (!d) throw new Error('تعذّر تحميل تفاصيل الطلب');
-      await Printer.printOrder({ ...order, ...d }, restaurant, d.items || []);
-      toast.success('تمت الطباعة');
+      if (hasPrinter) {
+        await Printer.printOrder({ ...order, ...d }, restaurant, d.items || []);
+        toast.success('تمت الطباعة');
+      } else {
+        await Printer.browserPrintOrder({ ...order, ...d }, restaurant, d.items || []);
+      }
     } catch (e) {
       const err = Printer.printerError(e);
       toast.error(`فشلت الطباعة: ${err.message}`, { duration: 6000 });
     } finally { setPrinting(false); }
   };
 
+  const goPrinterSettings = () => { onClose(); setTimeout(() => navigate('/settings'), 230); };
   const vip = async () => { setVipBusy(true); await onVip(order); setVipBusy(false); };
 
-  const footer = (action || canPrint || canCancel) ? (
+  const showPrintBtn = canPrint || needsPrinter;
+  const footer = (action || showPrintBtn || canCancel) ? (
     <div className="space-y-2">
       {action && (
         <Button variant={action.variant} size="lg" icon={action.icon} loading={busy} block onClick={() => onAction(action)}>{action.label}</Button>
       )}
-      {(canPrint || canCancel) && (
+      {(showPrintBtn || canCancel) && (
         <div className="flex gap-2">
-          {canPrint && (
-            <Button variant="ghost" icon={FiPrinter} loading={printing} onClick={print} className="flex-1">طباعة</Button>
+          {showPrintBtn && (
+            <Button variant="ghost" icon={FiPrinter} loading={printing} disabled={needsPrinter} onClick={print} className="flex-1"
+              title={needsPrinter ? 'لا توجد ماكنة مربوطة' : undefined}>طباعة</Button>
           )}
           {canCancel && (
             <button onClick={() => onCancel(order)} disabled={busy} className="btn-danger flex-1"><FiXCircle aria-hidden /> إلغاء الطلب</button>
           )}
         </div>
+      )}
+      {needsPrinter && (
+        <p className="text-[11.5px] text-ink-3 text-center">
+          لا توجد ماكنة طلبات مربوطة بهذا الجهاز — <button type="button" onClick={goPrinterSettings} className="font-bold text-brand-600 underline underline-offset-2">اربطها من الإعدادات</button>
+        </p>
       )}
     </div>
   ) : null;
@@ -532,8 +599,10 @@ function OrderDetailsSheet({ open, order, restaurant, busy, isVip, onClose, onAc
               <p className="text-[13px] text-ink-2 flex items-start gap-2"><FiMapPin size={14} className="mt-0.5 flex-shrink-0 text-ink-3" aria-hidden /> {full.delivery_address}</p>
             )}
             <p className="text-[13px] text-ink-2 flex items-center gap-2 flex-wrap">
-              <FiCreditCard size={14} className="text-ink-3" aria-hidden /> {paymentLabel(full.payment_method)}
-              {full.payment_status === 'paid' && <span className="chip bg-success-soft text-emerald-700"><FiCheck size={11} /> مدفوع</span>}
+              <FiCreditCard size={14} className="text-ink-3" aria-hidden />
+              {/* الطلب المجمّع: السائق يحصّل مبلغ المجمّع كاملًا — لا نعرض «كاش» لجزء هذا المطعم */}
+              {grouped ? 'الدفع على الطلب المجمّع' + (full.payment_status === 'paid' ? '' : ' (يحصّله السائق)') : paymentLabel(full.payment_method)}
+              {full.payment_status === 'paid' && <span className="chip bg-success-soft text-emerald-700"><FiCheck size={11} aria-hidden /> مدفوع</span>}
             </p>
           </div>
           {order.customer_id && (
@@ -593,7 +662,7 @@ function OrderDetailsSheet({ open, order, restaurant, busy, isVip, onClose, onAc
         )}
 
         {order.status === 'ready' && isDelivery && (
-          <p className="text-[13px] font-bold text-teal-700 bg-teal-50 border border-teal-100 rounded-[14px] p-3 text-center">الطلب جاهز — بانتظار السائق لاستلامه</p>
+          <p className="text-[13px] font-bold text-violet-700 bg-violet-50 border border-violet-100 rounded-[14px] p-3 text-center">الطلب جاهز — بانتظار السائق لاستلامه</p>
         )}
       </div>
     </Sheet>
@@ -644,11 +713,26 @@ function OrderSummary({ order, items }) {
   const subtotal = order.subtotal != null
     ? num(order.subtotal)
     : items.reduce((s, it) => s + (num(it.subtotal) || num(it.price) * (parseInt(it.quantity) || 1)), 0);
+  // الطلب المجمّع: رسوم التوصيل والإكرامية والخصومات والتحصيل على مستوى المجمّع — هنا قيمة أصناف هذا المطعم فقط
+  // (المطعم الأول «الحامل» كانت تظهر عليه إكرامية السائق كاملة بينما المجموع لا يشملها)
+  if (grouped) {
+    return (
+      <section className="rounded-[18px] bg-surface/70 p-3.5 space-y-1.5">
+        <div className="flex justify-between items-center font-black text-base">
+          <span>قيمة أصناف هذا المطعم</span>
+          <span className="text-brand-600 text-lg tnum">{money(order.total != null ? order.total : subtotal)}</span>
+        </div>
+        <p className="text-[11.5px] text-ink-3 flex items-start gap-1.5 leading-relaxed">
+          <FiLayers size={12} className="mt-0.5 flex-shrink-0 text-teal-600" aria-hidden />
+          الدفع على الطلب المجمّع ({order.payment_status === 'paid' ? 'مدفوع' : 'يحصّله السائق من الزبون'}) — رسوم التوصيل وإكرامية السائق تُحسب على المجمّع كاملًا.
+        </p>
+      </section>
+    );
+  }
   const rows = [['المجموع الفرعي', subtotal, '']];
-  // الطلب المجمّع: رسوم التوصيل والخصومات على مستوى المجمّع — هنا أصناف مطعمك فقط
-  if (isDelivery && !grouped) rows.push(['رسوم التوصيل', num(order.delivery_fee), '']);
+  if (isDelivery) rows.push(['رسوم التوصيل', num(order.delivery_fee), '']);
   [['الخصم', order.discount], ['خصم الكوبون', order.coupon_discount], ['خصم الطلب الأول', order.first_order_discount],
-    ['نقاط الولاء', order.points_value], ['من المحفظة', order.wallet_used]]
+    ['نقاط الولاء', order.points_value], ['من محفظة وصلّي', order.wallet_used]]
     .forEach(([l, v]) => { if (num(v) > 0) rows.push([l, num(v), 'discount']); });
   if (num(order.tip) > 0) rows.push(['إكرامية السائق', num(order.tip), '']);
 
@@ -661,10 +745,9 @@ function OrderSummary({ order, items }) {
         </div>
       ))}
       <div className="flex justify-between items-center font-black text-base border-t border-dashed border-gray-300 pt-2.5 mt-1.5">
-        <span>{grouped ? 'إجمالي أصنافك' : 'الإجمالي'}</span>
+        <span>الإجمالي</span>
         <span className="text-brand-600 text-lg tnum">{money(order.total)}</span>
       </div>
-      {grouped && <p className="text-[11px] text-ink-3">رسوم التوصيل والدفع تُحسب على الطلب المجمّع كاملاً.</p>}
     </section>
   );
 }

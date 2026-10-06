@@ -5,12 +5,15 @@ import { FiTrendingUp, FiAward, FiTruck, FiPackage, FiBarChart2 } from 'react-ic
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import PageSkeleton from '../components/Skeleton';
-import { PageHeader, EmptyState, Badge, SectionHeader, ChartTooltip, KpiTile, Avatar } from '../components/ui';
-import { statusMeta, num, truthy } from '../utils/format';
+import { PageHeader, EmptyState, ErrorState, Badge, SectionHeader, ChartTooltip, KpiTile } from '../components/ui';
+import { statusMeta, num, truthy, lastMonths, fmtMonth } from '../utils/format';
+import { arUnit } from '../utils/plural';
 
 const MEDAL = ['linear-gradient(135deg,#FFD66B,#F5A700)', 'linear-gradient(135deg,#E5E7EB,#9CA3AF)', 'linear-gradient(135deg,#FFB38A,#D9692F)'];
 
-function Leaderboard({ rows, valueKey, countLabel, icon, title, sub }) {
+function Leaderboard({ rows: raw, valueKey, countKey, icon, title, sub }) {
+  // الترتيب حسب المبلغ فعلاً (الخادم القديم يرتّب حسب العدد) — A-17
+  const rows = [...raw].sort((a, b) => num(b[valueKey]) - num(a[valueKey]));
   const max = Math.max(1, ...rows.map(r => num(r[valueKey])));
   return (
     <section className="card p-4 sm:p-5">
@@ -31,7 +34,7 @@ function Leaderboard({ rows, valueKey, countLabel, icon, title, sub }) {
                 <div className="flex-1 h-1.5 rounded-full bg-surface-sunken overflow-hidden">
                   <div className="h-full rounded-full grad-sunset grow-x" style={{ width: `${(num(r[valueKey]) / max) * 100}%`, animationDelay: `${i * 60}ms` }} />
                 </div>
-                <span className="text-[10.5px] text-ink-3 font-bold num whitespace-nowrap">{r.orders} {countLabel}</span>
+                <span className="text-[10.5px] text-ink-3 font-bold num whitespace-nowrap">{num(r.orders)} {arUnit(r.orders, countKey)}</span>
               </div>
             </div>
           </li>
@@ -44,25 +47,48 @@ function Leaderboard({ rows, valueKey, countLabel, icon, title, sub }) {
 export default function Analytics() {
   const [data, setData] = useState(readCache('adm_analytics') || null);
   const [loading, setLoading] = useState(!readCache('adm_analytics'));
+  const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    api.get('/admin/analytics')
+  const load = () => {
+    setFailed(false);
+    return api.get('/admin/analytics')
       .then(r => { setData(r.data); writeCache('adm_analytics', r.data); })
-      .catch(e => { if (e?.status !== 401 && e?.status !== 403) toast.error('فشل تحميل التحليلات'); })
+      .catch(e => {
+        setFailed(true);
+        if (e?.status !== 401 && e?.status !== 403 && data) toast.error('تعذّر تحديث التحليلات — المعروض آخر نسخة محفوظة', { id: 'an' });
+      })
       .finally(() => setLoading(false));
-  }, []);
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <div className="page"><PageSkeleton cards={4} rows={5} /></div>;
+  // فشل بلا نسخة محفوظة: خطأ واضح مع إعادة المحاولة (لا «لا توجد بيانات») — A-15
+  if (failed && !data) return <div className="page"><PageHeader icon={<FiTrendingUp />} title="التحليلات" /><ErrorState title="تعذّر تحميل التحليلات" onRetry={() => { setLoading(true); load(); }} /></div>;
 
-  const byStatus = (data?.ordersByStatus || []).map(s => ({ ...s, label: statusMeta(s.status).label, color: statusMeta(s.status).color, count: Number(s.count) || 0 }));
-  const monthly = (data?.monthlyRevenue || []).map(m => ({ ...m, revenue: num(m.revenue) }));
-  const hasAny = monthly.length || data?.topRestaurants?.length || data?.topDrivers?.length || byStatus.length;
+  // حالات متطابقة التسمية (picked_up = on_the_way) تُدمج في شريط واحد
+  const statusAgg = {};
+  (data?.ordersByStatus || []).forEach(s => {
+    const k = s.status === 'picked_up' ? 'on_the_way' : s.status;
+    statusAgg[k] = (statusAgg[k] || 0) + (Number(s.count) || 0);
+  });
+  const byStatus = Object.entries(statusAgg).map(([status, count]) => ({ status, count, label: statusMeta(status).label, color: statusMeta(status).color }));
+
+  // 6 أشهر بالضبط (الأقدم أولاً) مع أصفار للأشهر الفارغة — A-18
+  const byMonth = Object.fromEntries((data?.monthlyRevenue || []).map(m => [String(m.month).slice(0, 7), m]));
+  const months = lastMonths(6);
+  const monthly = months.map((k, i) => ({
+    month: k, label: `${fmtMonth(k)}${i === months.length - 1 ? ' (حتى الآن)' : ''}`,
+    revenue: num(byMonth[k]?.revenue), orders: parseInt(byMonth[k]?.orders) || 0,
+  }));
+  const hasMonthly = monthly.some(m => m.revenue > 0);
+  const hasAny = hasMonthly || data?.topRestaurants?.length || data?.topDrivers?.length || byStatus.length;
   const totalOrders = byStatus.reduce((a, s) => a + s.count, 0);
-  const delivered = byStatus.find(s => s.status === 'delivered')?.count || 0;
-  const cancelled = byStatus.find(s => s.status === 'cancelled')?.count || 0;
+  const delivered = statusAgg.delivered || 0;
+  const cancelled = statusAgg.cancelled || 0;
   const sixMonth = monthly.reduce((a, m) => a + m.revenue, 0);
-  const last = monthly[monthly.length - 1]?.revenue, prev = monthly[monthly.length - 2]?.revenue;
-  const mom = prev > 0 && last != null ? ((last - prev) / prev) * 100 : null;
+  // المقارنة بين آخر شهرين مكتملين (لا نقارن شهراً لم ينتهِ بشهر كامل)
+  const last = monthly[4].revenue, prev = monthly[3].revenue;
+  const mom = prev > 0 ? ((last - prev) / prev) * 100 : null;
 
   return (
     <div className="page">
@@ -72,7 +98,8 @@ export default function Analytics() {
 
       {hasAny ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 stagger">
-          <KpiTile icon={<FiTrendingUp />} label="مدفوعات 6 أشهر" value={sixMonth} suffix=" ₪" tint="#FF6B00" trend={mom} spark={monthly.map(m => m.revenue)} />
+          <KpiTile icon={<FiTrendingUp />} label="مدفوعات 6 أشهر" value={sixMonth} suffix=" ₪" tint="#FF6B00" trend={mom} spark={monthly.map(m => m.revenue)}
+            hint={mom != null ? `الاتجاه: ${fmtMonth(monthly[4].month, { month: 'long' })} مقابل ${fmtMonth(monthly[3].month, { month: 'long' })}` : undefined} />
           <KpiTile icon={<FiPackage />} label="كل الطلبات" value={totalOrders} tint="#2E90FA" />
           <KpiTile icon={<FiAward />} label="نسبة التسليم" value={totalOrders ? (delivered / totalOrders) * 100 : 0} decimals={1} suffix="%" tint="#16A34A" />
           <KpiTile icon={<FiPackage />} label="نسبة الإلغاء" value={totalOrders ? (cancelled / totalOrders) * 100 : 0} decimals={1} suffix="%" tint="#F04438" />
@@ -80,9 +107,9 @@ export default function Analytics() {
       ) : null}
 
       <div className="grid gap-4 lg:gap-6 lg:grid-cols-3">
-        {monthly.length > 0 && (
+        {hasMonthly && (
           <section className="card p-4 sm:p-5 lg:col-span-2">
-            <SectionHeader title="المدفوعات الشهرية" hint="إجمالي ما دفعه الزبائن على الطلبات المسلّمة (آخر 6 أشهر)" />
+            <SectionHeader title="المدفوعات الشهرية" hint="إجمالي ما دفعه الزبائن على الطلبات المسلّمة (آخر 6 أشهر — الشهر الحالي حتى اليوم)" />
             <div className="h-[240px] sm:h-[280px] mt-4 -mx-2" dir="ltr">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={monthly} margin={{ top: 8, right: 12, left: 14, bottom: 0 }}>
@@ -93,7 +120,7 @@ export default function Analytics() {
                     <linearGradient id="mStroke" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#FF8A00" /><stop offset="100%" stopColor="#F53B57" /></linearGradient>
                   </defs>
                   <CartesianGrid stroke="#EEF0F5" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#8A8FA3', fontWeight: 700 }} axisLine={false} tickLine={false} dy={6} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#8A8FA3', fontWeight: 700 }} axisLine={false} tickLine={false} dy={6} />
                   <YAxis tick={{ fontSize: 11, fill: '#8A8FA3' }} axisLine={false} tickLine={false} width={48} orientation="right" />
                   <Tooltip cursor={{ stroke: '#FFC999', strokeDasharray: '4 4' }} content={<ChartTooltip name="المدفوع" fmt={v => `${num(v).toFixed(2)}₪`} />} />
                   <Area type="monotone" dataKey="revenue" stroke="url(#mStroke)" strokeWidth={3} fill="url(#mFill)"
@@ -105,7 +132,7 @@ export default function Analytics() {
         )}
 
         {byStatus.length > 0 && (
-          <section className={`card p-4 sm:p-5 ${monthly.length ? '' : 'lg:col-span-3'}`}>
+          <section className={`card p-4 sm:p-5 ${hasMonthly ? '' : 'lg:col-span-3'}`}>
             <SectionHeader title="الطلبات حسب الحالة" hint="كل الأوقات" />
             <div className="mt-3" style={{ height: Math.max(180, byStatus.length * 38) }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -132,10 +159,10 @@ export default function Analytics() {
 
       <div className="grid gap-4 lg:gap-6 lg:grid-cols-2">
         {data?.topRestaurants?.length > 0 && (
-          <Leaderboard rows={data.topRestaurants} valueKey="revenue" countLabel="طلب" icon={<FiAward />} title="أفضل المتاجر" sub="حسب المدفوعات" />
+          <Leaderboard rows={data.topRestaurants} valueKey="revenue" countKey="order" icon={<FiAward />} title="أفضل المتاجر" sub="مرتّبة حسب المدفوعات على الطلبات المسلّمة" />
         )}
         {data?.topDrivers?.length > 0 && (
-          <Leaderboard rows={data.topDrivers} valueKey="earnings" countLabel="توصيلة" icon={<FiTruck />} title="أفضل السائقين" sub="حسب الأرباح" />
+          <Leaderboard rows={data.topDrivers} valueKey="earnings" countKey="delivery" icon={<FiTruck />} title="أفضل السائقين" sub="مرتّبون حسب الأرباح (الأجرة + إكرامية السائق)" />
         )}
       </div>
     </div>

@@ -1,26 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import toast from 'react-hot-toast';
-import { FiArrowRight, FiSend, FiPhone, FiMessageCircle, FiMessageSquare } from 'react-icons/fi';
+import { FiArrowRight, FiSend, FiPhone, FiMessageCircle, FiMessageSquare, FiWifiOff, FiRefreshCw } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
-import { fmtTime } from '../utils/format';
-import { PageHeader, EmptyState, ListSkeleton, SearchInput, Avatar, Spinner, useMediaQuery } from '../components/ui';
+import { fmtTime, fmtWhen } from '../utils/format';
+import { useOverlay } from '../utils/backStack';
+import { arCount } from '../utils/plural';
+import { PageHeader, EmptyState, ListSkeleton, SearchInput, Avatar, Spinner, Button, useMediaQuery, useVisiblePolling } from '../components/ui';
 import { Sk } from '../components/Skeleton';
-
-/** setInterval يتوقف تلقائياً عندما يكون التطبيق/التبويب مخفياً */
-function useVisiblePolling(fn, ms, enabled = true) {
-  useEffect(() => {
-    if (!enabled) return;
-    let t = null;
-    const start = () => { if (!t) t = setInterval(fn, ms); };
-    const stop = () => { clearInterval(t); t = null; };
-    const onVis = () => { if (document.hidden) stop(); else { fn(); start(); } };
-    if (!document.hidden) start();
-    document.addEventListener('visibilitychange', onVis);
-    return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
-  }, [fn, ms, enabled]);
-}
 
 const ROLE_TINT = (r) => (/سائق/.test(r || '') ? '#8B5CF6' : /مطعم|متجر/.test(r || '') ? '#16A34A' : '#FF6B00');
 
@@ -58,9 +46,13 @@ export default function Chats() {
                 {desktop && on && <span className="absolute right-0 top-2 bottom-2 w-[3px] rounded-l grad-sunset" />}
                 <Avatar name={c.name} size={46} rounded={15} tint={ROLE_TINT(c.role_ar)} />
                 <div className="flex-1 min-w-0">
-                  <p className={`text-sm leading-none truncate ${unread ? 'font-black text-ink' : 'font-bold text-ink'}`}>
-                    {c.name || 'مستخدم'} {c.role_ar && <span className="text-ink-3 text-[11px] font-bold">· {c.role_ar}</span>}
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className={`text-sm leading-none truncate ${unread ? 'font-black text-ink' : 'font-bold text-ink'}`}>
+                      {c.name || 'مستخدم'} {c.role_ar && <span className="text-ink-3 text-[11px] font-bold">· {c.role_ar}</span>}
+                    </p>
+                    {/* وقت آخر رسالة — A-40 */}
+                    {c.last_at && <span className={`text-[10.5px] num flex-shrink-0 ${unread ? 'text-brand-600 font-extrabold' : 'text-ink-3 font-bold'}`}>{fmtWhen(c.last_at)}</span>}
+                  </div>
                   <p className={`text-xs mt-1.5 truncate ${unread ? 'text-ink-2 font-bold' : 'text-ink-3'}`}>{c.last_message}</p>
                 </div>
                 {unread && (
@@ -76,7 +68,7 @@ export default function Chats() {
   if (desktop) {
     return (
       <div className="page">
-        <PageHeader icon={<FiMessageCircle />} title="المحادثات" subtitle={`دعم الزبائن والسائقين والمتاجر${totalUnread ? ` · ${totalUnread} غير مقروءة` : ''}`} />
+        <PageHeader icon={<FiMessageCircle />} title="المحادثات" subtitle={`دعم الزبائن والسائقين والمتاجر${totalUnread ? ` · ${arCount(totalUnread, 'message')} غير مقروءة` : ''}`} />
         <div className="card overflow-hidden grid grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[380px_minmax(0,1fr)] h-[calc(100vh-200px)] min-h-[520px]">
           <div className="border-l border-surface-line flex flex-col min-h-0">
             <div className="p-3 border-b border-surface-line bg-[#FAFBFD]"><SearchInput value={search} onChange={setSearch} placeholder="ابحث بالاسم أو الرسالة…" /></div>
@@ -99,7 +91,7 @@ export default function Chats() {
 
   return (
     <div className="page">
-      <PageHeader icon={<FiMessageCircle />} title="المحادثات" subtitle={`دعم الزبائن والسائقين والمتاجر${totalUnread ? ` · ${totalUnread} غير مقروءة` : ''}`} />
+      <PageHeader icon={<FiMessageCircle />} title="المحادثات" subtitle={`دعم الزبائن والسائقين والمتاجر${totalUnread ? ` · ${arCount(totalUnread, 'message')} غير مقروءة` : ''}`} />
       <SearchInput value={search} onChange={setSearch} placeholder="ابحث بالاسم أو الرسالة…" />
       {list}
       {active && <Thread convo={active} onClose={() => { setActive(null); loadConvos(); }} />}
@@ -110,22 +102,35 @@ export default function Chats() {
 function Thread({ convo, onClose, inline }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const endRef = useRef(null);
+  const taRef = useRef(null);
+  // اللمس (هاتف): Enter = سطر جديد والإرسال بالزر فقط · الماوس/الكيبورد: Enter يرسل — A-38
+  const finePointer = useMediaQuery('(hover: hover) and (pointer: fine)');
+  // شاشة المحادثة الكاملة (هاتف) تُغلق بزر الرجوع — X-04
+  useOverlay(!inline, onClose);
 
   const loadThread = useCallback(() => api.get(`/support/chat/user/${convo.user_id}`)
-    .then(r => setMessages(r.data || []))
-    .catch(() => {})
+    .then(r => { setMessages(r.data || []); setLoaded(true); setFailed(false); })
+    .catch(() => setFailed(true))
     .finally(() => setLoading(false)), [convo.user_id]);
 
   useEffect(() => { loadThread(); }, [loadThread]);
   useVisiblePolling(loadThread, 4000);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages.length]);
+  // حقل يكبر مع النص (حتى ~6 أسطر)
+  useEffect(() => {
+    const el = taRef.current; if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [text]);
 
   const send = async () => {
     const msg = text.trim();
-    if (!msg || sending) return;
+    if (!msg || sending || !loaded) return;
     setSending(true);
     try {
       await api.post(`/support/chat/user/${convo.user_id}`, { message: msg });
@@ -152,6 +157,14 @@ function Thread({ convo, onClose, inline }) {
         <div className="max-w-3xl mx-auto space-y-2">
           {loading && messages.length === 0 ? (
             <div className="space-y-3 py-4">{[60, 40, 70].map((w, i) => <Sk key={i} w={`${w}%`} h={44} r={18} className={i % 2 ? 'mr-auto' : ''} />)}</div>
+          ) : failed && !loaded ? (
+            // فشل التحميل ≠ «لا توجد رسائل» — A-39
+            <div className="text-center py-12 animate-fade-up">
+              <div className="w-14 h-14 mx-auto mb-3 rounded-[18px] bg-white ring-1 ring-red-100 flex items-center justify-center text-2xl text-red-400 shadow-soft"><FiWifiOff /></div>
+              <p className="text-sm font-black text-ink">تعذّر تحميل المحادثة</p>
+              <p className="text-[12px] text-ink-3 font-medium mt-1">تحقق من الاتصال ثم أعد المحاولة.</p>
+              <Button variant="secondary" size="sm" className="mt-4" icon={<FiRefreshCw />} onClick={() => { setLoading(true); loadThread(); }}>إعادة المحاولة</Button>
+            </div>
           ) : messages.length === 0 ? <div className="text-center py-12 animate-fade-up">
               <div className="w-14 h-14 mx-auto mb-3 rounded-[18px] bg-white ring-1 ring-orange-100 flex items-center justify-center text-2xl text-brand-500 shadow-soft"><FiMessageCircle /></div>
               <p className="text-sm font-black text-ink">لا توجد رسائل بعد</p>
@@ -172,9 +185,12 @@ function Thread({ convo, onClose, inline }) {
 
       <div className="bg-white border-t border-surface-line px-3 pt-2.5" style={{ paddingBottom: inline ? 10 : 'calc(env(safe-area-inset-bottom) + 10px)' }}>
         <div className="flex items-end gap-2 max-w-3xl mx-auto">
-          <textarea rows={1} className="inp flex-1 resize-none max-h-32 !rounded-[20px]" placeholder="اكتب ردّك… (Enter للإرسال)" aria-label="نص الرد" value={text} onChange={e => setText(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
-          <button onClick={send} disabled={!text.trim() || sending} aria-label="إرسال"
+          <textarea ref={taRef} rows={1} className="inp flex-1 resize-none !rounded-[20px] overflow-y-auto" style={{ maxHeight: 160 }}
+            placeholder={!loaded ? (failed ? 'تعذّر تحميل المحادثة' : 'جاري تحميل المحادثة…') : finePointer ? 'اكتب ردّك… (Enter للإرسال · Shift+Enter لسطر جديد)' : 'اكتب ردّك…'}
+            aria-label="نص الرد" value={text} onChange={e => setText(e.target.value)} disabled={!loaded}
+            enterKeyHint={finePointer ? 'send' : 'enter'}
+            onKeyDown={e => { if (finePointer && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
+          <button onClick={send} disabled={!text.trim() || sending || !loaded} aria-label="إرسال"
             className="w-[46px] h-[46px] rounded-full grad-sunset text-white flex-shrink-0 flex items-center justify-center shadow-brand disabled:opacity-40 disabled:shadow-none">
             {sending ? <Spinner light /> : <FiSend className="-scale-x-100" />}
           </button>

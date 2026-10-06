@@ -10,25 +10,9 @@ import api from '../utils/api';
 import * as Printer from '../utils/printer';
 import L, { TILE_URL, TILE_ATTR } from '../utils/leaflet';
 import { useRestaurant } from '../context/RestaurantContext';
-import { PageHeader, Spinner, Toggle, Button, CardHeader, cx } from '../components/ui';
-
-function compressToBase64(file, maxPx = 500, quality = 0.8) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const ratio = Math.min(maxPx / img.width, maxPx / img.height, 1);
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(img.width * ratio);
-      canvas.height = Math.round(img.height * ratio);
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(url);
-      resolve(canvas.toDataURL('image/jpeg', quality));
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('فشل تحميل الصورة')); };
-    img.src = url;
-  });
-}
+import { PageHeader, Spinner, Toggle, Button, CardHeader, cx, useConfirm } from '../components/ui';
+import { setLeaveGuard } from '../utils/navGuard';
+import { compressImage, uploadErrorMessage } from '../utils/image';
 
 // خريطة تفاعلية (Leaflet مدمج — بدون CDN): اضغط أو اسحب الدبوس
 function LocationPicker({ lat, lng, onPick, onLocate }) {
@@ -123,8 +107,22 @@ export default function Settings() {
   const [toggling, setToggling] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoInputRef = useRef(null);
+  const [leaveDialog, confirmLeave] = useConfirm();
 
   useEffect(() => { refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // تغييرات غير محفوظة: تأكيد قبل مغادرة الصفحة (القائمة، زر الرجوع، تسجيل الخروج) وقبل إغلاق/تحديث المتصفح
+  useEffect(() => {
+    if (!dirty) { setLeaveGuard(null); return; }
+    setLeaveGuard(() => confirmLeave({
+      title: 'تغييرات غير محفوظة',
+      message: 'عدّلت إعدادات المطعم ولم تحفظها بعد. إذا خرجت الآن ستضيع هذه التعديلات.',
+      confirmText: 'خروج بدون حفظ', cancelText: 'البقاء والحفظ', danger: true,
+    }));
+    const onUnload = (e) => { e.preventDefault(); e.returnValue = ''; return ''; };
+    window.addEventListener('beforeunload', onUnload);
+    return () => { setLeaveGuard(null); window.removeEventListener('beforeunload', onUnload); };
+  }, [dirty, confirmLeave]);
   // مزامنة النموذج مع بيانات السيرفر طالما لم يبدأ المستخدم بالتعديل
   useEffect(() => { if (!dirty) setForm(toForm(restaurant)); }, [restaurant]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!justSaved) return; const t = setTimeout(() => setJustSaved(false), 1800); return () => clearTimeout(t); }, [justSaved]);
@@ -136,17 +134,15 @@ export default function Settings() {
     if (!file.type.startsWith('image/')) return toast.error('اختر ملف صورة');
     setUploadingLogo(true);
     try {
-      let url = null;
-      try {
-        const fd = new FormData();
-        fd.append('file', file);
-        const r = await api.post('/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 });
-        url = r?.url || null;
-      } catch { /* نرجع للضغط المحلي */ }
-      if (!url) url = await compressToBase64(file);
-      setForm(f => ({ ...f, logo: url })); setDirty(true);
+      // ضغط على الجهاز ثم رفع للتخزين — لا نحفظ الصورة كنص base64 داخل قاعدة البيانات أبدًا
+      const small = await compressImage(file, { maxPx: 800, skipBelow: 200 * 1024 });
+      const fd = new FormData();
+      fd.append('file', small, small.name || file.name || 'logo.jpg');
+      const r = await api.post('/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 });
+      if (!r?.url) throw new Error('لم يُرجع الخادم رابط الصورة');
+      setForm(f => ({ ...f, logo: r.url })); setDirty(true);
       toast.success('تم رفع الشعار — اضغط «حفظ» لتثبيته');
-    } catch { toast.error('فشل رفع الصورة'); }
+    } catch (e) { toast.error(uploadErrorMessage(e)); }
     finally { setUploadingLogo(false); }
   };
 
@@ -169,7 +165,8 @@ export default function Settings() {
         description_ar: sOrNull(form.description_ar),
         phone: sOrNull(form.phone),
         address: sOrNull(form.address),
-        min_order: minOrder,
+        // الحقل الفارغ يعني «بدون حد أدنى» = 0 (السيرفر يرفض null/'' كقيمة غير صحيحة)
+        min_order: minOrder ?? 0,
         delivery_time_min: tmin,
         delivery_time_max: tmax,
         opens_at: sOrNull(form.opens_at),
@@ -215,6 +212,7 @@ export default function Settings() {
 
   return (
     <div className="space-y-4" dir="rtl">
+      {leaveDialog}
       <PageHeader title="الإعدادات" icon={FiSettings} subtitle="بيانات مطعمك وماكنة الطلبات" />
 
       {/* ─── فتح / إغلاق ─── */}
@@ -442,7 +440,7 @@ function PrinterSetup({ restaurant }) {
   return (
     <section className="card p-4 lg:p-5">
       <CardHeader icon={FiPrinter} title="ماكنة الطلبات" hint="طباعة الإيصالات لكل طلب"
-        action={saved && supported ? <span className="chip bg-success-soft text-emerald-700"><span className="w-1.5 h-1.5 rounded-full bg-success live-dot" /> متصلة</span> : null} />
+        action={saved && supported ? <span className="chip bg-success-soft text-emerald-700" title="الماكنة محفوظة لهذا الجهاز — جرّب «طباعة تجريبية» للتأكد من الاتصال"><FiLink size={11} aria-hidden /> مربوطة</span> : null} />
 
       {!supported ? (
         <div className="rounded-[18px] bg-gradient-to-br from-warning-soft to-white border border-warning/30 p-4 text-center">

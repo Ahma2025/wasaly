@@ -16,6 +16,9 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SPRING, EASE_OUT, haptic, useReducedMotion } from '../utils/motion';
+import { canonicalPhone, isMobilePhone, toLatinDigits, ltr } from '../utils/format';
+import { isNetworkError } from '../utils/api';
+import { KB_TOOLBAR_H } from '../config';
 
 /*
   شاشة الدخول / إنشاء الحساب — Luxe
@@ -42,30 +45,26 @@ const STEPS = [
 
 // ── أرقام ─────────────────────────────────────────────
 // أرقام عربية-هندية (٠-٩) وفارسية (۰-۹) → لاتينية، ثم إزالة أي رمز غير رقمي (نفس تطبيع السيرفر)
-const toLatinDigits = (s) => String(s || '')
-  .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
-  .replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
 const normalizePhone = (p) => toLatinDigits(p).replace(/\D/g, '');
 
-// تنسيق حيّ: 059 903 9704 | 970 59 903 9704
+/*
+  تنسيق حيّ بشكل موحّد: 00970/+970/972… تتحوّل لـ 05X مباشرة (قبل القص، فما بينقص رقم)
+  → «059 903 9704». أرقام أجنبية/قديمة طويلة تضل كما هي
+*/
 function formatPhone(raw) {
-  const d = normalizePhone(raw).slice(0, 15);
+  const d = canonicalPhone(raw, { partial: true }).slice(0, 15);
   if (d.startsWith('0')) {
     const x = d.slice(0, 10);
     return [x.slice(0, 3), x.slice(3, 6), x.slice(6)].filter(Boolean).join(' ');
   }
-  if (d.startsWith('970') || d.startsWith('972')) {
-    const x = d.slice(0, 12);
-    return [x.slice(0, 3), x.slice(3, 5), x.slice(5, 8), x.slice(8)].filter(Boolean).join(' ');
-  }
   return d;
 }
 
-// strict = للتسجيل (رقم جوال 05X بعشرة أرقام). الدخول يقبل أي رقم ≥ 9 مثل السيرفر (حسابات قديمة)
+// strict = للتسجيل (رقم جوال 05XXXXXXXX فقط). الدخول يقبل أي رقم ≥ 9 مثل السيرفر (حسابات قديمة)
 function phoneError(np, strict) {
   if (!np) return 'أدخل رقم جوالك';
-  if (strict && np.startsWith('05') && np.length !== 10) return 'رقم الجوال 10 أرقام — مثل 059 123 4567';
-  if (np.length < 9) return 'رقم الهاتف غير مكتمل';
+  if (strict && !isMobilePhone(np)) return np.length < 10 ? 'رقم الجوال 10 أرقام — مثل 059 123 4567' : 'رقم الجوال لازم يبدأ بـ 05 — مثل 059 123 4567';
+  if (np.length < 9) return 'رقم الجوال غير مكتمل';
   return null;
 }
 
@@ -190,9 +189,11 @@ export default function LoginScreen() {
     const base = L.card + L.form;
     const btn = L.f.submit;
     const f = focusedKey.current && L.f[focusedKey.current];
-    let target = btn ? base + btn.y + btn.h - vh + 18 : 0;
+    // (iOS: KeyboardAvoidingView بيحجز كمان مساحة شريط "تم" — keyboardVerticalOffset)
+    const pad = 18;
+    let target = btn ? base + btn.y + btn.h - vh + pad : 0;
     if (f) {
-      target = Math.max(target, base + f.y + f.h - vh + 18); // أسفل الحقل ظاهر
+      target = Math.max(target, base + f.y + f.h - vh + pad); // أسفل الحقل ظاهر
       target = Math.min(target, base + f.y - 14);            // وأعلاه ما ينقص فوق الشاشة
     }
     target = Math.max(0, target);
@@ -228,7 +229,9 @@ export default function LoginScreen() {
   }, [step]);
 
   const isReg = tab === 'register';
-  const np = normalizePhone(phone);
+  // رقم موحّد للإرسال (00970 / +972 / 5XXXXXXXX → 05XXXXXXXX) — نفس الشخص = نفس الحساب
+  const np = canonicalPhone(phone);
+  const rawNp = normalizePhone(phone);
   const strength = pwStrength(password);
 
   const switchTab = (t) => {
@@ -325,7 +328,13 @@ export default function LoginScreen() {
     try {
       let res; let recovered = false;
       if (!isReg) {
-        res = await api.post('/auth/login-password', { phone: np, password }, { timeout: AUTH_TIMEOUT });
+        try {
+          res = await api.post('/auth/login-password', { phone: np, password }, { timeout: AUTH_TIMEOUT });
+        } catch (err) {
+          // حسابات قديمة انسجّلت بصيغة ثانية (970… أو 5…) والسيرفر لسا ما بيوحّد — نجرّب الرقم كما كُتب مرة وحدة
+          if (err?.status !== 401 || rawNp === np || rawNp.length < 9) throw err;
+          res = await api.post('/auth/login-password', { phone: rawNp, password }, { timeout: AUTH_TIMEOUT });
+        }
       } else {
         try {
           res = await api.post('/auth/register',
@@ -383,12 +392,13 @@ export default function LoginScreen() {
       }
     }
     // شبكة / مهلة — بدون رد من السيرفر
-    if (!st || msg === 'Network error' || String(msg).toLowerCase().includes('timeout')) {
+    if (!st || isNetworkError(err) || String(msg).toLowerCase().includes('timeout')) {
       setBanner({ type: 'error', icon: 'cloud-offline-outline', msg: 'تعذّر الاتصال — تأكد من الإنترنت. بياناتك محفوظة، جرّب مرة ثانية.', actions: [retry] });
       return;
     }
     if (st === 401) {
-      setBanner({ type: 'error', msg: msg || 'رقم الهاتف أو كلمة المرور غير صحيحة', actions: [forgotAction] });
+      // نص موحّد (رقم الجوال / كلمة السر) بدل خليط رسائل السيرفر
+      setBanner({ type: 'error', msg: 'رقم الجوال أو كلمة السر غير صحيحة', actions: [forgotAction] });
       return;
     }
     if (st === 429) { setBanner({ type: 'error', icon: 'time-outline', msg }); return; }
@@ -434,7 +444,7 @@ export default function LoginScreen() {
       <FloatingField ref={refs.phone} icon="call-outline" label="رقم الجوال" value={phone} onChangeText={onPhone}
         keyboardType="phone-pad" maxLength={17} autoComplete="tel" textContentType="telephoneNumber" importantForAutofill="yes"
         error={errors.phone} nudge={nudge} valid={!phoneError(np, strict)} onFocus={onFieldFocus('phone')}
-        hint={strict ? 'الصيغة: 05X XXX XXXX' : undefined} placeholder="059 123 4567"
+        hint={strict ? `الصيغة: ${ltr('05X XXX XXXX')}` : undefined} placeholder="059 123 4567"
         returnKeyType="next" blurOnSubmit={false}
         onSubmitEditing={() => (nextKey ? focusField(nextKey) : onDone && onDone())}
         inputStyle={{ writingDirection: 'ltr' }} />
@@ -490,7 +500,7 @@ export default function LoginScreen() {
           <View style={[styles.summaryIcon, { backgroundColor: C.tint }]}><Ionicons name="person" size={15} color={C.primary} /></View>
           <View style={{ flex: 1 }}>
             <Text style={styles.summaryName} numberOfLines={1}>{name.trim()}</Text>
-            <Text style={styles.summarySub} numberOfLines={1}>{phone} · {city.trim()}</Text>
+            <Text style={styles.summarySub} numberOfLines={1}>{ltr(phone)} · {city.trim()}</Text>
           </View>
           <Text style={styles.summaryEdit}>تعديل</Text>
         </Press>
@@ -526,7 +536,7 @@ export default function LoginScreen() {
   const onPrimary = !isReg || step === 2 ? submit : goNext;
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? KB_TOOLBAR_H : 0}>
       <Animated.ScrollView ref={scrollRef} contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         showsVerticalScrollIndicator={false} scrollEventThrottle={16}
@@ -679,7 +689,7 @@ export default function LoginScreen() {
             accessibilityRole="button" accessibilityLabel={`اتصال بالدعم ${SUPPORT_PHONE}`}
             style={[styles.sheetBtn, { backgroundColor: C.inputBg, borderWidth: 1, borderColor: C.border }]}>
             <Ionicons name="call" size={18} color={C.primary} />
-            <Text style={[styles.sheetBtnTxt, { color: C.text }]}>اتصل بالدعم · {formatPhone(SUPPORT_PHONE)}</Text>
+            <Text style={[styles.sheetBtnTxt, { color: C.text }]}>اتصل بالدعم · {ltr(formatPhone(SUPPORT_PHONE))}</Text>
           </Press>
         </View>
       </BottomSheet>

@@ -52,4 +52,31 @@ function hebronRange(kind = 'day', now = new Date()) {
   return { start: naive(start), end: naive(end) };
 }
 
-module.exports = { hebronRange, TZ };
+/** آخر n تواريخ تقويمية بتوقيت فلسطين ('YYYY-MM-DD') تصاعدياً — تنتهي باليوم (حساب تقويمي، لا يتأثر بالتوقيت الصيفي) */
+function lastLocalDates(n, now = new Date()) {
+  const p = localParts(now);
+  const base = Date.UTC(p.y, p.m - 1, p.d, 12);
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) out.push(new Date(base - i * 24 * 3600 * 1000).toISOString().slice(0, 10));
+  return out;
+}
+/** آخر n أشهر بتوقيت فلسطين ('YYYY-MM') تصاعدياً — تنتهي بالشهر الحالي */
+function lastLocalMonths(n, now = new Date()) {
+  const p = localParts(now);
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(p.y, p.m - 1 - i, 1));
+    out.push(d.toISOString().slice(0, 7));
+  }
+  return out;
+}
+/** تعبئة صفوف مجمّعة حسب مفتاح تاريخ بأصفار للمفاتيح الناقصة */
+function fillSeries(keys, rows, keyField, zero) {
+  const m = new Map((rows || []).map(r => [String(r[keyField]), r]));
+  return keys.map(k => m.get(k) || { [keyField]: k, ...zero });
+}
+
+// منتصف ليل محلي (y, m, d) كنص UTC naive للمقارنة مع أعمدة TIMESTAMP (d قد يتجاوز الشهر → يلتف تلقائياً)
+const localMidnightNaive = (y, m, d) => naive(localMidnightUtc(y, m, d));
+
+module.exports = { hebronRange, TZ, lastLocalDates, lastLocalMonths, fillSeries, localParts, localMidnightNaive };

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Switch, Share, Linking, Image, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Switch, Share, Linking, Image, ActivityIndicator, AppState } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
@@ -7,20 +7,23 @@ import Constants from 'expo-constants';
 import { pickImage } from '../utils/pickImage';
 import { Animated, Easing } from 'react-native';
 import { FadeIn, PopIn, Press } from '../components/Anim';
-import { AnimatedNumber } from '../components/UI';
+import { AnimatedNumber, BottomSheet } from '../components/UI';
+import { Skeleton } from '../components/Skeleton';
 import { HeroDecor } from '../components/GradientHeader';
 import { useReducedMotion } from '../utils/motion';
-import api from '../utils/api';
+import api, { isNetworkError, NETWORK_MESSAGE } from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useHeaderTop } from '../components/GradientHeader';
 import { useTabBarInset } from '../components/FloatingTabBar';
-import { getNotificationsEnabled, setNotificationsEnabled } from '../utils/pushNotifications';
-import { storeUrl, storeWebUrl } from '../config';
+import { getNotificationsStatus, setNotificationsEnabled } from '../utils/pushNotifications';
+import { storeUrl, storeWebUrl, shareDownloadText, POINT_VALUE } from '../config';
+import { plural } from '../utils/plural';
+import { ltr, prettyPhone, fmtDateTime } from '../utils/format';
 
 const TIER_META = {
-  bronze:   { grad: ['#E8A15C', '#B5651D'], emoji: '🥉', label: 'برونز' },
+  bronze:   { grad: ['#E8A15C', '#B5651D'], emoji: '🥉', label: 'برونزي' },
   silver:   { grad: ['#B9BEC8', '#7F8696'], emoji: '🥈', label: 'فضي' },
   gold:     { grad: ['#FFCF33', '#FF9A00'], emoji: '🥇', label: 'ذهبي' },
   platinum: { grad: ['#7B79F0', '#4B49C9'], emoji: '💎', label: 'بلاتيني' },
@@ -38,14 +41,29 @@ export default function ProfileScreen({ navigation }) {
   const [name, setName] = useState('');
   const [savingName, setSavingName] = useState(false);
   const [notifs, setNotifs] = useState(true);
+  const [notifStatus, setNotifStatus] = useState({ pref: true, granted: true, canAskAgain: true });
   const [notifBusy, setNotifBusy] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [walletOpen, setWalletOpen] = useState(false);
+  const [walletTx, setWalletTx] = useState(null);     // null = لسا ما انجلب
+  const [walletErr, setWalletErr] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => { getNotificationsEnabled().then(setNotifs).catch(() => {}); }, []);
+  // حالة الإشعارات الحقيقية: اختيار المستخدم + إذن الجهاز (المفتاح ما بيحكي "مفعّلة" والإذن مرفوض)
+  const refreshNotifStatus = useCallback(() => {
+    getNotificationsStatus().then(st => { setNotifStatus(st); setNotifs(st.enabled); }).catch(() => {});
+  }, []);
+  useEffect(() => {
+    refreshNotifStatus();
+    // رجوع من إعدادات الجهاز → نحدّث الحالة
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') refreshNotifStatus(); });
+    return () => sub.remove();
+  }, [refreshNotifStatus]);
 
   // المحفظة والنقاط تتغير بعد كل طلب — نحدّث مع كل دخول للتبويب
   useFocusEffect(useCallback(() => {
     let alive = true;
+    refreshNotifStatus();
     (async () => {
       const cached = await readCache('profile');
       if (alive && cached && !profile) { setProfile(cached); setName(cached.name || ''); }
@@ -74,23 +92,28 @@ export default function ProfileScreen({ navigation }) {
     finally { setSavingName(false); }
   };
 
+  const avatarBusy = useRef(false);
   const pickAvatar = async () => {
+    if (avatarBusy.current) return; // ما يبلّش رفع ثاني والأول شغّال
+    avatarBusy.current = true;
     try {
       const asset = await pickImage({ allowsEditing: true, aspect: [1, 1], quality: 0.6 });
       if (!asset) return;
       setUploadingAvatar(true);
       const form = new FormData();
       form.append('file', { uri: asset.uri, name: 'avatar.jpg', type: 'image/jpeg' });
-      const up = await api.post('/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      // رفع الصور بياخد وقت عالنت البطيء
+      const up = await api.post('/upload', form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 });
       if (up.url) {
         await api.put('/users/profile', { avatar: up.url });
         setProfile(p => ({ ...p, avatar: up.url }));
         updateUser({ avatar: up.url });
       }
-    } catch { Alert.alert('خطأ', 'فشل رفع الصورة'); }
-    finally { setUploadingAvatar(false); }
+    } catch (e) { Alert.alert('تعذّر رفع الصورة', e?.message || 'حاول مرة ثانية'); }
+    finally { avatarBusy.current = false; setUploadingAvatar(false); }
   };
 
+  const openSettings = () => Linking.openSettings().catch(() => {});
   const toggleNotifs = async (v) => {
     setNotifBusy(true);
     setNotifs(v);
@@ -100,10 +123,39 @@ export default function ProfileScreen({ navigation }) {
       await setNotificationsEnabled(false);
       Alert.alert('الإشعارات', 'ما قدرنا نفعّل الإشعارات. اسمح بالإشعارات لتطبيق وصلّي من إعدادات الهاتف.', [
         { text: 'إلغاء', style: 'cancel' },
-        { text: 'الإعدادات', onPress: () => Linking.openSettings().catch(() => {}) },
+        { text: 'الإعدادات', onPress: openSettings },
       ]);
     }
+    refreshNotifStatus();
     setNotifBusy(false);
+  };
+
+  // سجل محفظة وصلّي (استرجاعات الطلبات المجمّعة، الكاش باك، الخصومات…)
+  const openWallet = async () => {
+    setWalletOpen(true);
+    setWalletErr('');
+    try {
+      const r = await api.get('/wallet/transactions');
+      setWalletTx(Array.isArray(r?.data) ? r.data : []);
+    } catch (e) {
+      if (walletTx == null) setWalletTx([]);
+      setWalletErr(isNetworkError(e) ? NETWORK_MESSAGE : (e?.message || 'تعذّر تحميل سجل المحفظة'));
+    }
+  };
+
+  // حذف الحساب: تحذير صريح بضياع الرصيد والنقاط + شاشة انتظار أثناء الحذف
+  const confirmDelete = () => {
+    const lost = [wallet > 0 ? `رصيد محفظة وصلّي (${wallet.toFixed(2)}₪)` : '', points > 0 ? plural(points, 'point') : ''].filter(Boolean);
+    Alert.alert('حذف الحساب', `سيتم حذف حسابك وبياناتك نهائياً.${lost.length ? `\n\n⚠️ رح يضيع: ${lost.join(' و ')} — وما بنقدر نرجّعهم.` : ''}\n\nهل أنت متأكد؟`, [
+      { text: 'إلغاء', style: 'cancel' },
+      {
+        text: 'حذف نهائياً', style: 'destructive', onPress: async () => {
+          setDeleting(true);
+          try { await api.delete('/users/me', { timeout: 30000 }); setDeleting(false); logout({ remote: false }); }
+          catch (e) { setDeleting(false); Alert.alert('تعذّر حذف الحساب', e?.message || 'حاول مرة أخرى'); }
+        },
+      },
+    ]);
   };
 
   const rateApp = () => {
@@ -127,6 +179,7 @@ export default function ProfileScreen({ navigation }) {
   const wallet = parseFloat(profile?.wallet_balance || 0) || 0;
 
   return (
+    <View style={styles.container}>
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: tabInset + 24 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
       <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.header, { paddingTop: headerTop }]}>
         <HeroDecor />
@@ -144,20 +197,20 @@ export default function ProfileScreen({ navigation }) {
           <Text style={styles.headerName}>{displayName}</Text>
           <View style={styles.phonePill}>
             <Ionicons name="call" size={12} color="#FFF" />
-            <Text style={styles.headerPhone}>{profile?.phone || user?.phone || ''}</Text>
+            <Text style={styles.headerPhone}>{ltr(prettyPhone(profile?.phone || user?.phone || ''))}</Text>
           </View>
         </FadeIn>
       </LinearGradient>
 
       {/* بطاقة المستوى (لمعة متحرّكة) */}
       <FadeIn delay={60} from={24}>
-        <TierCard tierMeta={tierMeta} points={points} wallet={wallet} C={COLORS} styles={styles} />
+        <TierCard tierMeta={tierMeta} points={points} wallet={wallet} C={COLORS} styles={styles} onWallet={openWallet} />
       </FadeIn>
 
       {!!profile?.referral_code && (
         <FadeIn delay={120}>
           <Press scaleTo={0.97} style={{ marginHorizontal: 16, marginBottom: 12 }} accessibilityRole="button" accessibilityLabel="شارك كود الدعوة"
-            onPress={() => Share.share({ message: `حمّل تطبيق وصلّي واستخدم كود الدعوة "${profile.referral_code}" لتحصل على 10₪ هدية! 🎁🛵` }).catch(() => {})}>
+            onPress={() => Share.share({ message: `حمّل تطبيق وصلّي واستخدم كود الدعوة "${profile.referral_code}" لتحصل على 10₪ هدية! 🎁🛵\n\n${shareDownloadText()}` }).catch(() => {})}>
             <View style={styles.referCard}>
               <LinearGradient colors={COLORS.gradients.violet} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.referIcon}>
                 <Ionicons name="gift" size={22} color="#FFF" />
@@ -179,11 +232,13 @@ export default function ProfileScreen({ navigation }) {
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>المعلومات الشخصية</Text>
           {editing ? (
-            <View style={{ flexDirection: 'row-reverse', gap: 14 }}>
-              <TouchableOpacity onPress={save} disabled={savingName} accessibilityRole="button">
+            <View style={{ flexDirection: 'row-reverse', gap: 8 }}>
+              <TouchableOpacity onPress={save} disabled={savingName} accessibilityRole="button" style={styles.linkBtn} hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}>
                 {savingName ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Text style={styles.linkTxt}>حفظ</Text>}
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => { setEditing(false); setName(profile?.name || ''); }} accessibilityRole="button"><Text style={[styles.linkTxt, { color: COLORS.gray }]}>إلغاء</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => { setEditing(false); setName(profile?.name || ''); }} accessibilityRole="button" style={styles.linkBtn} hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}>
+                <Text style={[styles.linkTxt, { color: COLORS.gray }]}>إلغاء</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <TouchableOpacity onPress={() => setEditing(true)} style={styles.editPill} accessibilityRole="button" accessibilityLabel="تعديل الاسم">
@@ -199,8 +254,8 @@ export default function ProfileScreen({ navigation }) {
             : <Text style={styles.fieldValue}>{displayName || '—'}</Text>}
         </View>
         <View style={[styles.field, { borderBottomWidth: 0 }]}>
-          <Text style={styles.fieldLabel}>الهاتف</Text>
-          <Text style={styles.fieldValue}>{profile?.phone || user?.phone || '—'}</Text>
+          <Text style={styles.fieldLabel}>رقم الجوال</Text>
+          <Text style={styles.fieldValue}>{(profile?.phone || user?.phone) ? ltr(prettyPhone(profile?.phone || user?.phone)) : '—'}</Text>
         </View>
       </FadeIn>
 
@@ -229,7 +284,7 @@ export default function ProfileScreen({ navigation }) {
             const active = (pref || 'system') === o.k;
             return (
               <Press key={o.k} scaleTo={0.95} style={[styles.themeChip, active && styles.themeChipOn]} onPress={() => setTheme(o.k)}
-                accessibilityRole="radio" accessibilityLabel={o.l}>
+                accessibilityRole="radio" accessibilityLabel={`المظهر: ${o.l}`} accessibilityState={{ checked: active, selected: active }}>
                 {active && <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />}
                 <Ionicons name={o.i} size={20} color={active ? '#FFF' : COLORS.sub} />
                 <Text style={[styles.themeChipTxt, active && { color: '#FFF' }]}>{o.l}</Text>
@@ -245,7 +300,17 @@ export default function ProfileScreen({ navigation }) {
             <View style={[styles.menuIcon, { backgroundColor: COLORS.tint }]}><Ionicons name="notifications" size={19} color={COLORS.primary} /></View>
             <View style={{ flex: 1 }}>
               <Text style={styles.menuLabel}>إشعارات الطلبات</Text>
-              <Text style={styles.menuSub}>{notifs ? 'مفعّلة — بنبلغك بكل تحديث' : 'موقوفة — ما رح توصلك إشعارات'}</Text>
+              <Text style={styles.menuSub}>
+                {notifs ? 'مفعّلة — بنبلغك بكل تحديث'
+                  : notifStatus.pref && !notifStatus.granted ? 'مرفوضة من إعدادات الجهاز — فعّلها من الإعدادات'
+                    : 'موقوفة — ما رح توصلك إشعارات'}
+              </Text>
+              {notifStatus.pref && !notifStatus.granted && (
+                <TouchableOpacity onPress={openSettings} style={styles.settingsLink} accessibilityRole="button" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="settings-outline" size={13} color={COLORS.primary} />
+                  <Text style={styles.linkTxt}>افتح الإعدادات</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
           <Switch value={notifs} onValueChange={toggleNotifs} disabled={notifBusy} trackColor={{ true: COLORS.primary, false: COLORS.border }} thumbColor="#FFF"
@@ -259,28 +324,63 @@ export default function ProfileScreen({ navigation }) {
         <Text style={styles.logoutText}>تسجيل الخروج</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.deleteAccBtn}
-        accessibilityRole="button"
-        onPress={() => Alert.alert('حذف الحساب', 'سيتم حذف حسابك وبياناتك نهائياً. هل أنت متأكد؟', [
-          { text: 'إلغاء', style: 'cancel' },
-          {
-            text: 'حذف نهائياً', style: 'destructive', onPress: async () => {
-              try { await api.delete('/users/me'); logout({ remote: false }); }
-              catch { Alert.alert('خطأ', 'حاول مرة أخرى'); }
-            },
-          },
-        ])}
-      >
+      <TouchableOpacity style={styles.deleteAccBtn} accessibilityRole="button" onPress={confirmDelete} disabled={deleting}>
         <Text style={styles.deleteAccText}>حذف الحساب نهائياً</Text>
       </TouchableOpacity>
       {!!version && <Text style={styles.version}>وصلّي · الإصدار {version}</Text>}
     </ScrollView>
+
+    {/* سجل محفظة وصلّي */}
+    <BottomSheet visible={walletOpen} onClose={() => setWalletOpen(false)} title="محفظة وصلّي" maxHeight={0.8} scrollable>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+        <View style={styles.walletHead}>
+          <Text style={styles.walletBal}>{wallet.toFixed(2)}₪</Text>
+          <Text style={styles.walletBalLbl}>رصيدك الحالي</Text>
+        </View>
+        {!!walletErr && (
+          <View style={styles.walletErr}>
+            <Ionicons name="cloud-offline-outline" size={15} color={COLORS.red} />
+            <Text style={[styles.menuSub, { color: COLORS.red, flex: 1, marginTop: 0 }]}>{walletErr}</Text>
+            <TouchableOpacity onPress={openWallet} accessibilityRole="button" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}><Text style={styles.linkTxt}>إعادة</Text></TouchableOpacity>
+          </View>
+        )}
+        {walletTx == null ? (
+          [0, 1, 2].map(i => <View key={i} style={{ marginBottom: 10 }}><Skeleton w={'100%'} h={54} r={14} /></View>)
+        ) : walletTx.length === 0 && !walletErr ? (
+          <Text style={[styles.menuSub, { textAlign: 'center', paddingVertical: 20 }]}>ما في حركات على محفظتك لسا</Text>
+        ) : walletTx.map((t, i) => {
+          const credit = String(t.type || '').toLowerCase() === 'credit' || parseFloat(t.amount) > 0 && String(t.type || '').toLowerCase() !== 'debit';
+          const amt = Math.abs(parseFloat(t.amount) || 0);
+          return (
+            <View key={String(t.id ?? i)} style={styles.txRow}>
+              <View style={[styles.txIcon, { backgroundColor: (credit ? COLORS.green : COLORS.red) + '1F' }]}>
+                <Ionicons name={credit ? 'arrow-down' : 'arrow-up'} size={16} color={credit ? COLORS.green : COLORS.red} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.menuLabel} numberOfLines={2}>{t.description || (credit ? 'إضافة للمحفظة' : 'دفع من المحفظة')}</Text>
+                <Text style={styles.menuSub}>{fmtDateTime(t.created_at)}</Text>
+              </View>
+              <Text style={[styles.txAmt, { color: credit ? COLORS.green : COLORS.red }]}>{credit ? '+' : '-'}{amt.toFixed(2)}₪</Text>
+            </View>
+          );
+        })}
+      </ScrollView>
+    </BottomSheet>
+
+    {deleting && (
+      <View style={styles.blocker} accessibilityViewIsModal accessibilityLabel="جاري حذف الحساب">
+        <View style={styles.blockerCard}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.menuLabel}>جاري حذف الحساب…</Text>
+        </View>
+      </View>
+    )}
+    </View>
   );
 }
 
 /* بطاقة المستوى: متدرّجة بلون المستوى + لمعة تمرّ كل بضع ثوانٍ */
-function TierCard({ tierMeta, points, wallet, C, styles }) {
+function TierCard({ tierMeta, points, wallet, C, styles, onWallet }) {
   const reduce = useReducedMotion();
   const sweep = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -315,14 +415,18 @@ function TierCard({ tierMeta, points, wallet, C, styles }) {
           <View style={styles.tierStat}>
             <Text style={styles.tierStatLbl}>النقاط</Text>
             <AnimatedNumber value={points} decimals={0} style={styles.tierStatVal} />
-            <Text style={styles.tierStatSub}>≈ {(points * 0.05).toFixed(1)}₪ خصم</Text>
+            {/* السلة بتسمح باستخدام النقاط من 100 وفوق */}
+            <Text style={styles.tierStatSub}>{points >= 100 ? `≈ ${(points * POINT_VALUE).toFixed(1)}₪ خصم` : `باقي ${plural(100 - points, 'point')} لأول خصم`}</Text>
           </View>
           <View style={styles.tierDivider} />
-          <View style={styles.tierStat}>
-            <Text style={styles.tierStatLbl}>المحفظة</Text>
+          <Press style={styles.tierStat} onPress={onWallet} scaleTo={0.95} accessibilityRole="button" accessibilityLabel={`محفظة وصلّي ${wallet.toFixed(2)} شيكل، اضغط لعرض السجل`}>
+            <Text style={styles.tierStatLbl}>محفظة وصلّي</Text>
             <AnimatedNumber value={wallet} suffix="₪" style={styles.tierStatVal} />
-            <Text style={styles.tierStatSub}>رصيد جاهز للاستخدام</Text>
-          </View>
+            <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 2 }}>
+              <Text style={styles.tierStatSub}>عرض السجل</Text>
+              <Ionicons name="chevron-back" size={11} color="rgba(255,255,255,0.85)" />
+            </View>
+          </Press>
         </View>
       </LinearGradient>
     </View>
@@ -383,4 +487,15 @@ const makeStyles = (C) => StyleSheet.create({
   deleteAccBtn: { alignItems: 'center', paddingVertical: 10, marginHorizontal: 16 },
   deleteAccText: { color: C.faint, fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
   version: { textAlign: 'center', color: C.faint, fontSize: 12, marginTop: 6 },
+  linkBtn: { paddingVertical: 4, paddingHorizontal: 6, minHeight: 32, justifyContent: 'center' },
+  settingsLink: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, marginTop: 4, alignSelf: 'flex-end' },
+  walletHead: { alignItems: 'center', paddingVertical: 12, marginBottom: 8, backgroundColor: C.tint, borderRadius: 18 },
+  walletBal: { fontSize: 26, fontWeight: '900', color: C.primary },
+  walletBalLbl: { fontSize: 12, color: C.gray, fontWeight: '600', marginTop: 2 },
+  walletErr: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, backgroundColor: C.dangerBg, borderRadius: 12, padding: 10, marginBottom: 10 },
+  txRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
+  txIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  txAmt: { fontSize: 15, fontWeight: '900' },
+  blocker: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(11,11,18,0.45)', alignItems: 'center', justifyContent: 'center', zIndex: 100 },
+  blockerCard: { backgroundColor: C.card, borderRadius: 22, paddingHorizontal: 28, paddingVertical: 22, alignItems: 'center', gap: 12, ...C.shadow.card },
 });

@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Animated, Alert, Share, Dimensions, Easing, Pressable } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Animated, Alert, Share, Dimensions, Easing, Pressable, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import api from '../utils/api';
+import api, { isNetworkError, NETWORK_MESSAGE } from '../utils/api';
+import { plural } from '../utils/plural';
+import { normStoreType } from '../utils/storeTypes';
+import { FREE_DELIVERY_THRESHOLD } from '../config';
+import RtlHScroll from '../components/RtlHScroll';
 import { readCache, writeCache } from '../utils/cache';
 import { useCart, MAX_QTY } from '../context/CartContext';
 import ItemCard from '../components/ItemCard';
@@ -46,7 +50,8 @@ function AddonRow({ opt, selected, multi, onPress, C, styles }) {
   const checkScale = v.interpolate({ inputRange: [0, 1], outputRange: [0.2, 1] });
   return (
     <Press onPress={() => { haptic.select(); onPress(); }} haptic={false} scaleTo={0.98}
-      accessibilityRole={multi ? 'checkbox' : 'radio'} accessibilityLabel={opt.name}
+      accessibilityRole={multi ? 'checkbox' : 'radio'} accessibilityState={{ checked: !!selected }}
+      accessibilityLabel={`${opt.name}${parseFloat(opt.price || 0) > 0 ? `، زيادة ${parseFloat(opt.price).toFixed(2)} شيكل` : ''}`}
       style={[styles.addonRow, selected && styles.addonRowSelected]}>
       <View style={[styles.addonCheck, !multi && { borderRadius: 12 }, selected && { borderColor: C.primary }]}>
         <Animated.View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center', opacity: v, transform: [{ scale: checkScale }] }]}>
@@ -120,7 +125,8 @@ export default function RestaurantScreen() {
   const insets = useSafeAreaInsets();
   const { colors: COLORS } = useTheme();
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
-  const { addItem, count, total, clearAndAdd, restaurantsCount } = useCart();
+  const { addItem, count, total, clearAndAdd, restaurantsCount, multiConfig = {} } = useCart();
+  const freeThreshold = parseFloat(multiConfig.free_delivery_threshold) || FREE_DELIVERY_THRESHOLD;
   const groupId = route.params?.groupId;      // وضع الطلب الجماعي (إن وُجد)
   const groupCode = route.params?.groupCode;
   const [restaurant, setRestaurant] = useState(null);
@@ -147,9 +153,10 @@ export default function RestaurantScreen() {
   const stuckRef = useRef(false);
   const lockSpy = useRef(0);
   const tabLayouts = useRef({});
-  const indX = useRef(new Animated.Value(0)).current;
-  const indW = useRef(new Animated.Value(0)).current;
   const heartV = useRef(new Animated.Value(1)).current;
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const creatingRef = useRef(false);
+  const targetItemDone = useRef(null);
 
   const TOP_BAR = insets.top + 56;
   const COVER_H = 250 + insets.top * 0.4;
@@ -165,7 +172,21 @@ export default function RestaurantScreen() {
       }
       fetchRestaurant();
     })();
+    loadFavorite();
   }, [id]);
+
+  // المفضلة: من قائمة مفضلة الزبون (الكاش ثم السيرفر) — مش من رد المطعم المخزّن مؤقتاً لكل الزباين
+  const loadFavorite = async () => {
+    const has = (list) => Array.isArray(list) && list.some(r => String(r?.id ?? r?.restaurant_id) === String(id));
+    const cached = await readCache('favorites');
+    if (cached) setIsFavorite(has(cached));
+    try {
+      const d = await api.get('/users/favorites');
+      const list = d?.data || [];
+      setIsFavorite(has(list));
+      writeCache('favorites', list);
+    } catch {}
+  };
 
   useEffect(() => { if (selectedItem) setSheetItem(selectedItem); }, [selectedItem]);
 
@@ -181,17 +202,23 @@ export default function RestaurantScreen() {
       }));
       setRestaurant(r);
       setMenu(m);
-      if (typeof r.is_favorite !== 'undefined') setIsFavorite(!!r.is_favorite);
+      if (r.is_favorite === true) setIsFavorite(true);
       writeCache('rest_' + id, { restaurant: r, menu: m });
     } catch (e) {
-      setError(e?.message === 'Network error' ? 'تعذّر الاتصال — تأكد من الإنترنت' : (e?.message || 'تعذّر تحميل المطعم'));
+      setError(isNetworkError(e) ? NETWORK_MESSAGE : (e?.message || `تعذّر تحميل ${nouns.place}`));
     } finally { setLoading(false); }
   };
+
+  // كلمات حسب نوع المتجر: مطعم/متجر، المنيو/المنتجات، وجبة/منتج
+  const isFoodStore = ['restaurant', 'sweets'].includes(normStoreType(restaurant?.store_type));
+  const nouns = isFoodStore
+    ? { place: 'المطعم', menu: 'المنيو', item: 'الوجبة' }
+    : { place: 'المتجر', menu: 'المنتجات', item: 'المنتج' };
 
   const openItem = (item) => {
     if (restaurant && !restaurant.is_open) {
       haptic.warning();
-      Alert.alert('المطعم مغلق', 'المطعم مغلق حالياً ولا يستقبل طلبات. جرّب لاحقاً 🕐');
+      Alert.alert(`${nouns.place} مغلق`, `${nouns.place} مغلق حالياً ولا يستقبل طلبات. جرّب لاحقاً 🕐`);
       return;
     }
     haptic.light();
@@ -221,12 +248,17 @@ export default function RestaurantScreen() {
 
   const getAddonPrice = () => Object.values(selectedAddons).reduce((s, g) => s + g.reduce((x, a) => x + (parseFloat(a.price) || 0), 0), 0);
 
+  // سلة مشتركة: ضغطة وحدة = مجموعة وحدة (ضغطتين ما بيعملوا مجموعتين)
   const createGroup = async () => {
+    if (creatingRef.current) return;
+    creatingRef.current = true;
+    setCreatingGroup(true);
     try {
       const r = await api.post('/group-orders', { restaurant_id: restaurant.id, restaurant_name: restaurant.name_ar });
       const g = r.data || r;
       navigation.navigate('GroupOrder', { code: g.code });
-    } catch { Alert.alert('خطأ', 'تعذّر بدء المجموعة، حاول مرة ثانية'); }
+    } catch (e) { Alert.alert('تعذّر فتح السلة المشتركة', e?.message || 'حاول مرة ثانية'); }
+    finally { creatingRef.current = false; setCreatingGroup(false); }
   };
 
   const confirmAddItem = async () => {
@@ -267,7 +299,7 @@ export default function RestaurantScreen() {
       if (result.reason === 'limit') {
         Alert.alert(
           'وصلت للحد الأقصى 🛵',
-          `بتقدر تطلب من ${result.max} مطاعم كحد أقصى بالطلب الواحد (سائق واحد بيجمعهم).\nسلتك فيها: ${result.restaurant}.\n\nبدك تفرّغ السلة وتبدأ من ${here}؟ أو احذف مطعم من السلة أولاً.`,
+          `بتقدر تطلب من ${plural(result.max, 'restaurant')} كحد أقصى بالطلب الواحد (سائق واحد بيجمعهم).\nسلتك فيها: ${result.restaurant}.\n\nبدك تفرّغ السلة وتبدأ من ${here}؟ أو احذف مطعم من السلة أولاً.`,
           [
             { text: 'إلغاء', style: 'cancel' },
             { text: 'راجع السلة', onPress: () => { setSelectedItem(null); navigation.navigate('Main', { screen: 'سلتي' }); } },
@@ -306,6 +338,10 @@ export default function RestaurantScreen() {
     try {
       if (next) await api.post(`/users/favorites/${id}`);
       else await api.delete(`/users/favorites/${id}`);
+      // تحديث كاش المفضلة (صفحة المفضلة + المرة الجاية)
+      const cached = (await readCache('favorites')) || [];
+      const rest = cached.filter(r => String(r?.id ?? r?.restaurant_id) !== String(id));
+      writeCache('favorites', next && restaurant ? [{ ...restaurant, menu: undefined }, ...rest] : rest);
     } catch { setIsFavorite(!next); }
   };
 
@@ -320,22 +356,26 @@ export default function RestaurantScreen() {
   const sections = menu.map((cat, idx) => ({ cat, idx, items: (cat.items || []).filter(passes) }));
   const visibleSections = sections.filter(sct => sct.items.length > 0);
 
-  /* ═══ مؤشر التبويب المتحرّك ═══ */
-  const moveIndicator = (idx, animated = true) => {
+  /*
+    التبويب النشط يظهر بالشريطين (داخل الصفحة + اللاصق) — الشريط اللاصق ينبني لاحقاً،
+    فبنسكروله للتبويب النشط أول ما يتقاس محتواه (بدل ما يفتح على آخر الأقسام بالـ RTL)
+  */
+  const tabsViewW = useRef({ main: SW, sticky: SW });
+  const tabsContentW = useRef({ main: 0, sticky: 0 });
+  const scrollTabsTo = (idx, animated = true, which = 'both') => {
     const l = tabLayouts.current[idx];
     if (!l) return;
-    if (!animated || isReducedMotion()) { indX.setValue(l.x); indW.setValue(l.width); }
-    else {
-      Animated.parallel([
-        Animated.spring(indX, { toValue: l.x, damping: 18, stiffness: 220, mass: 0.9, useNativeDriver: false }),
-        Animated.spring(indW, { toValue: l.width, damping: 18, stiffness: 220, mass: 0.9, useNativeDriver: false }),
-      ]).start();
-    }
-    const scrollTo = Math.max(0, l.x - SW / 2 + l.width / 2);
-    stickyTabsRef.current?.scrollTo({ x: scrollTo, animated });
-    tabsRef.current?.scrollTo({ x: scrollTo, animated });
+    const go = (ref, k) => {
+      const vw = tabsViewW.current[k] || SW;
+      const cw = tabsContentW.current[k];
+      const max = cw ? Math.max(0, cw - vw) : Infinity;
+      // +12: حشوة المحتوى (tabsContent.paddingHorizontal)
+      ref.current?.scrollTo({ x: Math.min(max, Math.max(0, l.x + 12 - vw / 2 + l.width / 2)), animated });
+    };
+    if (which !== 'sticky') go(tabsRef, 'main');
+    if (which !== 'main') go(stickyTabsRef, 'sticky');
   };
-  useEffect(() => { moveIndicator(activeCategory); }, [activeCategory]);
+  useEffect(() => { scrollTabsTo(activeCategory, !isReducedMotion()); }, [activeCategory]);
 
   const onTabPress = (idx) => {
     haptic.select();
@@ -346,6 +386,23 @@ export default function RestaurantScreen() {
       scrollRef.current?.scrollTo({ y: Math.max(0, menuY.current + y - TOP_BAR - TABS_H - 6), animated: true });
     }
   };
+
+  // جاي من نتيجة بحث عن صنف → نسكرول لقسمه ونفتحه مباشرة (بدل ما يضيع الصنف)
+  useEffect(() => {
+    const itemId = route.params?.itemId;
+    if (itemId == null || !menu.length || !restaurant || targetItemDone.current === String(itemId)) return undefined;
+    let found = null, catIdx = -1;
+    menu.forEach((cat, ci) => {
+      if (found) return;
+      const it = (cat.items || []).find(x => String(x.id) === String(itemId));
+      if (it) { found = it; catIdx = ci; }
+    });
+    if (!found) return undefined;
+    setDietFilter('all');
+    const t = setTimeout(() => { targetItemDone.current = String(itemId); onTabPress(catIdx); openItem(found); }, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menu, restaurant, route.params?.itemId]);
 
   // متابعة القسم الظاهر أثناء التمرير (scroll-spy) + إظهار التبويبات اللاصقة
   const onScrollJS = (e) => {
@@ -415,7 +472,7 @@ export default function RestaurantScreen() {
   if (!restaurant) return (
     <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
       <LinearGradient colors={COLORS.gradients.sunset} style={{ height: TOP_BAR }} />
-      <EmptyState emoji="😕" title="تعذّر فتح المطعم" subtitle={error || 'حاول مرة ثانية بعد شوي'}
+      <EmptyState emoji="😕" title={`تعذّر فتح ${nouns.place}`} subtitle={error || 'حاول مرة ثانية بعد شوي'}
         ctaLabel="إعادة المحاولة" onCta={() => { setLoading(true); fetchRestaurant(); }} />
       <TouchableOpacity onPress={goBack} style={{ alignSelf: 'center', marginBottom: insets.bottom + 30 }} accessibilityRole="button">
         <Text style={{ color: COLORS.gray, fontWeight: '700', fontSize: 14 }}>رجوع</Text>
@@ -435,6 +492,13 @@ export default function RestaurantScreen() {
   // شريط تبويبات الأقسام (يُرسم مرتين: داخل الصفحة + لاصق بالأعلى)
   const renderTabs = (ref, isSticky) => (
     <ScrollView ref={ref} horizontal showsHorizontalScrollIndicator={false}
+      onLayout={(e) => { tabsViewW.current[isSticky ? 'sticky' : 'main'] = e.nativeEvent.layout.width; }}
+      onContentSizeChange={(w) => {
+        const k = isSticky ? 'sticky' : 'main';
+        const first = !tabsContentW.current[k];
+        tabsContentW.current[k] = w;
+        if (first) scrollTabsTo(activeCategory, false, k);
+      }}
       contentContainerStyle={styles.tabsContent} accessibilityRole="tablist">
       <View style={{ flexDirection: 'row-reverse' }}>
         {menu.map((cat, idx) => {
@@ -444,7 +508,7 @@ export default function RestaurantScreen() {
             <TouchableOpacity key={cat.id ?? idx} activeOpacity={0.75} onPress={() => has && onTabPress(idx)}
               onLayout={isSticky ? undefined : (e) => {
                 tabLayouts.current[idx] = e.nativeEvent.layout;
-                if (idx === activeCategory) moveIndicator(idx, false);
+                if (idx === activeCategory) scrollTabsTo(idx, false);
               }}
               style={[styles.catTab, on && styles.catTabOn, !has && { opacity: 0.35 }]} accessibilityRole="tab" accessibilityState={{ selected: on, disabled: !has }}>
               {on && <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[StyleSheet.absoluteFill, { borderRadius: 19 }]} />}
@@ -506,8 +570,10 @@ export default function RestaurantScreen() {
           </View>
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
-              <View style={styles.statTop}><Ionicons name="star" size={15} color="#FFB020" /><Text style={styles.statVal}>{rating.toFixed(1)}</Text></View>
-              <Text style={styles.statLbl}>التقييم</Text>
+              {rating > 0
+                ? <View style={styles.statTop}><Ionicons name="star" size={15} color="#FFB020" /><Text style={styles.statVal}>{rating.toFixed(1)}</Text></View>
+                : <View style={styles.statTop}><Text style={[styles.statVal, { fontSize: 13.5 }]}>جديد ✨</Text></View>}
+              <Text style={styles.statLbl}>{rating > 0 ? 'التقييم' : 'بدون تقييمات بعد'}</Text>
             </View>
             <View style={styles.statSep} />
             <View style={styles.statBox}>
@@ -523,7 +589,7 @@ export default function RestaurantScreen() {
           {parseFloat(restaurant.min_order) > 0 && (
             <View style={styles.minOrderRow}>
               <Ionicons name="information-circle" size={15} color={COLORS.primary} />
-              <Text style={styles.minOrder}>الحد الأدنى للطلب: {parseFloat(restaurant.min_order).toFixed(0)}₪ · توصيل مجاني فوق 50₪</Text>
+              <Text style={styles.minOrder}>الحد الأدنى للطلب: {parseFloat(restaurant.min_order).toFixed(0)}₪ · توصيل مجاني فوق {freeThreshold}₪</Text>
             </View>
           )}
         </FadeIn>
@@ -538,37 +604,37 @@ export default function RestaurantScreen() {
         {!restaurant.is_open && (
           <View style={[styles.notice, { backgroundColor: COLORS.dangerBg, borderColor: COLORS.dangerBorder }]}>
             <Ionicons name="lock-closed" size={16} color={COLORS.red} />
-            <Text style={[styles.noticeTxt, { color: COLORS.red }]}>المطعم مغلق حالياً — لا يستقبل طلبات</Text>
+            <Text style={[styles.noticeTxt, { color: COLORS.red }]}>{nouns.place} مغلق حالياً — لا يستقبل طلبات</Text>
           </View>
         )}
 
-        {/* 👥 الطلب الجماعي */}
+        {/* 👥 السلة المشتركة (اطلب مع أصحابك) */}
         {groupId ? (
           <Press style={styles.groupModeBanner} onPress={() => navigation.navigate('GroupOrder', { code: groupCode })} accessibilityRole="button">
             <LinearGradient colors={COLORS.gradients.violet} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
             <Ionicons name="people" size={16} color="#FFF" />
-            <Text style={styles.groupModeTxt}>أنت تضيف لمجموعة {groupCode} — اضغط للرجوع</Text>
+            <Text style={styles.groupModeTxt}>أنت تضيف للسلة المشتركة {groupCode} — اضغط للرجوع</Text>
           </Press>
         ) : restaurant.is_open ? (
-          <Press style={styles.groupCta} onPress={createGroup} scaleTo={0.97} accessibilityRole="button" accessibilityLabel="ابدأ طلب جماعي">
+          <Press style={[styles.groupCta, creatingGroup && { opacity: 0.6 }]} onPress={createGroup} disabled={creatingGroup} scaleTo={0.97}
+            accessibilityRole="button" accessibilityLabel="اطلب مع أصحابك — سلة مشتركة" accessibilityState={{ busy: creatingGroup }}>
             <LinearGradient colors={COLORS.gradients.violet} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.groupIcon}>
-              <Ionicons name="people" size={20} color="#FFF" />
+              {creatingGroup ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="people" size={20} color="#FFF" />}
             </LinearGradient>
             <View style={{ flex: 1 }}>
-              <Text style={styles.groupCtaTitle}>اطلبوا سوا — كل واحد يشوف حسابه</Text>
-              <Text style={styles.groupCtaSub}>افتح مجموعة، وكل واحد يزيد أكله من موبايله</Text>
+              <Text style={styles.groupCtaTitle}>اطلب مع أصحابك — كل واحد يشوف حسابه</Text>
+              <Text style={styles.groupCtaSub}>{creatingGroup ? 'عم نفتح السلة المشتركة…' : isFoodStore ? 'سلة مشتركة: كل واحد يضيف أكله من موبايله' : 'سلة مشتركة: كل واحد يضيف طلبه من موبايله'}</Text>
             </View>
             <Ionicons name="chevron-back" size={18} color={COLORS.faint} />
           </Press>
         ) : null}
 
         {/* فلاتر */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 8, paddingTop: 6, paddingBottom: 12 }}>
+        <RtlHScroll contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingTop: 6, paddingBottom: 12 }}>
           {DIETS.map(f => (
             <Chip key={f.k} size="sm" icon={f.icon} emoji={f.emoji} label={f.l} selected={dietFilter === f.k} onPress={() => setDietFilter(f.k)} />
           ))}
-        </ScrollView>
+        </RtlHScroll>
 
         {/* تبويبات الأقسام (داخل الصفحة) */}
         {menu.length > 0 && (
@@ -580,7 +646,7 @@ export default function RestaurantScreen() {
         {menu.length === 0 ? (
           <View style={styles.noItems}>
             <View style={styles.noItemsIcon}><Ionicons name="document-text-outline" size={34} color={COLORS.primary} /></View>
-            <Text style={styles.noItemsTxt}>المنيو قيد التجهيز — رجّع بعد شوي</Text>
+            <Text style={styles.noItemsTxt}>{isFoodStore ? 'المنيو قيد التجهيز — رجّع بعد شوي' : 'المنتجات قيد التجهيز — رجّع بعد شوي'}</Text>
           </View>
         ) : visibleSections.length === 0 ? (
           <View style={styles.noItems}>
@@ -622,7 +688,7 @@ export default function RestaurantScreen() {
           <Ionicons name="checkmark-circle" size={20} color="#FFF" />
           <Text style={styles.groupReturnTxt}>خلّصت؟ ارجع للمجموعة</Text>
         </Pressable>
-      ) : cartVisible && <CartBar count={count} total={total} hint={restaurantsCount > 1 ? `طلب مجمّع من ${restaurantsCount} مطاعم · سائق واحد` : undefined} onPress={() => navigation.navigate('Main', { screen: 'سلتي' })} />}
+      ) : cartVisible && <CartBar count={count} total={total} hint={restaurantsCount > 1 ? `طلب مجمّع من ${plural(restaurantsCount, 'restaurant')} · سائق واحد` : undefined} onPress={() => navigation.navigate('Main', { screen: 'سلتي' })} />}
 
       <FlyToCart shot={flyShot} onDone={() => setFlyShot(null)} bottomInset={insets.bottom} C={COLORS} />
 
@@ -692,11 +758,6 @@ export default function RestaurantScreen() {
             );
           })}
 
-          {(!sheetItem?.addon_groups || sheetItem.addon_groups.length === 0) && (
-            <View style={{ padding: 20, alignItems: 'center' }}>
-              <Text style={{ color: COLORS.gray, fontSize: 14, fontWeight: '500' }}>لا توجد إضافات لهذه الوجبة</Text>
-            </View>
-          )}
         </ScrollView>
       </BottomSheet>
     </View>

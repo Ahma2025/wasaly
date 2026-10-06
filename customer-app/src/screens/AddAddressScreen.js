@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../utils/api';
 import { writeCache } from '../utils/cache';
+import { KB_TOOLBAR_H } from '../config';
 import { useTheme } from '../context/ThemeContext';
 import GradientHeader from '../components/GradientHeader';
 import MapPicker from '../components/MapPicker';
@@ -63,16 +64,29 @@ export default function AddAddressScreen({ navigation, route }) {
       lat: coords.lat, lng: coords.lng, is_default: isDefault,
     };
     try {
+      let newId = null;
       if (editing) await api.put(`/users/addresses/${editing.id}`, body);
-      else await api.post('/users/addresses', body);
-      try { const d = await api.get('/users/addresses'); writeCache('addresses', d.data || []); } catch {}
+      else {
+        const r = await api.post('/users/addresses', body);
+        newId = r?.data?.id ?? r?.id ?? null;
+      }
+      let list = null;
+      try { const d = await api.get('/users/addresses'); list = d.data || []; writeCache('addresses', list); } catch {}
+      // سيرفر ما رجّع id؟ العنوان الجديد = اللي ما كان موجود قبل
+      if (!editing && newId == null && Array.isArray(list)) {
+        const before = new Set((route?.params?.prevIds || []).map(String));
+        const fresh = list.filter(a => !before.has(String(a.id)));
+        if (fresh.length === 1 || (fresh.length && !before.size)) newId = fresh.sort((a, b) => Number(b.id) - Number(a.id))[0].id;
+      }
+      // السلة بتختار العنوان الجديد تلقائياً (بدل ما ينبعت الطلب عالعنوان القديم)
+      if (newId != null) writeCache('new_address', { id: newId, at: Date.now() });
       navigation.goBack();
-    } catch (e) { Alert.alert('خطأ', e?.message || 'تعذّر حفظ العنوان، حاول مرة أخرى'); }
+    } catch (e) { Alert.alert('تعذّر حفظ العنوان', e?.message || 'حاول مرة أخرى'); }
     finally { setSaving(false); }
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? KB_TOOLBAR_H : 0}>
       <GradientHeader title={editing ? 'تعديل العنوان' : 'إضافة عنوان'} subtitle="حرّك الخريطة لوضع الدبوس على موقعك" />
 
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: insets.bottom + 30 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" scrollEnabled={scrollEnabled}>
@@ -122,13 +136,14 @@ export default function AddAddressScreen({ navigation, route }) {
             value={notes} onChangeText={setNotes} multiline maxLength={200} />
         </FadeIn>
 
+        {/* نفس ترتيب باقي صفوف الإعدادات (RTL): أيقونة يمين ← نص ← مفتاح يسار */}
         <FadeIn delay={160} style={styles.defaultRow}>
-          <Switch value={isDefault} onValueChange={setIsDefault} trackColor={{ true: COLORS.primary, false: COLORS.border }} thumbColor="#FFF" accessibilityLabel="العنوان الافتراضي" />
+          <View style={styles.defIcon}><Ionicons name="star" size={16} color={COLORS.primary} /></View>
           <View style={{ flex: 1 }}>
             <Text style={styles.defaultTitle}>العنوان الافتراضي</Text>
             <Text style={styles.defaultSub}>يُختار تلقائياً بالسلة ويظهر بالرئيسية</Text>
           </View>
-          <View style={styles.defIcon}><Ionicons name="star" size={16} color={COLORS.primary} /></View>
+          <Switch value={isDefault} onValueChange={setIsDefault} trackColor={{ true: COLORS.primary, false: COLORS.border }} thumbColor="#FFF" accessibilityLabel="العنوان الافتراضي" />
         </FadeIn>
 
         <GradientButton title={editing ? 'حفظ التعديلات' : 'حفظ العنوان'} onPress={save} loading={saving}

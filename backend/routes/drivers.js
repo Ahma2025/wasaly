@@ -8,6 +8,9 @@ const driverLoc = require('../utils/driverLocation');
 const { hebronRange } = require('../utils/time');
 const { serverError, clampInt } = require('../utils/http');
 const { invalidateSocketAuth } = require('../utils/socket');
+const { noteDriverSeen, hasActiveAssignment, releaseDriverOffers } = require('../utils/driverPresence');
+const { maybeRefreshToken } = require('../utils/jwtKey');
+const { canonicalPhone } = require('../utils/phone');
 
 const stripUser = (u) => { if (!u) return u; const { password_hash, ...rest } = u; return rest; };
 
@@ -16,6 +19,10 @@ router.patch('/status', auth, driverOnly, async (req, res) => {
   try {
     const { is_online, lat, lng } = req.body;
     const hasLoc = validCoord(lat, lng);
+    // 🛑 D-08: لا يمكن الخروج من الاستقبال/تسجيل الخروج وعليه توصيلة مُسندة (يبقى الطلب معلّقاً عليه ويتوقف التتبع)
+    if (!is_online && await hasActiveAssignment(req.user.id)) {
+      return res.status(409).json({ success: false, code: 'ACTIVE_DELIVERY', message: 'لا يمكنك إيقاف الاستقبال أو تسجيل الخروج وعندك طلب قيد التوصيل — سلّمه أولاً' });
+    }
     const { rowCount } = await pool.query(
       `UPDATE drivers SET is_online=$1,
          current_lat=COALESCE($2, current_lat), current_lng=COALESCE($3, current_lng),
@@ -24,6 +31,8 @@ router.patch('/status', auth, driverOnly, async (req, res) => {
     );
     if (!rowCount) return res.status(404).json({ success: false, message: 'ملف السائق غير موجود — تواصل مع الإدارة' });
     if (hasLoc) await driverLoc.setLocation(req.user.id, +lat, +lng, { dbWritten: true }).catch(() => {});
+    if (is_online) await noteDriverSeen(req.user.id, { force: true });
+    else await releaseDriverOffers(req.io, req.user.id); // عرض قائم لم يُقبل → لسائق آخر فوراً بدل انتظار 45ث
     res.json({ success: true });
   } catch (e) {
     console.error('driver status:', e.message);
@@ -89,7 +98,12 @@ router.get('/me', auth, driverOnly, async (req, res) => {
     let activeGroup = null;
     try { activeGroup = await require('../utils/groupService').activeGroupForDriver(req.user.id); } catch (e) { console.error('active group:', e.message); }
     if (active && active.group_id) { active.is_group = true; }
-    res.json({ success: true, data: { ...drivers[0], active_order: active, active_group: activeGroup } });
+    if (active && active.is_offer && active.expires_at) { active.offer_id = `${active.id}|${active.expires_at}`; }
+    if (active) delete active.payment_ref_history;
+    // D-07: تجديد منزلق للتوكن (اختياري للتطبيق: يخزّن refreshed_token إن وُجد)
+    const refreshed = maybeRefreshToken(req.user, req.tokenDecoded);
+    res.json({ success: true, server_now: new Date().toISOString(), ...(refreshed ? { refreshed_token: refreshed } : {}),
+      data: { ...drivers[0], active_order: active, active_group: activeGroup } });
   } catch (e) {
     console.error('driver me:', e.message);
     res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
@@ -116,10 +130,23 @@ router.get('/earnings', auth, driverOnly, async (req, res) => {
        GROUP BY 1 ORDER BY date DESC`, [req.user.id]);
     const { rows: driver } = await pool.query('SELECT wallet_balance, total_deliveries FROM drivers WHERE user_id=$1', [req.user.id]);
     const s = stats[0] || {};
+    // D-09: أيام متصلة (بتوقيت فلسطين) بأصفار للأيام بلا توصيل — حتى يصدق عنوان "آخر N يوم" (فارغة إن لا توصيل إطلاقاً)
+    const byDate = new Map(daily.map(d => [d.date, d]));
+    const contDaily = [];
+    if (daily.length) {
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Hebron', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+      const base = Date.parse(`${today}T12:00:00Z`); // حساب تقويمي بحت (لا يتأثر بالتوقيت الصيفي)
+      for (let i = 0; i < 31; i++) {
+        const key = new Date(base - i * 24 * 3600 * 1000).toISOString().slice(0, 10);
+        const hit = byDate.get(key);
+        contDaily.push(hit ? { ...hit, earnings: round2(num(hit.earnings)) } : { date: key, count: '0', earnings: 0 });
+      }
+    }
     res.json({ success: true, data: {
       period,
+      period_label: period === 'week' ? 'آخر 7 أيام' : period === 'month' ? 'هذا الشهر' : 'اليوم',
       stats: { deliveries: s.deliveries || '0', earnings: round2(num(s.earnings)), tips: round2(num(s.tips)) },
-      daily: daily.map(d => ({ ...d, earnings: round2(num(d.earnings)) })),
+      daily: contDaily,
       wallet_balance: round2(num(driver[0]?.wallet_balance)),
       total_deliveries: driver[0]?.total_deliveries || 0,
     } });
@@ -137,14 +164,26 @@ router.get('/orders', auth, driverOnly, async (req, res) => {
     const offset = (page - 1) * limit;
     const { rows } = await pool.query(
       `SELECT o.*, o.status, o.order_type, o.service_type, r.name_ar as restaurant_name, u.name as customer_name,
-              (COALESCE(o.driver_fee, o.delivery_fee, 0) + COALESCE(o.tip, 0)) AS driver_earning
+              (COALESCE(o.driver_fee, o.delivery_fee, 0) + COALESCE(o.tip, 0)) AS driver_earning,
+              g.group_number, g.status AS group_status, g.stops_total AS group_stops_count,
+              (COALESCE(g.driver_fee, 0) + COALESCE(g.tip, 0)) AS group_driver_earning, (o.group_id IS NOT NULL) AS is_group
        FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
        LEFT JOIN users u ON o.customer_id=u.id
+       LEFT JOIN order_groups g ON g.id = o.group_id
        WHERE o.driver_id=$1 AND (o.driver_assigned_at IS NOT NULL OR o.status='delivered')
-       ORDER BY o.created_at DESC LIMIT $2 OFFSET $3`,
+       ORDER BY o.created_at DESC, o.id DESC LIMIT $2 OFFSET $3`,
       [req.user.id, limit, offset]
     );
-    res.json({ success: true, data: rows });
+    // D-24/D-35: كل ابن يحمل ربح المجموعة/عدد محطاتها (لا 0.00₪ لو انقسمت المجموعة بين صفحتين) وحالة المجموعة (picking_up)
+    res.json({ success: true, data: rows.map(o => {
+      const x = { ...o };
+      delete x.payment_ref_history;
+      if (o.group_id) {
+        x.group_driver_earning = round2(num(o.group_driver_earning));
+        x.display_status = ['picking_up', 'on_the_way', 'delivered', 'cancelled'].includes(o.group_status) && o.status !== 'cancelled' ? o.group_status : o.status;
+      } else { x.group_driver_earning = null; x.display_status = o.status; }
+      return x;
+    }) });
   } catch (e) {
     console.error('driver orders:', e.message);
     res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
@@ -155,8 +194,10 @@ router.get('/orders', auth, driverOnly, async (req, res) => {
 router.get('/', auth, adminOnly, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT d.*, u.name, u.phone, u.avatar, u.is_blocked,
-              (SELECT COUNT(*) FROM orders WHERE driver_id=d.user_id AND status='delivered') as total_orders,
+      `SELECT d.*, u.name, u.phone, u.avatar, u.is_blocked, u.is_active,
+              (SELECT COUNT(DISTINCT COALESCE(-group_id, id)) FROM orders WHERE driver_id=d.user_id AND status='delivered') as total_orders,
+              (SELECT COUNT(DISTINCT COALESCE(-group_id, id)) FROM orders WHERE driver_id=d.user_id AND status='delivered') as total_trips,
+              EXISTS (SELECT 1 FROM orders WHERE driver_id=d.user_id AND driver_assigned_at IS NOT NULL AND status IN ('confirmed','preparing','ready','on_the_way')) AS has_active_delivery,
               (SELECT COALESCE(SUM(COALESCE(driver_fee, delivery_fee, 0) + COALESCE(tip,0)),0) FROM orders WHERE driver_id=d.user_id AND status='delivered') as total_earnings
        FROM drivers d JOIN users u ON d.user_id=u.id
        ORDER BY d.is_online DESC, total_orders DESC`
@@ -168,11 +209,16 @@ router.get('/', auth, adminOnly, async (req, res) => {
 // Add driver (admin) — كلمة المرور مطلوبة (6+)، لا كلمات افتراضية
 router.post('/', auth, adminOnly, async (req, res) => {
   try {
-    const { name, phone, password, vehicle_type, vehicle_plate } = req.body;
+    const { name, password, vehicle_type, vehicle_plate } = req.body;
+    const phone = canonicalPhone(req.body.phone);
     if (!name || !phone) return res.status(400).json({ success: false, message: 'الاسم ورقم الهاتف مطلوبان' });
     if (!password || String(password).length < 6) return res.status(400).json({ success: false, message: 'كلمة المرور مطلوبة (6 أحرف على الأقل)' });
-    const { rows: existing } = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
-    if (existing[0]) return res.status(400).json({ success: false, message: 'رقم الهاتف مسجل مسبقاً' });
+    const { rows: existing } = await pool.query('SELECT id, is_active FROM users WHERE phone=$1', [phone]);
+    if (existing[0]) {
+      // A-07: حساب معطّل بنفس الرقم → رسالة واضحة + معرّفه لإعادة التفعيل (PATCH /admin/users/:id/reactivate)
+      if (existing[0].is_active === false) return res.status(409).json({ success: false, code: 'INACTIVE_ACCOUNT', user_id: existing[0].id, message: 'هذا الرقم لحساب معطّل — أعد تفعيله بدل إنشاء حساب جديد' });
+      return res.status(400).json({ success: false, code: 'PHONE_EXISTS', message: 'رقم الهاتف مسجل مسبقاً' });
+    }
     const hash = await bcrypt.hash(String(password), 12);
     const { rows: users } = await pool.query(
       `INSERT INTO users (name, phone, password_hash, role, is_verified) VALUES ($1,$2,$3,'driver',true) RETURNING *`, [name, phone, hash]);
@@ -187,9 +233,46 @@ router.post('/', auth, adminOnly, async (req, res) => {
   }
 });
 
-// Delete driver (admin)
+// ✏️ A-02: تعديل مركبة السائق (الإدارة) — :id = user_id (كما في GET /drivers). PUT و PATCH بنفس السلوك (تحديث جزئي)
+async function updateDriver(req, res) {
+  try {
+    if (!/^\d+$/.test(String(req.params.id))) return res.status(404).json({ success: false, message: 'السائق غير موجود' });
+    const b = req.body || {};
+    const sets = [], vals = [];
+    for (const k of ['vehicle_type', 'vehicle_plate', 'vehicle_number', 'national_id', 'license_number']) {
+      if (b[k] === undefined) continue;
+      const v = b[k] === null ? null : String(b[k]).trim().slice(0, 60);
+      vals.push(v); sets.push(`${k}=$${vals.length}`);
+    }
+    if (b.vehicle_type !== undefined && !String(b.vehicle_type || '').trim()) return res.status(400).json({ success: false, message: 'اختر نوع المركبة' });
+    if (!sets.length && b.name === undefined) return res.status(400).json({ success: false, message: 'لا يوجد ما يُحدَّث' });
+    let row = null;
+    if (sets.length) {
+      vals.push(req.params.id);
+      const { rows } = await pool.query(`UPDATE drivers SET ${sets.join(', ')} WHERE user_id=$${vals.length} RETURNING *`, vals);
+      if (!rows[0]) return res.status(404).json({ success: false, message: 'السائق غير موجود' });
+      row = rows[0];
+    }
+    if (b.name !== undefined && String(b.name).trim()) {
+      await pool.query("UPDATE users SET name=$1 WHERE id=$2 AND role='driver'", [String(b.name).trim().slice(0, 100), req.params.id]);
+    }
+    if (!row) { const { rows } = await pool.query('SELECT * FROM drivers WHERE user_id=$1', [req.params.id]); row = rows[0]; }
+    if (!row) return res.status(404).json({ success: false, message: 'السائق غير موجود' });
+    res.json({ success: true, data: row });
+  } catch (e) { serverError(res, e); }
+}
+router.put('/:id', auth, adminOnly, updateDriver);
+router.patch('/:id', auth, adminOnly, updateDriver);
+
+// Delete driver (admin) — A-08: مرفوض وعليه توصيلة نشطة (الطلب كان يعلق)؛ العروض غير المقبولة تُسحب ويُعاد توزيعها
 router.delete('/:id', auth, adminOnly, async (req, res) => {
   try {
+    if (!/^\d+$/.test(String(req.params.id))) return res.status(404).json({ success: false, message: 'السائق غير موجود' });
+    if (await hasActiveAssignment(req.params.id)) {
+      return res.status(409).json({ success: false, code: 'ACTIVE_DELIVERY', message: 'لا يمكن حذف السائق وهو يوصّل طلباً الآن — انتظر حتى يسلّمه أو ألغِ الطلب' });
+    }
+    await pool.query('UPDATE drivers SET is_online=false WHERE user_id=$1', [req.params.id]);
+    await releaseDriverOffers(req.io, req.params.id);
     await pool.query('DELETE FROM drivers WHERE user_id=$1', [req.params.id]);
     await pool.query("UPDATE users SET is_active=false, role='customer' WHERE id=$1 AND role='driver'", [req.params.id]);
     invalidateSocketAuth(req.params.id);

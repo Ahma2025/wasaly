@@ -3,9 +3,20 @@ const pool = require('../config/database');
 const { serverError } = require('../utils/http');
 const { auth, adminOnly, driverOnly } = require('../middleware/auth');
 
-// تقييمات مطعم معيّن (تُستخدم في التطبيق وبوابة المطعم)
+// D-26/R-30: ملخص كل التقييمات (لا آخر 100 فقط): المعدل + العدد + توزيع النجوم 1..5
+async function summary(col, whereCol, id) {
+  const { rows } = await pool.query(
+    `SELECT ${col} AS stars, COUNT(*)::int AS c FROM reviews WHERE ${whereCol}=$1 AND ${col} BETWEEN 1 AND 5 GROUP BY 1`, [id]);
+  const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  let count = 0, sum = 0;
+  for (const r of rows) { distribution[r.stars] = r.c; count += r.c; sum += r.stars * r.c; }
+  return { distribution, count, avg_rating: count ? Math.round((sum / count) * 100) / 100 : 0 };
+}
+
+// تقييمات مطعم معيّن (تُستخدم في التطبيق وبوابة المطعم) — data = آخر 100 (كما كانت) + summary لكل التقييمات
 router.get('/restaurant/:id', async (req, res) => {
   try {
+    if (!/^\d+$/.test(String(req.params.id))) return res.status(404).json({ success: false, message: 'المطعم غير موجود' });
     const { rows } = await pool.query(
       `SELECT r.id, r.restaurant_rating, r.driver_rating, r.comment, r.images, r.created_at,
               u.name as customer_name, u.avatar
@@ -14,7 +25,8 @@ router.get('/restaurant/:id', async (req, res) => {
        ORDER BY r.created_at DESC LIMIT 100`,
       [req.params.id]
     );
-    res.json({ success: true, data: rows });
+    const s = await summary('restaurant_rating', 'restaurant_id', req.params.id);
+    res.json({ success: true, data: rows, summary: s, avg_rating: s.avg_rating, count: s.count, distribution: s.distribution });
   } catch (e) { serverError(res, e); }
 });
 
@@ -31,12 +43,8 @@ router.get('/driver/me', auth, driverOnly, async (req, res) => {
        ORDER BY r.created_at DESC LIMIT 100`,
       [req.user.id]
     );
-    const { rows: agg } = await pool.query(
-      `SELECT COALESCE(AVG(driver_rating),0) as avg_rating, COUNT(*) as count
-       FROM reviews WHERE driver_id=$1 AND driver_rating IS NOT NULL`,
-      [req.user.id]
-    );
-    res.json({ success: true, data: rows, avg_rating: parseFloat(agg[0]?.avg_rating || 0), count: parseInt(agg[0]?.count || 0) });
+    const s = await summary('driver_rating', 'driver_id', req.user.id);
+    res.json({ success: true, data: rows, avg_rating: s.avg_rating, count: s.count, distribution: s.distribution, summary: s });
   } catch (e) { serverError(res, e); }
 });
 

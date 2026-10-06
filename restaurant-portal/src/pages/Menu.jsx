@@ -9,10 +9,16 @@ import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { useRestaurant } from '../context/RestaurantContext';
 import { PageHeader, EmptyState, ErrorState, ListSkeleton, Spinner, useConfirm, Sheet, Button, Toggle, Tabs, cx } from '../components/ui';
-import { arCount, num } from '../utils/format';
+import { num } from '../utils/format';
+import { pl } from '../utils/plural';
+import { compressImage, uploadErrorMessage } from '../utils/image';
 
-const ITEM_WORDS = ['صنف واحد', 'صنفان', 'أصناف', 'صنفًا'];
-const CAT_WORDS = ['فئة واحدة', 'فئتان', 'فئات', 'فئة'];
+// عدد الأصناف/الفئات بصيغة عربية صحيحة (0 → «لا أصناف»)
+const itemsCount = (n) => (n ? pl(n, 'item') : 'لا أصناف');
+const catsCount = (n) => (n ? pl(n, 'category') : 'لا فئات');
+// قسم «بدون قسم» (أصناف بلا فئة يرسلها السيرفر بـ id = null) — مفتاح ثابت يسمح بفتحه وإغلاقه
+const ORPHAN_KEY = '__orphan__';
+const catKey = (c) => (c.id == null ? ORPHAN_KEY : c.id);
 
 const truthy = (v) => v === true || v === 1 || v === '1' || v === 't' || v === 'true';
 
@@ -36,9 +42,9 @@ function normalizeMenu(cats) {
 export default function Menu() {
   const { restaurant } = useRestaurant();
   const cacheKey = 'rest_menu_' + restaurant.id;
-  const cachedMenu = readCache(cacheKey);
-  const [categories, setCategories] = useState(cachedMenu || []);
-  const [loading, setLoading] = useState(!cachedMenu);
+  // قراءة الكاش مرة واحدة فقط (لا مع كل حرف في البحث)
+  const [categories, setCategories] = useState(() => readCache(cacheKey) || []);
+  const [loading, setLoading] = useState(() => !readCache(cacheKey));
   const [error, setError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [fullMode, setFullMode] = useState(true); // false = السيرفر القديم (لا يعرض المخفي)
@@ -50,6 +56,9 @@ export default function Menu() {
   const [showAddItem, setShowAddItem] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [showOptions, setShowOptions] = useState(null);
+  const [editorSession, setEditorSession] = useState(0); // يتغير مع كل فتح للمحرر → نموذج جديد نظيف
+  const [togglingIds, setTogglingIds] = useState(() => new Set());
+  const addingCatRef = useRef(false);
   const [query, setQuery] = useState('');
   const [dialog, confirm] = useConfirm();
 
@@ -62,7 +71,8 @@ export default function Menu() {
         menu = Array.isArray(r?.data) ? r.data : (r?.data?.menu || []);
         setFullMode(true);
       } catch (e) {
-        if (e.status === 403 || e.status === 401) throw e;
+        // القائمة العامة (بدون المخفي) فقط لسيرفر قديم لا يعرف /manage — أي خطأ آخر لا يبدّل العرض ولا يكتب فوق الكاش
+        if (e.status !== 404) throw e;
         const r = await api.get(`/restaurants/${restaurant.id}`);
         menu = r?.data?.menu || [];
         setFullMode(false);
@@ -71,30 +81,42 @@ export default function Menu() {
       setCategories(norm);
       writeCache(cacheKey, norm);
       setError(false);
+      return norm;
     } catch (e) {
       if (!readCache(cacheKey)) setError(true);
-      else toast.error(e.message || 'فشل تحميل المنيو');
+      else toast.error(e.message || 'فشل تحميل المنيو — نعرض آخر نسخة محفوظة');
+      return null;
     } finally { setLoading(false); setRefreshing(false); }
   }, [restaurant.id, cacheKey]);
 
   useEffect(() => { fetchMenu(); }, [fetchMenu]);
   // افتح أول فئة تلقائيًا لعرض فوري
-  useEffect(() => { if (expandedCat == null && categories.length) setExpandedCat(categories[0].id); }, [categories]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (expandedCat == null && categories.length) setExpandedCat(catKey(categories[0])); }, [categories]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const patchItem = (id, patch) => setCategories(cs => cs.map(c => ({ ...c, items: c.items.map(it => (it.id === id ? { ...it, ...patch } : it)) })));
 
   // ─── الفئات ───
   const addCategory = async () => {
+    if (addingCatRef.current) return; // Enter مرتين لا يكرر الفئة
     const name = newCatName.trim();
     if (!name) return toast.error('اكتب اسم الفئة');
+    addingCatRef.current = true;
     setAddingCat(true);
     try {
-      await api.post('/menu/categories', { restaurant_id: restaurant.id, name_ar: name, name_en: name, sort_order: categories.length });
+      const r = await api.post('/menu/categories', { restaurant_id: restaurant.id, name_ar: name, name_en: name, sort_order: categories.filter(c => c.id != null).length });
       toast.success('تمت إضافة الفئة');
       setNewCatName(''); setShowAddCat(false);
-      fetchMenu();
+      const newId = r?.data?.id;
+      const menu = await fetchMenu();
+      // افتح الفئة الجديدة وانزل لها مباشرة لإضافة أصنافها
+      const created = newId != null ? (menu || []).find(c => String(c.id) === String(newId)) : null;
+      if (created) {
+        setQuery('');
+        setExpandedCat(created.id);
+        setTimeout(() => document.getElementById(`cat-${created.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 350);
+      }
     } catch (e) { toast.error(e.message || 'فشل'); }
-    finally { setAddingCat(false); }
+    finally { addingCatRef.current = false; setAddingCat(false); }
   };
 
   const saveCategory = async (cat, patch) => {
@@ -126,8 +148,14 @@ export default function Menu() {
     }
   };
 
-  const deleteCategory = async (cat) => {
-    const ok = await confirm({ title: `حذف فئة «${cat.name_ar}»؟`, message: `سيتم حذف الفئة و${arCount(cat.items.length, ITEM_WORDS)} بداخلها نهائيًا.`, confirmText: 'حذف', danger: true });
+  const deleteCategory = async (shownCat) => {
+    // أثناء البحث الفئة المعروضة مفلترة — نعدّ أصنافها من الفئة الكاملة
+    const cat = categories.find(c => c.id === shownCat.id) || shownCat;
+    const n = cat.items?.length || 0;
+    const message = n
+      ? `سيتم حذف الفئة و${n === 1 ? 'الصنف الوحيد' : pl(n, 'item')} بداخلها نهائيًا.`
+      : 'الفئة فارغة — سيتم حذفها نهائيًا.';
+    const ok = await confirm({ title: `حذف فئة «${cat.name_ar}»؟`, message, confirmText: 'حذف', danger: true });
     if (!ok) return;
     try { await api.delete(`/menu/categories/${cat.id}`); toast.success('تم حذف الفئة'); fetchMenu(); }
     catch (e) { toast.error(e.message || 'فشل'); }
@@ -163,8 +191,10 @@ export default function Menu() {
   };
 
   const toggleItem = async (item) => {
+    if (togglingIds.has(item.id)) return;
     const next = !item.is_available;
     patchItem(item.id, { is_available: next });
+    setTogglingIds(s => new Set(s).add(item.id));
     try {
       const r = await api.patch(`/menu/items/${item.id}/toggle`);
       const value = r?.is_available ?? r?.data?.is_available;
@@ -174,7 +204,15 @@ export default function Menu() {
     } catch (e) {
       patchItem(item.id, { is_available: item.is_available });
       toast.error(e.message || 'فشل');
+    } finally {
+      setTogglingIds(s => { const n = new Set(s); n.delete(item.id); return n; });
     }
+  };
+
+  const openEditor = (mode, value) => {
+    setEditorSession(x => x + 1);
+    if (mode === 'new') { setShowAddItem(value); setEditItem(null); }
+    else { setEditItem(value); setShowAddItem(null); }
   };
 
   const q = query.trim();
@@ -202,7 +240,7 @@ export default function Menu() {
     <div className="space-y-4" dir="rtl">
       {dialog}
       <PageHeader title="المنيو" icon={MdOutlineRestaurantMenu}
-        subtitle={`${arCount(totalItems, ITEM_WORDS)} · ${arCount(categories.length, CAT_WORDS)}`}
+        subtitle={`${itemsCount(totalItems)} · ${catsCount(categories.filter(c => c.id != null).length)}`}
         onRefresh={() => { setRefreshing(true); fetchMenu(); }} refreshing={refreshing}>
         <button onClick={() => setShowAddCat(true)} className="btn-primary px-3.5" aria-label="إضافة فئة">
           <FiPlus aria-hidden /> <span>فئة</span>
@@ -211,7 +249,7 @@ export default function Menu() {
 
       {!loading && !error && categories.length > 0 && (
         <div className="grid grid-cols-3 gap-2 lg:gap-3 stagger">
-          <MiniStat icon={FiLayers} label="الفئات" value={categories.length} />
+          <MiniStat icon={FiLayers} label="الفئات" value={categories.filter(c => c.id != null).length} />
           <MiniStat icon={FiGrid} label="الأصناف" value={totalItems} />
           <MiniStat icon={FiEyeOff} label="مخفي" value={hiddenItems} tone={hiddenItems ? 'amber' : 'gray'} />
         </div>
@@ -240,11 +278,13 @@ export default function Menu() {
         ) : (
           <div className="space-y-3 stagger">
             {visibleCats.map((cat, ci) => {
-              const open = expandedCat === cat.id || !!q;
+              const key = catKey(cat);
+              const orphan = cat.id == null;
+              const open = expandedCat === key || !!q;
               const count = cat.items?.length || 0;
               const hidden = cat.items.filter(i => !i.is_available).length;
               return (
-                <section key={cat.id} className={cx('card overflow-hidden transition-shadow', open && 'shadow-card', !cat.is_active && 'opacity-80')}>
+                <section key={key} id={orphan ? undefined : `cat-${cat.id}`} className={cx('card overflow-hidden transition-shadow scroll-mt-24', open && 'shadow-card', !cat.is_active && 'opacity-80')}>
                   {renaming?.id === cat.id ? (
                     <div className="flex items-center gap-2 p-3">
                       <input className="input flex-1" value={renaming.name} autoFocus aria-label="اسم الفئة"
@@ -255,15 +295,15 @@ export default function Menu() {
                     </div>
                   ) : (
                     <button type="button" className={cx('no-press w-full flex items-center gap-3 p-4 text-right', open ? 'bg-gradient-to-l from-brand-50/80 to-transparent' : 'hover:bg-surface/60')}
-                      onClick={() => setExpandedCat(open && !q ? null : cat.id)} aria-expanded={open}>
+                      onClick={() => setExpandedCat(open && !q ? null : key)} aria-expanded={open}>
                       <div className={cx('w-11 h-11 rounded-[14px] flex items-center justify-center font-black flex-shrink-0 tnum transition-all duration-300',
-                        open ? 'grad-brand text-white shadow-brand' : 'bg-brand-50 text-brand-600')}>{ci + 1}</div>
+                        open ? 'grad-brand text-white shadow-brand' : 'bg-brand-50 text-brand-600')}>{orphan ? <FiInfo aria-hidden /> : ci + 1}</div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-extrabold text-ink text-[16px] truncate flex items-center gap-2">
-                          {cat.name_ar}
-                          {!cat.is_active && <span className="chip bg-gray-100 text-ink-2"><FiEyeOff size={11} /> مخفية</span>}
+                        <p className="font-extrabold text-ink text-[16px] flex items-center gap-2 min-w-0">
+                          <span className="truncate min-w-0">{cat.name_ar}</span>
+                          {!cat.is_active && <span className="chip bg-gray-100 text-ink-2 flex-shrink-0"><FiEyeOff size={11} aria-hidden /> مخفية</span>}
                         </p>
-                        <p className="text-[12px] text-ink-3 mt-0.5">{arCount(count, ITEM_WORDS)}{hidden ? ` · ${hidden} مخفي` : ''}</p>
+                        <p className="text-[12px] text-ink-3 mt-0.5">{itemsCount(count)}{hidden ? ` · مخفي: ${hidden}` : ''}{orphan ? ' · أصناف بلا فئة' : ''}</p>
                       </div>
                       <span className={cx('w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300', open ? 'rotate-180 bg-white text-brand-600 shadow-soft' : 'bg-surface text-ink-3')}><FiChevronDown aria-hidden /></span>
                     </button>
@@ -272,7 +312,10 @@ export default function Menu() {
                   <div className={cx('collapse-grid', open && 'open')}>
                     <div>
                       <div className="px-3 pb-3 lg:px-4 lg:pb-4 pt-1">
-                        {/* أدوات الفئة */}
+                        {/* أدوات الفئة — قسم «بدون قسم» ليس فئة حقيقية: لا تعديل ولا حذف ولا إضافة */}
+                        {orphan ? (
+                          <p className="text-[12px] text-ink-3 bg-surface rounded-[12px] px-3 py-2 mb-3 flex items-start gap-1.5"><FiInfo className="mt-0.5 flex-shrink-0" aria-hidden /> أصناف فئتها محذوفة — عدّلها أو احذفها من هنا، أو أنشئ فئة جديدة وأضف الأصناف إليها.</p>
+                        ) : (
                         <div className="flex items-center gap-1.5 mb-3 flex-wrap">
                           <button onClick={() => setRenaming({ id: cat.id, name: cat.name_ar })} className="btn h-9 px-3 text-xs bg-surface text-ink-2 hover:bg-gray-200" tabIndex={open ? 0 : -1}><FiEdit2 size={13} /> تعديل الاسم</button>
                           <button onClick={() => toggleCategory(cat)} className="btn h-9 px-3 text-xs bg-surface text-ink-2 hover:bg-gray-200" tabIndex={open ? 0 : -1}>
@@ -280,22 +323,23 @@ export default function Menu() {
                           </button>
                           <button onClick={() => deleteCategory(cat)} className="btn h-9 px-3 text-xs bg-danger-soft text-danger hover:bg-danger/10 ms-auto" tabIndex={open ? 0 : -1} aria-label={`حذف فئة ${cat.name_ar}`}><FiTrash2 size={13} /> حذف</button>
                         </div>
+                        )}
 
                         <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
                           {cat.items.map(item => (
-                            <ItemCard key={item.id} item={item} tabIndex={open ? 0 : -1}
-                              onEdit={() => { setEditItem(item); setShowAddItem(null); }}
+                            <ItemCard key={item.id} item={item} tabIndex={open ? 0 : -1} toggling={togglingIds.has(item.id)}
+                              onEdit={() => openEditor('edit', item)}
                               onToggle={() => toggleItem(item)}
                               onDelete={() => deleteItem(item)}
                               onOptions={() => setShowOptions(item.id)} />
                           ))}
-                          <button onClick={() => { setShowAddItem(cat.id); setEditItem(null); }} tabIndex={open ? 0 : -1}
+                          {!orphan && <button onClick={() => openEditor('new', cat.id)} tabIndex={open ? 0 : -1}
                             className={cx('rounded-[18px] border-2 border-dashed border-brand-200 text-brand-600 font-extrabold text-sm hover:bg-brand-50 hover:border-brand-300 flex items-center justify-center gap-2',
                               count === 0 ? 'py-8 sm:col-span-2 xl:col-span-3 flex-col' : 'min-h-[64px] py-4')}>
                             <span className="w-9 h-9 rounded-full bg-brand-50 flex items-center justify-center"><FiPlus aria-hidden /></span>
                             أضف صنف جديد
                             {count === 0 && <span className="text-[12px] font-bold text-ink-3">لا أصناف بعد في هذه الفئة</span>}
-                          </button>
+                          </button>}
                         </div>
                       </div>
                     </div>
@@ -317,7 +361,7 @@ export default function Menu() {
 
       {/* محرر الصنف */}
       {editor && (
-        <ItemEditorSheet key={editor.mode === 'new' ? `new-${editor.catId}` : `edit-${editor.item.id}`}
+        <ItemEditorSheet key={`${editor.mode === 'new' ? `new-${editor.catId}` : `edit-${editor.item.id}`}-${editorSession}`}
           open={!!editorNow}
           initial={editor.mode === 'edit' ? editor.item : null}
           onSave={(payload) => (editor.mode === 'new' ? addItem(editor.catId, payload) : updateItem(editor.item.id, payload))}
@@ -348,7 +392,7 @@ function MiniStat({ icon: Icon, label, value, tone = 'brand' }) {
   );
 }
 
-function ItemCard({ item, onEdit, onToggle, onDelete, onOptions, tabIndex }) {
+function ItemCard({ item, onEdit, onToggle, onDelete, onOptions, tabIndex, toggling = false }) {
   const hasDiscount = item.discount_price != null && num(item.discount_price) > 0 && num(item.discount_price) < num(item.price);
   const optCount = item.options?.length || 0;
   return (
@@ -366,7 +410,7 @@ function ItemCard({ item, onEdit, onToggle, onDelete, onOptions, tabIndex }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
             <p className={cx('font-extrabold text-[14.5px] leading-snug', item.is_available ? 'text-ink' : 'text-ink-3')}>{item.name_ar}</p>
-            <Toggle checked={item.is_available} onChange={onToggle} label={item.is_available ? `إخفاء ${item.name_ar}` : `إظهار ${item.name_ar}`} tone="emerald" />
+            <Toggle checked={item.is_available} onChange={onToggle} busy={toggling} label={item.is_available ? `إخفاء ${item.name_ar}` : `إظهار ${item.name_ar}`} tone="emerald" className="mt-0.5 me-1" />
           </div>
           {item.description_ar && <p className="text-[12px] text-ink-3 mt-0.5 line-clamp-2 leading-relaxed">{item.description_ar}</p>}
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
@@ -433,13 +477,14 @@ function ItemEditorSheet({ open, initial, onSave, onClose }) {
     if (!file.type.startsWith('image/')) return toast.error('اختر ملف صورة');
     setUploading(true);
     try {
+      const small = await compressImage(file, { maxPx: 1600 });
       const fd = new FormData();
-      fd.append('file', file);
+      fd.append('file', small, small.name || file.name || 'image.jpg');
       const r = await api.post('/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 });
-      if (!r?.url) throw new Error();
+      if (!r?.url) throw new Error('لم يُرجع الخادم رابط الصورة');
       setForm(f => ({ ...f, image: r.url }));
       toast.success('تم رفع الصورة');
-    } catch { toast.error('فشل رفع الصورة'); }
+    } catch (e) { toast.error(uploadErrorMessage(e)); }
     finally { setUploading(false); }
   };
 
@@ -550,7 +595,8 @@ function ItemOptions({ itemId, options, onUpdate, confirm }) {
     }));
     const multi = form.type === 'multiple';
     const max = multi ? (parseInt(form.max_selections) || values.length) : 1;
-    return { name_ar: form.name_ar.trim(), name_en: form.name_ar.trim(), type: form.type, is_required: !!form.is_required, max_selections: Math.min(Math.max(1, max), Math.max(1, values.length)), values };
+    const minMax = multi ? 2 : 1;
+    return { name_ar: form.name_ar.trim(), name_en: form.name_ar.trim(), type: form.type, is_required: !!form.is_required, max_selections: Math.min(Math.max(minMax, max), Math.max(minMax, values.length)), values };
   };
 
   const validate = (form) => {
@@ -558,10 +604,15 @@ function ItemOptions({ itemId, options, onUpdate, confirm }) {
     const vals = form.values.filter(v => v.name_ar.trim());
     if (!vals.length) return 'أضف خيارًا واحدًا على الأقل';
     if (vals.some(v => String(v.extra_price).trim() !== '' && (!Number.isFinite(parseFloat(v.extra_price)) || parseFloat(v.extra_price) < 0))) return 'سعر الإضافة لا يمكن أن يكون سالبًا';
-    if (form.type === 'multiple' && String(form.max_selections).trim() !== '') {
-      const m = parseInt(form.max_selections);
-      if (!Number.isFinite(m) || m < 1) return 'الحد الأقصى للاختيارات يجب أن يكون 1 أو أكثر';
-      if (m > vals.length) return 'الحد الأقصى أكبر من عدد الخيارات';
+    if (form.type === 'multiple') {
+      // «متعدد» بحد أقصى 1 = «اختيار واحد» فعليًا (والسيرفر كان يغيّره لكل الخيارات بصمت)
+      if (vals.length < 2) return 'الاختيار المتعدد يحتاج خيارين على الأقل — أو اختر «اختيار واحد»';
+      if (String(form.max_selections).trim() !== '') {
+        const m = parseInt(form.max_selections);
+        if (!Number.isFinite(m) || m < 1) return 'الحد الأقصى للاختيارات يجب أن يكون 2 أو أكثر';
+        if (m === 1) return 'حد أقصى 1 يعني اختيارًا واحدًا — اختر «اختيار واحد» أو اجعل الحد 2 أو أكثر';
+        if (m > vals.length) return 'الحد الأقصى أكبر من عدد الخيارات';
+      }
     }
     return null;
   };
@@ -704,7 +755,7 @@ function OptionForm({ initial, busy, onSave, onCancel }) {
       {form.type === 'multiple' && (
         <div className="animate-fade-up">
           <label className="label" htmlFor="og-max">الحد الأقصى للاختيارات</label>
-          <input id="og-max" className="input tnum" type="number" min="1" inputMode="numeric" placeholder="فارغ = بلا حد (كل الخيارات)"
+          <input id="og-max" className="input tnum" type="number" min="2" inputMode="numeric" placeholder="فارغ = بلا حد (كل الخيارات) — أقل قيمة 2"
             value={form.max_selections} onChange={e => setForm(f => ({ ...f, max_selections: e.target.value }))} />
         </div>
       )}

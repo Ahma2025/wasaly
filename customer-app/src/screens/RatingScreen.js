@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Image, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -11,6 +11,10 @@ import { Animated } from 'react-native';
 import { FadeIn, PopIn, Press, GradientButton } from '../components/Anim';
 import { Chip } from '../components/UI';
 import { haptic, SPRING_POP, isReducedMotion } from '../utils/motion';
+import { readCache } from '../utils/cache';
+import { normStoreType } from '../utils/storeTypes';
+import { markRated } from '../utils/rated';
+import { KB_TOOLBAR_H } from '../config';
 
 const FACES = ['', '😞', '😐', '🙂', '😋', '🤩'];
 
@@ -54,8 +58,11 @@ function AnimatedStars({ value, onChange, label, C, styles }) {
 
 const LABELS = ['', 'سيء', 'مقبول', 'جيد', 'ممتاز', 'رائع 🤩'];
 
+// المتاجر اللي تقييمها "أكل": مطاعم وحلويات ومخابز — الباقي (صيدلية، اتصالات، ورد…) منتجات وخدمة
+const FOOD_TYPES = ['restaurant', 'sweets'];
+
 export default function RatingScreen({ route, navigation }) {
-  const { orderId, restaurantName, driverName, isPersonal } = route.params || {};
+  const { orderId, groupId, restaurantName, restaurantId, driverName, isPersonal } = route.params || {};
   const { colors: COLORS } = useTheme();
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   const insets = useSafeAreaInsets();
@@ -65,6 +72,14 @@ export default function RatingScreen({ route, navigation }) {
   const [images, setImages] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [storeType, setStoreType] = useState(route.params?.storeType || null);
+
+  // نوع المتجر (من الطلب، وإلا من كاش صفحة المطعم)
+  useEffect(() => {
+    if (storeType || isPersonal || restaurantId == null) return;
+    readCache('rest_' + restaurantId).then(c => { if (c?.restaurant?.store_type) setStoreType(c.restaurant.store_type); }).catch(() => {});
+  }, [restaurantId]);
+  const isFood = !storeType || FOOD_TYPES.includes(normStoreType(storeType));
 
   const addPhoto = async () => {
     if (images.length >= 3) return Alert.alert('تنبيه', 'حد أقصى 3 صور');
@@ -82,29 +97,38 @@ export default function RatingScreen({ route, navigation }) {
 
   const QUICK_COMMENTS = isPersonal
     ? ['سائق محترم', 'وصل بسرعة', 'تعامل ممتاز', 'رح أطلب مرة ثانية']
-    : ['طعام لذيذ', 'خدمة سريعة', 'سائق محترم', 'سيعاد الطلب', 'التغليف ممتاز'];
+    : isFood
+      ? ['طعام لذيذ', 'خدمة سريعة', 'سائق محترم', 'رح أطلب مرة ثانية', 'التغليف ممتاز']
+      : ['منتجات ممتازة', 'خدمة سريعة', 'سائق محترم', 'رح أطلب مرة ثانية', 'التغليف ممتاز'];
 
   // للطلب الشخصي: التقييم الأساسي = تقييم الخدمة/السائق
-  const mainLabel = isPersonal ? 'تقييم الخدمة' : 'جودة الطعام';
+  const mainLabel = isPersonal ? 'تقييم الخدمة' : isFood ? 'جودة الطعام' : 'جودة المنتجات والخدمة';
+  const leave = () => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Main', { screen: 'الرئيسية' }));
 
   const submit = async () => {
-    if (!foodRating) return Alert.alert('التقييم', `قيّم ${isPersonal ? 'الخدمة' : 'الطعام'} على الأقل`);
+    if (!foodRating) return Alert.alert('التقييم', `قيّم ${isPersonal ? 'الخدمة' : isFood ? 'الطعام' : 'المنتجات والخدمة'} على الأقل`);
     setSaving(true);
     try {
-      await api.post(`/orders/${orderId}/rate`, {
+      const driverValue = isPersonal ? (driverRating || foodRating) : (driverRating > 0 ? driverRating : null);
+      const r = await api.post(`/orders/${orderId}/rate`, {
         restaurant_rating: foodRating,
         // بدون تقييم للسائق = null (حتى ما ينزل معدله بصفر)
-        driver_rating: isPersonal ? (driverRating || foodRating) : (driverRating > 0 ? driverRating : null),
+        driver_rating: driverValue,
         comment: comment.trim(),
         images,
       });
-      Alert.alert('شكراً! 💛', 'تم إرسال تقييمك', [{ text: 'حسناً', onPress: () => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Main', { screen: 'الرئيسية' })) }]);
+      markRated({ orderId, groupId, driver: !!driverValue || !!r?.already }).catch(() => {});
+      if (r?.already) {
+        Alert.alert('قيّمت هذا الطلب من قبل', 'تقييمك السابق محفوظ — شكراً إلك 💛', [{ text: 'حسناً', onPress: leave }]);
+        return;
+      }
+      Alert.alert('شكراً! 💛', r?.driver_rating_ignored ? 'تم إرسال تقييمك — السائق انقيّم من قبل ضمن هالطلب المجمّع' : 'تم إرسال تقييمك', [{ text: 'حسناً', onPress: leave }]);
     } catch (e) { Alert.alert('خطأ', e?.message || 'حاول مرة أخرى'); }
     finally { setSaving(false); }
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? KB_TOOLBAR_H : 0}>
       <GradientHeader title="قيّم تجربتك" />
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 30 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">

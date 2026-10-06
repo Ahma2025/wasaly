@@ -350,7 +350,7 @@ export default function Login() {
                 <div className="flex justify-end !mt-1.5">
                   <button type="button" onClick={() => setForgotOpen(true)}
                     className="text-[13px] font-bold text-brand-600 hover:text-brand-700 hover:underline underline-offset-4 h-9 px-1 rounded-lg">
-                    نسيت كلمة السر؟
+                    نسيت كلمة المرور؟
                   </button>
                 </div>
 
@@ -383,8 +383,8 @@ export default function Login() {
         </div>
       </main>
 
-      {/* ─── نسيت كلمة السر ─── */}
-      <Sheet open={forgotOpen} onClose={() => setForgotOpen(false)} title="نسيت كلمة السر؟" size="sm">
+      {/* ─── نسيت كلمة المرور ─── */}
+      <Sheet open={forgotOpen} onClose={() => setForgotOpen(false)} title="نسيت كلمة المرور؟" size="sm">
         <div className="text-center pt-1 pb-2">
           <div className="relative w-20 h-20 mx-auto mb-4">
             <div className="absolute inset-0 rounded-[26px] grad-sunset opacity-[.14] rotate-6" />
@@ -392,7 +392,7 @@ export default function Login() {
             <div className="absolute inset-0 flex items-center justify-center text-brand-500"><FiHelpCircle size={32} aria-hidden /></div>
           </div>
           <p className="text-[15px] text-ink-2 leading-relaxed max-w-xs mx-auto">
-            لحماية حساب مطعمك، تتم إعادة تعيين كلمة السر عن طريق <b className="text-ink">إدارة وصلّي</b>.
+            لحماية حساب مطعمك، تتم إعادة تعيين كلمة المرور عن طريق <b className="text-ink">إدارة وصلّي</b>.
             تواصل معنا وسنساعدك خلال دقائق.
           </p>
         </div>

@@ -1,8 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useId } from 'react';
 import { createPortal } from 'react-dom';
-import { FiEye, FiEyeOff, FiX, FiAlertTriangle, FiSearch, FiInbox, FiRefreshCw, FiArrowUpRight, FiArrowDownRight, FiWifiOff } from 'react-icons/fi';
+import { FiEye, FiEyeOff, FiX, FiAlertTriangle, FiSearch, FiInbox, FiRefreshCw, FiArrowUpRight, FiArrowDownRight, FiWifiOff, FiClock, FiCheckCircle, FiCoffee, FiShoppingBag, FiTruck, FiCheck, FiXCircle } from 'react-icons/fi';
 import { Sk } from './Skeleton';
-import { statusMeta } from '../utils/format';
+import { statusMeta, statusLabel } from '../utils/format';
+import { pushOverlay, isTopOverlay } from '../utils/backStack';
 
 /* =====================================================================
    Hooks
@@ -30,6 +31,23 @@ export function useMediaQuery(q) {
     return () => mq.removeEventListener?.('change', on);
   }, [q]);
   return m;
+}
+
+/** setInterval يتوقف تلقائياً عندما يكون التطبيق/التبويب مخفياً، ويحدّث فور العودة */
+export function useVisiblePolling(fn, ms, enabled = true) {
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let t = null;
+    const tick = () => ref.current?.();
+    const start = () => { if (!t) t = setInterval(tick, ms); };
+    const stop = () => { clearInterval(t); t = null; };
+    const onVis = () => { if (document.hidden) stop(); else { tick(); start(); } };
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [ms, enabled]);
 }
 
 /** يُبقي العنصر مركّباً أثناء حركة الخروج */
@@ -80,7 +98,6 @@ export function AnimatedNumber({ value, decimals = 0, prefix = '', suffix = '', 
    variant: 'dialog' (افتراضي: شيت سفلي على الهاتف، نافذة وسط على الشاشات)
             'drawer' (شيت سفلي على الهاتف، درج جانبي على ≥1024px)
    ===================================================================== */
-const MODAL_STACK = [];
 const FOCUSABLE ='a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
 export function Modal({ open, onClose, title, subtitle, children, footer, size = 'md', dismissable = true, variant = 'dialog', icon }) {
@@ -92,14 +109,16 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
   const labelId = useId();
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const dismissableRef = useRef(dismissable);
+  dismissableRef.current = dismissable;
 
   useEffect(() => {
     if (!open) return;
-    const token = {};
-    MODAL_STACK.push(token);
+    // زر الرجوع (أندرويد) و Esc يغلقان النافذة العليا فقط
+    const token = pushOverlay(() => { if (dismissableRef.current) onCloseRef.current?.(); });
     lastFocus.current = document.activeElement;
     const onKey = (e) => {
-      if (MODAL_STACK[MODAL_STACK.length - 1] !== token) return; // فقط النافذة العليا
+      if (!isTopOverlay(token)) return; // فقط النافذة العليا
       if (e.key === 'Escape' && dismissable) { e.stopPropagation(); onCloseRef.current?.(); }
       if (e.key === 'Tab' && panelRef.current) {
         const els = [...panelRef.current.querySelectorAll(FOCUSABLE)].filter(el => el.offsetParent !== null);
@@ -115,7 +134,7 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
     const t = setTimeout(() => { if (panelRef.current && !panelRef.current.contains(document.activeElement)) panelRef.current.focus({ preventScroll: true }); }, 40);
     return () => {
       clearTimeout(t);
-      const i = MODAL_STACK.indexOf(token); if (i >= 0) MODAL_STACK.splice(i, 1);
+      token.remove();
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
       try { lastFocus.current?.focus?.({ preventScroll: true }); } catch { /* ignore */ }
@@ -284,13 +303,21 @@ export function SoftBtn({ children, className = '', ...p }) {
 /* =====================================================================
    Form bits
    ===================================================================== */
-export function Field({ label, hint, error, children }) {
+/**
+ * Field: label حول حقل واحد. لمجموعة أزرار (اختيار نوع/دور/جمهور) مرّر as="group"
+ * حتى لا يؤدي الضغط على العنوان أو الفراغات إلى اختيار أول زر بالخطأ — A-11
+ */
+export function Field({ label, hint, error, children, as }) {
+  const group = as === 'group' || as === 'div';
+  const labelId = useId();
+  const Tag = group ? 'div' : 'label';
+  const extra = group ? { role: 'group', 'aria-labelledby': label ? labelId : undefined } : {};
   return (
-    <label className="block">
-      {label && <span className="lbl">{label}{hint && <span className="text-ink-3 font-medium mr-1">{hint}</span>}</span>}
+    <Tag className="block" {...extra}>
+      {label && <span id={group ? labelId : undefined} className="lbl">{label}{hint && <span className="text-ink-3 font-medium mr-1">{hint}</span>}</span>}
       {children}
       {error && <span className="flex items-center gap-1 text-[11.5px] text-red-500 font-bold mt-1.5" role="alert"><FiAlertTriangle className="text-[11px]" />{error}</span>}
-    </label>
+    </Tag>
   );
 }
 
@@ -385,13 +412,17 @@ export function Badge({ className = '', children }) {
   return <span className={`inline-flex items-center gap-1 px-2 py-[3px] rounded-full text-[10.5px] font-extrabold ring-1 ring-inset whitespace-nowrap ${className}`}>{children}</span>;
 }
 
-export function StatusChip({ status, size = 'md' }) {
+const STATUS_ICONS = { clock: FiClock, check: FiCheckCircle, prep: FiCoffee, bag: FiShoppingBag, truck: FiTruck, done: FiCheck, x: FiXCircle };
+
+/** شارة الحالة: لون + أيقونة + نص (التسمية حسب نوع الطلب إن مُرّر order) — X-09 / X-10 */
+export function StatusChip({ status, size = 'md', order, label }) {
   const m = statusMeta(status);
-  const live = !['delivered', 'cancelled'].includes(status);
+  const Icon = STATUS_ICONS[m.icon];
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full font-extrabold ring-1 ring-inset whitespace-nowrap ${m.cls} ${size === 'sm' ? 'px-2 py-[2px] text-[10px]' : 'px-2.5 py-1 text-[11px]'}`}>
-      <span className={live ? 'live-dot' : 'w-2 h-2 rounded-full'} style={{ background: m.color, width: 7, height: 7 }} />
-      {m.label}
+    <span className={`inline-flex items-center gap-1 rounded-full font-extrabold ring-1 ring-inset whitespace-nowrap ${m.cls} ${size === 'sm' ? 'px-2 py-[2px] text-[10px]' : 'px-2.5 py-1 text-[11px]'}`}>
+      {Icon ? <Icon className="flex-shrink-0" style={{ color: m.color }} aria-hidden="true" />
+        : <span className="w-2 h-2 rounded-full" style={{ background: m.color, width: 7, height: 7 }} />}
+      {label || statusLabel(status, order)}
     </span>
   );
 }

@@ -1,7 +1,7 @@
 // حقل إدخال بعنوان عائم (Floating label) — نفس لغة تطبيق الزبون
 // - ارتفاع 56، العنوان يطفو عند التركيز أو وجود قيمة
 // - إطار يتلوّن بالتركيز / الخطأ، اهتزاز خفيف عند ظهور خطأ جديد
-// - إظهار/إخفاء كلمة السر، علامة صح عند valid
+// - إظهار/إخفاء كلمة المرور، علامة صح عند valid
 // مكوّن على مستوى الملف (ليس داخل render) حتى لا يضيع تركيز الكيبورد.
 import React, { useEffect, useRef, useState, forwardRef } from 'react';
 import { View, Text, TextInput, StyleSheet, Animated, Pressable, Easing } from 'react-native';

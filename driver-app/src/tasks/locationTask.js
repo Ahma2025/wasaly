@@ -79,7 +79,7 @@ export async function startBackgroundTracking() {
       pausesUpdatesAutomatically: false,
       activityType: Location.ActivityType.AutomotiveNavigation,
       foregroundService: {
-        notificationTitle: 'وصلّي - مندوب',
+        notificationTitle: 'وصلّي - السائق',
         notificationBody: 'يتم مشاركة موقعك مع الزبون أثناء التوصيل',
         notificationColor: '#FF6B00',
       },

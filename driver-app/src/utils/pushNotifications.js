@@ -78,6 +78,18 @@ export async function registerForPushNotifications({ force = false } = {}) {
 
 export function resetPushRegistration() { lastRegisteredToken = null; }
 
+// توكن الإشعارات الحالي بلا طلب إذن (لإيقاف استقبال الطلبات حين يكون توكن الدخول منتهياً)
+export async function currentDevicePushToken() {
+  if (lastRegisteredToken) return lastRegisteredToken;
+  if (Platform.OS !== 'android' && Platform.OS !== 'ios') return null;
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') return null;
+    const r = await Promise.race([Notifications.getDevicePushTokenAsync(), new Promise(res => setTimeout(() => res(null), 3000))]);
+    return r?.data || null;
+  } catch { return null; }
+}
+
 // رنّة تنبيه لعرض الطلب (بدون expo-av): إشعار محلي صوت-فقط عبر المعالج أعلاه
 export async function playOfferChime() {
   try {

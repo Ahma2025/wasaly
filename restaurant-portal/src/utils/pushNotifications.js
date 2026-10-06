@@ -6,6 +6,7 @@ import { APP_BASE, LOGO_URL } from './config';
 export const CHANNEL_ID = 'wasaly_default';
 
 let nativeListeners = [];
+let lastHandlers = {};
 
 // ─── إشعارات أندرويد/iOS الأصلية (FCM / APNs) ─────────────────────────────
 async function setupNativePush({ onReceive, onAction } = {}) {
@@ -73,13 +74,15 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...atob(base64)].map(c => c.charCodeAt(0)));
 }
 
+const webPushSupported = () => typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+// اشتراك المتصفح — لا نطلب الإذن هنا (فايرفوكس وسفاري يرفضان الطلب بدون ضغطة من المستخدم)؛
+// الطلب يتم من زر «تفعيل الإشعارات» عبر enablePush()
 async function setupWebPush() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+  if (!webPushSupported()) return;
   try {
+    if (Notification.permission !== 'granted') return;
     const reg = await navigator.serviceWorker.register(APP_BASE + 'sw.js', { scope: APP_BASE });
-    let permission = Notification.permission;
-    if (permission === 'default') permission = await Notification.requestPermission();
-    if (permission !== 'granted') return;
 
     const vapidData = await api.get('/webpush/vapid-public-key');
     if (!vapidData?.publicKey) return;
@@ -97,8 +100,34 @@ async function setupWebPush() {
   }
 }
 
+// حالة الإذن الحالية: 'granted' | 'denied' | 'default' | 'unsupported'
+export async function getPushPermission() {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { PushNotifications } = await import('@capacitor/push-notifications');
+      const p = await PushNotifications.checkPermissions();
+      return p.receive === 'granted' ? 'granted' : p.receive === 'denied' ? 'denied' : 'default';
+    } catch { return 'unsupported'; }
+  }
+  if (!webPushSupported()) return 'unsupported';
+  return Notification.permission;
+}
+
+// يُستدعى من ضغطة المستخدم (زر «تفعيل»): يطلب الإذن ثم يشترك
+export async function enablePush(handlers = null) {
+  if (Capacitor.isNativePlatform()) { await setupNativePush(handlers || lastHandlers); return getPushPermission(); }
+  if (!webPushSupported()) return 'unsupported';
+  try {
+    let p = Notification.permission;
+    if (p === 'default') p = await Notification.requestPermission();
+    if (p === 'granted') await setupWebPush();
+    return p;
+  } catch { return Notification.permission; }
+}
+
 // ─── نقطة الدخول ──────────────────────────────────────────────────────────
 export async function setupPush(handlers = {}) {
+  lastHandlers = handlers || {};
   if (Capacitor.isNativePlatform()) await setupNativePush(handlers);
   else await setupWebPush();
 }

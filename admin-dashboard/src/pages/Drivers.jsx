@@ -1,16 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FiPlus, FiBarChart2, FiEdit2, FiSlash, FiTrash2, FiCheck, FiTruck, FiWifi, FiActivity, FiUsers, FiPhone } from 'react-icons/fi';
+import { FiPlus, FiBarChart2, FiEdit2, FiSlash, FiTrash2, FiCheck, FiTruck, FiWifi, FiActivity, FiUsers, FiPhone, FiFilter, FiX } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
-import { normalizePhone, truthy, num, fmtDate } from '../utils/format';
-import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, StatTile, Avatar, useConfirm } from '../components/ui';
+import { normalizePhone, truthy, num, fmtDate, lastDays } from '../utils/format';
+import { arCount } from '../utils/plural';
+import { duplicatePhoneMessage } from '../utils/accounts';
+import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, Button, StatTile, Avatar, useConfirm } from '../components/ui';
 import { Sk } from '../components/Skeleton';
 
 const PAGE = 30;
 const VEHICLES = ['دراجة نارية', 'دراجة', 'سيارة', 'دراجة هوائية'];
 const EMPTY = { name: '', phone: '', password: '', vehicle_type: 'دراجة نارية', vehicle_plate: '' };
+// مسار تعديل المركبة غير موجود على الخادم القديم: نتذكّر ذلك لهذه الجلسة فقط (يعود تلقائياً بعد تحديث الخادم) — A-02
+let vehicleEditUnsupported = false;
 
 export default function Drivers() {
   const confirm = useConfirm();
@@ -72,11 +76,23 @@ export default function Drivers() {
       setShowForm(false);
       setForm(EMPTY);
       fetchDrivers();
-    } catch (e) { toast.error(e?.message || 'فشل الإضافة'); }
+    } catch (e) {
+      if (e?.status === 409 || /مسجل مسبقاً|مسجّل مسبقاً/.test(e?.message || '')) toast.error(await duplicatePhoneMessage(phone), { duration: 6000 });
+      else toast.error(e?.message || 'فشل الإضافة');
+    }
     finally { setSaving(false); }
   };
 
   const deleteDriver = async (d) => {
+    // سائق بتوصيلة جارية: الحذف يعلّق الطلب — نمنعه حتى ينهي التوصيلة — A-08
+    if (truthy(d.is_busy)) {
+      await confirm({
+        title: 'السائق في توصيلة الآن',
+        message: `«${d.name}» ينفّذ توصيلة حالياً، وحذفه الآن يعلّق الطلب.\nانتظر حتى ينهي التوصيلة، أو احظره مؤقتاً ليتوقف عن استقبال طلبات جديدة.`,
+        confirmText: 'حسناً', cancelText: 'إغلاق', danger: false,
+      });
+      return;
+    }
     const ok = await confirm({
       title: 'حذف السائق',
       message: `سيُزال «${d.name}» من قائمة السائقين ويتحوّل حسابه إلى زبون غير نشط. سجلّ طلباته السابقة يبقى محفوظاً.`,
@@ -107,7 +123,7 @@ export default function Drivers() {
 
   return (
     <div className="page">
-      <PageHeader icon={<FiTruck />} title="السائقون" subtitle={`${drivers.length} سائق مسجّل · ${stats.online} متصل الآن`}
+      <PageHeader icon={<FiTruck />} title="السائقون" subtitle={`${arCount(drivers.length, 'driver', { zero: 'لا سائقين' })} · ${stats.online ? `متصل الآن: ${stats.online}` : 'لا أحد متصل الآن'}`}
         action={<PrimaryBtn onClick={() => setShowForm(true)}><FiPlus /> <span>سائق<span className="hidden sm:inline"> جديد</span></span></PrimaryBtn>} />
 
       <div className="grid grid-cols-3 lg:grid-cols-4 gap-3 lg:gap-4">
@@ -125,8 +141,11 @@ export default function Drivers() {
       </div>
 
       {loading && drivers.length === 0 ? <ListSkeleton rows={6} grid />
-        : filtered.length === 0 ? <EmptyState icon={<FiTruck />} title="لا يوجد سائقون" hint={search ? 'لا نتائج مطابقة' : 'أضف أول سائق من زر «سائق»'}
-            action={!search && <PrimaryBtn onClick={() => setShowForm(true)}><FiPlus /> إضافة سائق</PrimaryBtn>} />
+        : filtered.length === 0 ? ((search.trim() || filter) && drivers.length > 0
+            ? <EmptyState icon={<FiFilter />} title="لا نتائج لهذا الفلتر" hint="جرّب بحثاً آخر أو امسح الفلاتر"
+                action={<Button variant="secondary" icon={<FiX />} onClick={() => { setSearch(''); setFilter(''); }}>مسح الفلاتر</Button>} />
+            : <EmptyState icon={<FiTruck />} title="لا يوجد سائقون بعد" hint="أضف أول سائق من زر «سائق»"
+                action={<PrimaryBtn onClick={() => setShowForm(true)}><FiPlus /> إضافة سائق</PrimaryBtn>} />)
         : (
           <div className="grid gap-3 lg:gap-4 sm:grid-cols-2 2xl:grid-cols-3 items-start stagger">
             {shown.map(d => {
@@ -142,23 +161,24 @@ export default function Drivers() {
                         <Badge className={online ? 'bg-green-50 text-green-700 ring-green-200' : 'bg-gray-100 text-gray-500 ring-gray-200'}>{online ? 'متصل' : 'غير متصل'}</Badge>
                         {busy && <Badge className="bg-orange-50 text-orange-700 ring-orange-200">مشغول</Badge>}
                         {blocked && <Badge className="bg-red-50 text-red-600 ring-red-200">محظور</Badge>}
-                        {truthy(d.supports_groups) && <Badge className="bg-violet-50 text-violet-700 ring-violet-200">يدعم المجمّعة</Badge>}
+                        {truthy(d.supports_groups) && <Badge className="bg-teal-50 text-teal-700 ring-teal-200">يدعم المجمّعة</Badge>}
                       </div>
-                      <p className="text-[11.5px] text-ink-3 mt-1.5 truncate font-medium flex items-center gap-1.5"><FiPhone className="flex-shrink-0" /><span dir="ltr" className="num">{d.phone}</span> · {d.vehicle_type || '—'} · <span className="font-mono">{d.vehicle_plate || 'بدون لوحة'}</span></p>
+                      <p className="text-[11.5px] text-ink-3 mt-1.5 truncate font-medium flex items-center gap-1.5"><FiPhone className="flex-shrink-0" /><bdi dir="ltr" className="num">{d.phone}</bdi> · {d.vehicle_type || '—'} · <span className="font-mono">{d.vehicle_plate || 'بدون لوحة'}</span></p>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-3 mt-4 rounded-2xl bg-surface divide-x divide-x-reverse divide-surface-line text-center py-2.5">
-                    <div><p className="text-[15px] font-black text-ink num">{d.total_orders || 0}</p><p className="text-[10.5px] text-ink-3 font-bold">توصيلة</p></div>
-                    <div><p className="text-[15px] font-black text-ink num">{num(d.total_earnings).toFixed(1)}<span className="text-[11px] text-ink-3">₪</span></p><p className="text-[10.5px] text-ink-3 font-bold">أرباح</p></div>
-                    <div><p className="text-[15px] font-black text-ink num">{num(d.rating).toFixed(1)}<span className="text-amber-400 text-[12px]"> ★</span></p><p className="text-[10.5px] text-ink-3 font-bold">تقييم</p></div>
+                    {/* total_trips (بعد تحديث الخادم) يعدّ المجمّع توصيلة واحدة — A-21 */}
+                    <div><p className="text-[15px] font-black text-ink num">{d.total_trips ?? d.total_orders ?? 0}</p><p className="text-[10.5px] text-ink-3 font-bold">التوصيلات</p></div>
+                    <div><p className="text-[15px] font-black text-ink num">{num(d.total_earnings).toFixed(1)}<span className="text-[11px] text-ink-3">₪</span></p><p className="text-[10.5px] text-ink-3 font-bold">الأرباح</p></div>
+                    <div><p className="text-[15px] font-black text-ink num">{num(d.rating).toFixed(1)}<span className="text-amber-400 text-[12px]"> ★</span></p><p className="text-[10.5px] text-ink-3 font-bold">التقييم</p></div>
                   </div>
 
                   <div className="grid grid-cols-4 gap-1.5 mt-3">
                     <button onClick={() => setExpanded(open ? null : uid(d))} aria-expanded={open} className={`btn btn-sm !px-1 ${open ? 'btn-dark' : 'bg-sky-50 text-sky-700 hover:bg-sky-100'}`}><FiBarChart2 /> تفاصيل</button>
-                    <button onClick={() => setEditing(d)} className="btn btn-sm !px-1 btn-soft"><FiEdit2 /> المركبة</button>
+                    <button onClick={() => setEditing(d)} disabled={vehicleEditUnsupported} title={vehicleEditUnsupported ? 'تعديل المركبة غير متاح حالياً' : 'تعديل المركبة'} className="btn btn-sm !px-1 btn-soft disabled:opacity-40"><FiEdit2 /> المركبة</button>
                     <button onClick={() => blockDriver(d)} className={`btn btn-sm !px-1 ${blocked ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>{blocked ? <><FiCheck /> رفع</> : <><FiSlash /> حظر</>}</button>
-                    <button onClick={() => deleteDriver(d)} className="btn btn-sm !px-1 btn-danger"><FiTrash2 /> حذف</button>
+                    <button onClick={() => deleteDriver(d)} aria-disabled={busy} title={busy ? 'في توصيلة الآن — لا يمكن الحذف' : 'حذف السائق'} className={`btn btn-sm !px-1 btn-danger ${busy ? 'opacity-50' : ''}`}><FiTrash2 /> حذف</button>
                   </div>
 
                   {open && <DriverStats driverId={uid(d)} />}
@@ -206,12 +226,16 @@ function EditVehicle({ driver, onClose, onSaved }) {
     setSaving(true);
     const body = { vehicle_type: v.vehicle_type, vehicle_plate: v.vehicle_plate.trim() };
     try {
-      try { await api.put(`/drivers/${id}`, body); }
-      catch (e) { if (e?.status === 404) await api.patch(`/drivers/${id}`, body); else throw e; }
+      const r = await api.put(`/drivers/${id}`, body);
+      const saved = r?.data && typeof r.data === 'object' ? r.data : {};
       toast.success('تم تحديث المركبة');
-      onSaved(body);
+      onSaved({ vehicle_type: saved.vehicle_type ?? body.vehicle_type, vehicle_plate: saved.vehicle_plate ?? body.vehicle_plate });
     } catch (e) {
-      toast.error(e?.status === 404 ? 'تعديل المركبة يتطلب تحديث الخادم (PUT /drivers/:id)' : (e?.message || 'فشل الحفظ'));
+      if (e?.missingRoute) {
+        vehicleEditUnsupported = true;
+        toast.error('تعديل المركبة غير متاح حالياً — سيعمل بعد تحديث الخادم.', { duration: 5000 });
+        onClose();
+      } else toast.error(e?.message || 'تعذّر حفظ بيانات المركبة');
     } finally { setSaving(false); }
   };
 
@@ -244,18 +268,21 @@ function DriverStats({ driverId }) {
   return (
     <div className="mt-3 grad-ink text-white rounded-2xl p-4 space-y-3 animate-fade-up">
       <div className="grid grid-cols-3 gap-2 text-center">
-        <div><p className="font-black num text-[15px]">{stats.total_orders || 0}</p><p className="text-[10px] text-white/55 font-bold">إجمالي الطلبات</p></div>
+        <div><p className="font-black num text-[15px]">{stats.total_orders || 0}</p><p className="text-[10px] text-white/55 font-bold">إجمالي التوصيلات</p></div>
         <div><p className="font-black num text-[15px] text-green-300">{num(stats.total_earnings).toFixed(2)}₪</p><p className="text-[10px] text-white/55 font-bold">إجمالي الأرباح</p></div>
         <div><p className="font-black num text-[15px] text-orange-300">{num(stats.avg_per_delivery).toFixed(2)}₪</p><p className="text-[10px] text-white/55 font-bold">متوسط التوصيلة</p></div>
       </div>
-      {stats.weekly?.length > 0 && (() => {
-        const max = Math.max(1, ...stats.weekly.map(w => num(w.earnings)));
+      {Array.isArray(stats.weekly) && (() => {
+        // 7 أيام متصلة (الأقدم يساراً) مع أصفار للأيام بلا توصيلات — A-21
+        const byDay = Object.fromEntries(stats.weekly.map(w => [String(w.date).slice(0, 10), w]));
+        const week = lastDays(7).map(k => ({ date: k, orders: parseInt(byDay[k]?.orders) || 0, earnings: num(byDay[k]?.earnings) }));
+        const max = Math.max(1, ...week.map(w => w.earnings));
         return (
           <div className="pt-3 border-t border-white/10">
             <p className="text-[11px] font-bold text-white/60 mb-2">آخر 7 أيام</p>
             <div className="flex items-end gap-1.5 h-24" dir="ltr">
-              {stats.weekly.map((w, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end" title={`${fmtDate(w.date)} · ${w.orders} طلب · ${num(w.earnings).toFixed(2)}₪`}>
+              {week.map((w, i) => (
+                <div key={w.date} className="flex-1 flex flex-col items-center gap-1 h-full justify-end" title={`${fmtDate(w.date)} · ${arCount(w.orders, 'delivery', { zero: 'لا توصيلات' })} · ${num(w.earnings).toFixed(2)}₪`}>
                   <span className="text-[9px] text-white/60 num">{num(w.earnings).toFixed(0)}</span>
                   <div className="w-full rounded-t-md grad-sunset grow-y" style={{ height: `${Math.max(4, (num(w.earnings) / max) * 70)}%`, animationDelay: `${i * 50}ms` }} />
                   <span className="text-[9px] text-white/50">{fmtDate(w.date, { weekday: 'short' })}</span>

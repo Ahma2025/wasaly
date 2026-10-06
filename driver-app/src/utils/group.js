@@ -1,6 +1,7 @@
 // 🧺 الطلب المجمّع (عدة مطاعم — سائق واحد): توحيد شكل البيانات + أدوات عرض + فتح تطبيقات الملاحة
 // العقد: D:\wasaly-study\MULTI_CONTRACT.md — المال على مستوى المجموعة فقط (لا نجمع مال الأبناء)
 import { Alert, Linking, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { num, haversineKm } from './format';
 
 export const gid = (v) => (v == null ? '' : String(v));
@@ -84,7 +85,7 @@ export function stopState(s) {
   if (s.picked || s.status === 'on_the_way' || s.status === 'delivered') return { label: 'تم الاستلام', tone: 'green', icon: 'checkmark-done' };
   if (s.status === 'ready') return { label: 'جاهز للاستلام', tone: 'purple', icon: 'bag-check' };
   if (s.status === 'pending') return { label: 'بانتظار المطعم', tone: 'amber', icon: 'hourglass' };
-  return { label: 'قيد التحضير', tone: 'amber', icon: 'flame' };
+  return { label: 'قيد التحضير', tone: 'brand', icon: 'flame' };
 }
 
 // مسافات المسار المقترح: السائق → المحطة ١ → ٢ → ... → الزبون
@@ -103,17 +104,67 @@ export function routeLegs(g, from) {
   return { legs, toDrop, total: total > 0 ? total : null };
 }
 
-// فتح الملاحة: اختيار التطبيق (Google Maps / Waze / Apple Maps على iOS)
-export function openNavigation(lat, lng, label = '') {
-  if (!lat || !lng) { Alert.alert('الموقع غير متوفر', 'لا توجد إحداثيات لهذه النقطة'); return; }
+// ترتيب المحطات غير المستلمة بأقرب جار من موقع السائق — نفس خوارزمية السيرفر عند القبول (recomputeRoute)
+// فيرى السائق في نافذة العرض نفس الترتيب الذي سيظهر له بعد القبول
+export function routeOrder(stops, from) {
+  const list = Array.isArray(stops) ? stops : [];
+  if (!from || !Number.isFinite(from.lat) || !Number.isFinite(from.lng)) return list;
+  const picked = list.filter(s => s.picked);
+  const rest = list.filter(s => !s.picked);
+  const ordered = [...picked];
+  let cur = { lat: from.lat, lng: from.lng };
+  while (rest.length) {
+    let bi = 0, bd = Infinity;
+    rest.forEach((s, i) => {
+      const d = haversineKm(cur.lat, cur.lng, s.lat, s.lng);
+      const v = d == null ? Infinity : d;
+      if (v < bd) { bd = v; bi = i; }
+    });
+    const nx = rest.splice(bi, 1)[0];
+    ordered.push(nx);
+    if (nx.lat && nx.lng) cur = { lat: num(nx.lat), lng: num(nx.lng) };
+  }
+  return ordered;
+}
+
+// ── الملاحة: نفس المساعد للطلب العادي والمجمّع، ويتذكّر التطبيق المختار ──
+const NAV_PREF_KEY = 'pref_nav_app'; // ليس driver_* حتى يبقى بعد تسجيل الخروج (تفضيل جهاز)
+export const NAV_APPS = {
+  google: 'Google Maps',
+  waze: 'Waze',
+  ...(Platform.OS === 'ios' ? { apple: 'Apple Maps' } : {}),
+};
+let navPref; // undefined = لم يُقرأ بعد
+export async function getNavPref() {
+  if (navPref !== undefined) return navPref;
+  try { navPref = (await AsyncStorage.getItem(NAV_PREF_KEY)) || null; } catch { navPref = null; }
+  if (navPref && !NAV_APPS[navPref]) navPref = null;
+  return navPref;
+}
+export async function setNavPref(app) {
+  navPref = app && NAV_APPS[app] ? app : null;
+  try {
+    if (navPref) await AsyncStorage.setItem(NAV_PREF_KEY, navPref);
+    else await AsyncStorage.removeItem(NAV_PREF_KEY);
+  } catch {}
+}
+
+function launch(app, lat, lng) {
   const google = () => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`)
     .catch(() => Linking.openURL(`geo:${lat},${lng}?q=${lat},${lng}`).catch(() => {}));
-  const waze = () => Linking.openURL(`https://waze.com/ul?ll=${lat},${lng}&navigate=yes`).catch(google);
-  const apple = () => Linking.openURL(`http://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`).catch(google);
-  const buttons = [{ text: 'Google Maps', onPress: google }, { text: 'Waze', onPress: waze }];
-  if (Platform.OS === 'ios') buttons.push({ text: 'Apple Maps', onPress: apple });
+  if (app === 'waze') return Linking.openURL(`https://waze.com/ul?ll=${lat},${lng}&navigate=yes`).catch(google);
+  if (app === 'apple') return Linking.openURL(`http://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`).catch(google);
+  return google();
+}
+
+export async function openNavigation(lat, lng, label = '') {
+  if (!lat || !lng) { Alert.alert('الموقع غير متوفر', 'لا توجد إحداثيات لهذه النقطة'); return; }
+  const pref = await getNavPref();
+  if (pref) { launch(pref, lat, lng); return; }
+  // أول مرة فقط: نسأل ونحفظ الاختيار (يمكن تغييره من "حسابي ← تطبيق الملاحة")
+  const buttons = Object.keys(NAV_APPS).map(k => ({ text: NAV_APPS[k], onPress: () => { setNavPref(k); launch(k, lat, lng); } }));
   buttons.push({ text: 'إلغاء', style: 'cancel' });
-  Alert.alert('ملاحة', label ? `اختر تطبيق الملاحة إلى ${label}` : 'اختر تطبيق الملاحة', buttons, { cancelable: true });
+  Alert.alert('اختر تطبيق الملاحة', `${label ? `الوجهة: ${label}\n` : ''}سنتذكّر اختيارك للمرات القادمة — يمكنك تغييره من صفحة حسابي.`, buttons, { cancelable: true });
 }
 
 export function callPhone(phone) {

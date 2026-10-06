@@ -2,7 +2,7 @@
 // - مراقب مقدّمة واحد (watchPositionAsync) يعمل حين يكون السائق متصلاً أو لديه توصيل نشط
 // - رفع الموقع (سوكِت + REST) بحدّ أقصى مرة كل ٥ ثوانٍ أثناء التوصيل
 // - مهمة الخلفية فقط أثناء التوصيل النشط، وتتوقف عند انتهائه / عدم الاتصال / الخروج
-import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Alert, AppState, Platform, Linking } from 'react-native';
 import * as Location from 'expo-location';
 import api from '../utils/api';
@@ -11,6 +11,7 @@ import { startBackgroundTracking, stopBackgroundTracking } from '../tasks/locati
 import { LOCATION_UPLOAD_MS, ANDROID_BACKGROUND_TRACKING } from '../config';
 
 const LocationContext = createContext({});
+const CoordsContext = createContext(null);
 
 const IDLE_UPLOAD_MS = 10000;      // متصل بدون توصيل: يكفي كل ١٠ ث لاختيار أقرب سائق
 const REST_WHILE_SOCKET_MS = 20000; // أثناء التوصيل والسوكِت متصل: REST للتخزين فقط
@@ -23,6 +24,8 @@ export function LocationProvider({ children }) {
   const coordsRef = useRef(null);
   const watcherRef = useRef(null);
   const watcherMode = useRef(null); // 'idle' | 'delivery' | null
+  const watcherGen = useRef(0);       // عدّاد أجيال: كل إيقاف/تشغيل يُبطل ما قبله
+  const startingGen = useRef(null);   // جيل تشغيل قيد الانتظار (await)
   const trackingRef = useRef({ online: false, activeOrderId: null, activeGroupId: null });
   const lastUpload = useRef(0);
   const lastRest = useRef(0);
@@ -109,17 +112,23 @@ export function LocationProvider({ children }) {
   }, []);
 
   const stopWatcher = useCallback(() => {
+    watcherGen.current += 1; // يُبطل أي تشغيل قيد الانتظار
+    startingGen.current = null;
     try { watcherRef.current?.remove(); } catch {}
     watcherRef.current = null;
     watcherMode.current = null;
   }, []);
 
   const startWatcher = useCallback(async (mode) => {
-    if (watcherRef.current && watcherMode.current === mode) return;
+    // نفس الوضع يعمل أو قيد التشغيل → لا شيء
+    if (watcherMode.current === mode && (watcherRef.current || startingGen.current === watcherGen.current)) return;
     stopWatcher();
+    const gen = watcherGen.current;
+    startingGen.current = gen;
     watcherMode.current = mode;
     const ok = await requestForeground();
-    if (!ok || watcherMode.current !== mode) return;
+    if (gen !== watcherGen.current) return; // أُوقف/استُبدل أثناء طلب الإذن
+    if (!ok) { startingGen.current = null; watcherMode.current = null; return; }
     try {
       const sub = await Location.watchPositionAsync(
         {
@@ -134,10 +143,13 @@ export function LocationProvider({ children }) {
           upload(lat, lng);
         }
       );
-      if (watcherMode.current !== mode) { sub.remove(); return; }
+      // أُوقف أو استُبدل أثناء الانتظار → نزيل هذا الاشتراك فوراً (لا GPS يتيم)
+      if (gen !== watcherGen.current) { try { sub.remove(); } catch {} return; }
+      if (watcherRef.current && watcherRef.current !== sub) { try { watcherRef.current.remove(); } catch {} }
       watcherRef.current = sub;
+      startingGen.current = null;
     } catch {
-      watcherMode.current = null;
+      if (gen === watcherGen.current) { watcherMode.current = null; startingGen.current = null; }
     }
   }, [requestForeground, stopWatcher, updateCoords, upload]);
 
@@ -224,15 +236,22 @@ export function LocationProvider({ children }) {
     return () => { mounted.current = false; stopWatcher(); };
   }, [stopWatcher]);
 
+  const value = useMemo(() => ({
+    coordsRef, permission,
+    requestForeground, getFix, setTracking,
+    ensureBackgroundTracking, stopBackground,
+  }), [permission, requestForeground, getFix, setTracking, ensureBackgroundTracking, stopBackground]);
+
   return (
-    <LocationContext.Provider value={{
-      coords, coordsRef, permission,
-      requestForeground, getFix, setTracking,
-      ensureBackgroundTracking, stopBackground,
-    }}>
-      {children}
+    <LocationContext.Provider value={value}>
+      <CoordsContext.Provider value={coords}>
+        {children}
+      </CoordsContext.Provider>
     </LocationContext.Provider>
   );
 }
 
+// واجهة الموقع الثابتة (أذونات، تتبّع، coordsRef) — لا تتغيّر مع كل قراءة GPS
 export const useDriverLocation = () => useContext(LocationContext);
+// آخر إحداثيات { lat, lng, at } — سياق منفصل حتى لا يُعاد رسم كل التطبيق مع كل تحديث موقع
+export const useDriverCoords = () => useContext(CoordsContext);

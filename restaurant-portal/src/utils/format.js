@@ -1,4 +1,5 @@
 // ثوابت ودوال تنسيق مشتركة بين الصفحات
+import { pl } from './plural';
 
 // أسماء الحالات حسب العقد الموحّد للتطبيقات
 export const STATUS_LABELS = {
@@ -11,30 +12,33 @@ export const STATUS_LABELS = {
   cancelled: 'ملغي',
 };
 
-// اسم الحالة مع مراعاة نوع الطلب (الاستلام من المحل: "تم التسليم")
+// اسم الحالة مع مراعاة نوع الطلب — الاستلام من المحل ينتهي بـ«تم الاستلام» (موحّد مع تطبيق الزبون)
 export const statusLabel = (status, orderType) => {
-  if (status === 'delivered' && orderType && orderType !== 'delivery') return 'تم التسليم';
+  if (status === 'delivered' && orderType && orderType !== 'delivery') return 'تم الاستلام';
   if (status === 'ready' && orderType && orderType !== 'delivery') return 'جاهز للاستلام';
   return STATUS_LABELS[status] || status || '—';
 };
 
-export const STATUS_BADGE = {
-  pending: 'bg-amber-50 text-amber-700 ring-amber-200',
-  confirmed: 'bg-sky-50 text-sky-700 ring-sky-200',
-  preparing: 'bg-brand-50 text-brand-700 ring-brand-200',
-  ready: 'bg-teal-50 text-teal-700 ring-teal-200',
-  on_the_way: 'bg-violet-50 text-violet-700 ring-violet-200',
-  delivered: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  cancelled: 'bg-rose-50 text-rose-600 ring-rose-200',
+// ─── جدول ألوان الحالات الموحّد (رموز DESIGN.md) — نفس الجدول في التطبيقات الأربعة ───
+// pending=warning · confirmed=info · preparing=brand · ready=violet · on_the_way=coral · delivered=success · cancelled=danger
+// شارات الطلب المجمّع تستخدم teal (لون لا تستخدمه أي حالة)
+export const STATUS_META = {
+  pending:    { tone: 'warning', accent: '#FFB020', chip: 'bg-warning-soft text-amber-700' },
+  confirmed:  { tone: 'info',    accent: '#2E90FA', chip: 'bg-info-soft text-sky-700' },
+  preparing:  { tone: 'brand',   accent: '#FF6B00', chip: 'bg-brand-50 text-brand-700' },
+  ready:      { tone: 'violet',  accent: '#7B61FF', chip: 'bg-violet-50 text-violet-700' },
+  on_the_way: { tone: 'coral',   accent: '#F53B57', chip: 'bg-coral-50 text-coral' },
+  delivered:  { tone: 'success', accent: '#1DB954', chip: 'bg-success-soft text-emerald-700' },
+  cancelled:  { tone: 'danger',  accent: '#F04438', chip: 'bg-danger-soft text-danger' },
 };
+export const GROUP_ACCENT = '#0E9F9A'; // teal — نفس لون شارة «مجمّع» في تطبيق السائق
+const UNKNOWN_META = { tone: 'gray', accent: '#CBD5E1', chip: 'bg-gray-100 text-ink-2' };
+export const statusMeta = (s) => STATUS_META[s] || UNKNOWN_META;
+export const STATUS_ACCENT = Object.fromEntries(Object.entries(STATUS_META).map(([k, v]) => [k, v.accent]));
 
-export const STATUS_ACCENT = {
-  pending: '#F59E0B', confirmed: '#0EA5E9', preparing: '#FF6B00', ready: '#14B8A6',
-  on_the_way: '#8B5CF6', delivered: '#10B981', cancelled: '#F43F5E',
-};
-
+// المصطلحات الموحّدة: «كاش عند الاستلام» · «محفظة وصلّي» · «إكرامية السائق» · «رسوم مطعم إضافي»
 export const PAYMENT_LABELS = {
-  cash: 'نقداً عند الاستلام',
+  cash: 'كاش عند الاستلام',
   card: 'بطاقة',
   wallet: 'محفظة وصلّي',
   online: 'دفع إلكتروني',
@@ -52,30 +56,67 @@ export const moneyShort = (v) => {
 };
 
 export const orderNo = (o) => (o ? (o.order_number || o.id) : '');
+// رقم الطلب المعروف (WSL000123) — احتياط عند غياب order_number من حدث السيرفر
+export const orderNumberOf = (p) => p?.order_number || (p?.order_id != null ? `WSL${String(p.order_id).padStart(6, '0')}` : '');
 
-const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+// ─── التواريخ: أرقام لاتينية + تقويم ميلادي + توقيت فلسطين (موحّد مع باقي التطبيقات) ───
+const LOCALE = 'ar-EG-u-ca-gregory-nu-latn';
+const TZ = 'Asia/Hebron';
+function fmt(d, opts) {
+  try { return new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, ...opts }).format(d); }
+  catch {
+    try { return new Intl.DateTimeFormat(LOCALE, opts).format(d); }
+    catch { return d.toISOString().slice(0, 16).replace('T', ' '); }
+  }
+}
+const toDate = (v) => {
+  if (v == null || v === '') return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return isNaN(d) ? null : d;
+};
+
+// مفتاح يوم YYYY-MM-DD بتوقيت فلسطين (نفس تجميع السيرفر)
+export function dayKey(v) {
+  const d = toDate(v) || new Date();
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);
+    const g = (t) => parts.find(p => p.type === t)?.value;
+    return `${g('year')}-${g('month')}-${g('day')}`;
+  } catch {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+}
+
+export const fmtTime = (v) => { const d = toDate(v); return d ? fmt(d, { hour: '2-digit', minute: '2-digit', hour12: false }) : ''; };
+export const fmtDate = (v, opts = { day: 'numeric', month: 'short' }) => { const d = toDate(v); return d ? fmt(d, opts) : ''; };
+// «الثلاثاء، 6 أكتوبر»
+export const fmtLongToday = () => fmt(new Date(), { weekday: 'long', day: 'numeric', month: 'long' });
+// «06/10/2026»
+export const fmtNumericDate = (v) => { const d = toDate(v); return d ? fmt(d, { day: '2-digit', month: '2-digit', year: 'numeric' }) : ''; };
 
 // تاريخ + وقت مقروء: "اليوم 14:30" / "أمس 09:10" / "12 أكتوبر 18:05"
 export function formatDateTime(value) {
-  if (!value) return '';
-  const d = new Date(value);
-  if (isNaN(d)) return '';
-  const time = d.toLocaleTimeString('ar', { hour: '2-digit', minute: '2-digit' });
+  const d = toDate(value);
+  if (!d) return '';
+  const time = fmtTime(d);
   const now = new Date();
-  const y = new Date(now); y.setDate(now.getDate() - 1);
-  if (sameDay(d, now)) return `اليوم ${time}`;
-  if (sameDay(d, y)) return `أمس ${time}`;
-  const date = d.toLocaleDateString('ar', { day: 'numeric', month: 'short', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
+  const k = dayKey(d);
+  const today = dayKey(now);
+  if (k === today) return `اليوم ${time}`;
+  if (k === dayKey(new Date(now.getTime() - 86400000))) return `أمس ${time}`;
+  const sameYear = k.slice(0, 4) === today.slice(0, 4);
+  const date = fmtDate(d, { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) });
   return `${date} ${time}`;
 }
 
-// صيغ الجمع العربية للأعداد: 1 صنف، 2 صنفان، 3-10 أصناف، 11+ صنفًا
+// صيغ الجمع العربية (للتوافق مع الكود القديم) — الأفضل استخدام utils/plural.js
 export function arCount(n, [one, two, few, many]) {
   const c = Number(n) || 0;
   if (c === 0) return `لا ${few}`;
   if (c === 1) return one;
   if (c === 2) return two;
-  if (c >= 3 && c <= 10) return `${c} ${few}`;
+  const r = c % 100;
+  if (r >= 3 && r <= 10) return `${c} ${few}`;
   return `${c} ${many}`;
 }
 
@@ -97,8 +138,9 @@ export function groupLabel(o) {
   if (!isGroupOrder(o)) return '';
   const n = groupStops(o);
   const x = parseInt(o?.stop_sequence) || 0;
-  if (x && n) return `طلب مجمّع (مطعم ${x} من ${n})`;
-  if (n) return `طلب مجمّع (${n} مطاعم)`;
+  // حماية: بعد انسحاب مطعم قد يصبح الترتيب أكبر من العدد («مطعم 3 من 2») — نخفي «X من N» حينها
+  if (x && n && x <= n) return `طلب مجمّع (مطعم ${x} من ${n})`;
+  if (n > 1) return `طلب مجمّع (${pl(n, 'restaurant')})`;
   return 'طلب مجمّع';
 }
 export const GROUP_STATUS_LABELS = {
@@ -115,9 +157,3 @@ export function distanceKm(aLat, aLng, bLat, bLng) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a1)) * Math.cos(toRad(a2)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
-
-// مفتاح تاريخ محلي YYYY-MM-DD
-export const dayKey = (d) => {
-  const x = new Date(d);
-  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
-};

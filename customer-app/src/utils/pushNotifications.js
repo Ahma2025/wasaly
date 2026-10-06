@@ -15,8 +15,26 @@ Notifications.setNotificationHandler({
   }),
 });
 
-export async function getNotificationsEnabled() {
+// اختيار المستخدم من صفحة حسابي (بدون النظر لإذن الجهاز)
+export async function getNotificationsPref() {
   try { return (await AsyncStorage.getItem(NOTIF_PREF_KEY)) !== 'off'; } catch { return true; }
+}
+// للتوافق مع الاستدعاءات القديمة
+export const getNotificationsEnabled = getNotificationsPref;
+
+/**
+  الحالة الفعلية: { enabled, pref, granted, canAskAgain }
+  enabled = المستخدم ما طفّاها + إذن الجهاز ممنوح (المفتاح ما بيكذب لو الإذن مرفوض من الإعدادات)
+*/
+export async function getNotificationsStatus() {
+  const pref = await getNotificationsPref();
+  let granted = false, canAskAgain = true;
+  try {
+    const p = await Notifications.getPermissionsAsync();
+    granted = p?.status === 'granted' || p?.granted === true || p?.ios?.status === Notifications.IosAuthorizationStatus?.PROVISIONAL;
+    canAskAgain = p?.canAskAgain !== false;
+  } catch {}
+  return { enabled: pref && granted, pref, granted, canAskAgain };
 }
 
 async function ensureChannel() {
@@ -37,7 +55,7 @@ export async function registerForPushNotifications({ force = false } = {}) {
 
   try {
     // احترام اختيار المستخدم من صفحة حسابي
-    if (!force && !(await getNotificationsEnabled())) return null;
+    if (!force && !(await getNotificationsPref())) return null;
 
     await ensureChannel();
 
@@ -73,27 +91,50 @@ export async function registerForPushNotifications({ force = false } = {}) {
   }
 }
 
-// تفعيل/إيقاف الإشعارات فعلياً: إيقاف = إلغاء تسجيل الجهاز من الإشعارات البعيدة
+// تفعيل/إيقاف الإشعارات فعلياً: إيقاف = إلغاء تسجيل الجهاز + إلغاء أي تذكير محلي مجدول (تذكير السلة)
 export async function setNotificationsEnabled(enabled) {
   try { await AsyncStorage.setItem(NOTIF_PREF_KEY, enabled ? 'on' : 'off'); } catch {}
   if (enabled) {
     return !!(await registerForPushNotifications({ force: true }));
   }
+  try { await Notifications.cancelAllScheduledNotificationsAsync(); } catch {}
   try { await Notifications.unregisterForNotificationsAsync(); } catch {}
   return true;
 }
 
-// تذكير محلي على قناة أندرويد الصحيحة
+// تذكير محلي على قناة أندرويد الصحيحة — لا شيء لو المستخدم طفّى الإشعارات أو الإذن مرفوض
 export async function scheduleLocal(content, seconds) {
+  const st = await getNotificationsStatus();
+  if (!st.enabled) return null;
   return Notifications.scheduleNotificationAsync({
     content: { sound: 'default', ...content },
     trigger: Platform.OS === 'android' ? { seconds, channelId: ANDROID_CHANNEL } : { seconds },
   });
 }
 
-// يستخرج بيانات الإشعار (قد تكون نص JSON)
+/** تصفير الرقم الأحمر على أيقونة التطبيق (iOS) */
+export function clearBadge() {
+  try { Notifications.setBadgeCountAsync(0).catch(() => {}); } catch {}
+}
+
+const parse = (d) => {
+  if (typeof d === 'string') { try { return JSON.parse(d) || {}; } catch { return {}; } }
+  return d && typeof d === 'object' ? d : {};
+};
+
+// يستخرج بيانات الإشعار (قد تكون نص JSON). iOS (APNs خام): البيانات أحياناً داخل trigger.payload بدل content.data
 export function notificationData(response) {
-  let d = response?.notification?.request?.content?.data;
-  if (typeof d === 'string') { try { d = JSON.parse(d); } catch { d = {}; } }
+  const req = response?.notification?.request;
+  let d = parse(req?.content?.data);
+  if (!Object.keys(d).length) {
+    const payload = parse(req?.trigger?.payload);
+    const { aps, ...rest } = payload;
+    // السيرفر ممكن يبعتها مسطّحة أو داخل data/body
+    const fromData = parse(rest.data);
+    const fromBody = parse(rest.body);
+    d = Object.keys(fromData).length ? fromData : Object.keys(fromBody).length ? fromBody : rest;
+  }
+  // بعض المسارات تلف البيانات بطبقة data إضافية
+  if (d && d.data && typeof d.data === 'object' && !d.order_id && !d.group_id && !d.type) d = { ...d.data, ...d };
   return d || {};
 }

@@ -10,16 +10,14 @@ export function clearSession() {
   clearCaches();
 }
 
-// خروج كامل: إبلاغ السيرفر (يحذف رمز الإشعارات للجهاز) ثم مسح الجلسة
+// خروج فوري: نمسح الجلسة أولًا (الواجهة تنتقل لصفحة الدخول دون انتظار)، ثم نبلغ السيرفر بالخلفية
+// بالتوكن القديم ليحذف رمز إشعارات هذا الجهاز
 export async function logout() {
-  try {
-    if (localStorage.getItem('token')) {
-      await Promise.race([
-        api.post('/auth/logout'),
-        new Promise(res => setTimeout(res, 4000)),
-      ]);
-    }
-  } catch { /* نكمل الخروج حتى لو فشل الطلب */ }
-  try { await teardownPush(); } catch {}
+  let token = null;
+  try { token = localStorage.getItem('token'); } catch {}
   clearSession();
+  teardownPush().catch(() => {});
+  if (token) {
+    api.post('/auth/logout', null, { headers: { Authorization: 'Bearer ' + token }, timeout: 6000 }).catch(() => {});
+  }
 }

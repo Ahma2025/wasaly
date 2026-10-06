@@ -17,8 +17,15 @@ export default class ErrorBoundary extends React.Component {
           <p className="font-black text-ink text-lg">{chunk ? 'تعذّر تحميل الصفحة' : 'حدث خطأ غير متوقع'}</p>
           <p className="text-sm text-ink-3 mt-1.5">{chunk ? 'تحقق من الاتصال ثم أعد المحاولة.' : 'أعد المحاولة، وإذا تكرر الخطأ أعد تشغيل التطبيق.'}</p>
           <div className="flex gap-2 justify-center mt-6">
-            <button onClick={() => this.setState({ error: null })} className="btn btn-primary">إعادة المحاولة</button>
-            <button onClick={() => window.location.reload()} className="btn btn-secondary">إعادة تحميل</button>
+            {/* فشل تحميل جزء الصفحة لا يُصلحه إعادة العرض (import() مخزّن كفشل) → إعادة تحميل التطبيق — A-35 */}
+            {chunk ? (
+              <button onClick={() => window.location.reload()} className="btn btn-primary">إعادة المحاولة</button>
+            ) : (
+              <>
+                <button onClick={() => this.setState({ error: null })} className="btn btn-primary">إعادة المحاولة</button>
+                <button onClick={() => window.location.reload()} className="btn btn-secondary">إعادة تحميل</button>
+              </>
+            )}
           </div>
         </div>
       </div>

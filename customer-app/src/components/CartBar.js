@@ -7,6 +7,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useBump } from './Anim';
 import { AnimatedNumber } from './UI';
 import { SPRING, SPRING_POP, haptic, isReducedMotion } from '../utils/motion';
+import { plural } from '../utils/plural';
 
 // شريط السلة العائم: يدخل بانزلاق، يرتد عند تغيّر العدد، والمجموع يعدّ بحركة
 export default function CartBar({ count, total, onPress, hint }) {
@@ -26,7 +27,7 @@ export default function CartBar({ count, total, onPress, hint }) {
         <Pressable onPress={() => { haptic.medium(); onPress && onPress(); }}
           onPressIn={() => Animated.spring(press, { toValue: 0.97, ...SPRING, stiffness: 320 }).start()}
           onPressOut={() => Animated.spring(press, { toValue: 1, ...SPRING_POP }).start()}
-          accessibilityRole="button" accessibilityLabel={`عرض السلة، ${count} صنف، ${Number(total || 0).toFixed(2)} شيكل`}>
+          accessibilityRole="button" accessibilityLabel={`عرض السلة، ${plural(count, 'item')}، ${Number(total || 0).toFixed(2)} شيكل`}>
           <Animated.View style={[styles.shadow, COLORS.shadow.float, { transform: [{ scale: press }] }]}>
             <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.bar}>
               <LinearGradient colors={COLORS.gradients.sheen} style={styles.sheen} pointerEvents="none" />

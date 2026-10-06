@@ -89,7 +89,7 @@ function FloatingField({ icon, label, value, error, valid, secure, onFocus, onBl
           </View>
           {secure ? (
             <TouchableOpacity onPress={() => { haptic.select(); setHidden(h => !h); }} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} style={styles.trail}
-              accessibilityRole="button" accessibilityLabel={hidden ? 'إظهار كلمة المرور' : 'إخفاء كلمة المرور'}>
+              accessibilityRole="button" accessibilityLabel={hidden ? 'إظهار كلمة السر' : 'إخفاء كلمة السر'}>
               <Ionicons name={hidden ? 'eye-outline' : 'eye-off-outline'} size={20} color={focused ? C.primary : C.faint} />
             </TouchableOpacity>
           ) : trailing ? (

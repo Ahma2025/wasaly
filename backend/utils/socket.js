@@ -5,6 +5,10 @@ const cache = require('./cache');
 const { isTokenDenied } = require('./security');
 const driverLoc = require('./driverLocation');
 const { noteDriverFeatures } = require('./driverFeatures');
+const { noteDriverSeen, hasActiveAssignment } = require('./driverPresence');
+
+// خطأ مصادقة حقيقي (العميل يجب أن يسجّل الدخول من جديد) — data.code للتمييز عن الأعطال المؤقتة
+function authErr(message, code) { const e = new Error(message); e.data = { code, retry: false }; return e; }
 
 // كاش المصادقة (60 ث): موجات الاتصال (إعادة نشر/انقطاع شبكة) لا تضرب القاعدة بـ SELECT لكل handshake
 const AUTH_TTL = Number(process.env.SOCKET_AUTH_CACHE_MS) || 60000;
@@ -28,21 +32,28 @@ module.exports = (io) => {
   // 🔒 المصادقة: توكن صالح + حساب نشط وغير محظور (كان يكفي التوكن فقط)
   io.use(async (socket, next) => {
     const token = socket.handshake.auth && socket.handshake.auth.token;
-    if (!token) return next(new Error('No token'));
+    if (!token) return next(authErr('No token', 'NO_TOKEN'));
+    let decoded;
+    try { decoded = jwt.verify(token, jwtVerifyKey()); }
+    catch { return next(authErr('Invalid token', 'TOKEN_INVALID')); }
     try {
-      const decoded = jwt.verify(token, jwtVerifyKey());
-      if (await isTokenDenied(token)) return next(new Error('Invalid token'));
+      if (await isTokenDenied(token)) return next(authErr('Invalid token', 'TOKEN_REVOKED'));
       const u = await lookupSocketUser(decoded.id);
-      if (!u || u.none) return next(new Error('User not found'));
+      if (!u || u.none) return next(authErr('User not found', 'USER_INACTIVE'));
       socket.userId = u.id;
       socket.userRole = u.role;
       if (u.role === 'driver') {
         const feats = (socket.handshake.auth && socket.handshake.auth.features) || socket.handshake.headers['x-wasaly-features'];
         if (feats) await noteDriverFeatures(u.id, feats);
+        noteDriverSeen(u.id).catch(() => {});
       }
       next();
-    } catch {
-      next(new Error('Invalid token'));
+    } catch (e) {
+      // R-04: عطل مؤقت (قاعدة/Redis) ≠ توكن غير صالح → العميل يعيد المحاولة ولا يعتبر نفسه مرفوضاً
+      console.error('[socket auth] temporary error:', e && e.message);
+      const err = new Error('Server busy');
+      err.data = { code: 'TEMPORARY_UNAVAILABLE', retry: true };
+      next(err);
     }
   });
 
@@ -127,6 +138,7 @@ module.exports = (io) => {
         }
         // آخر موقع → Redis/ذاكرة فوراً، والقاعدة ≤ مرة كل 15 ثانية (مشترك مع PATCH /drivers/location)
         driverLoc.setLocation(socket.userId, +lat, +lng).catch(() => {});
+        noteDriverSeen(socket.userId).catch(() => {});
       } catch (e) {
         console.error('driver:location error:', e.message);
       }
@@ -135,7 +147,10 @@ module.exports = (io) => {
     socket.on('driver:status', async (payload) => {
       try {
         if (socket.userRole !== 'driver') return;
-        await pool.query('UPDATE drivers SET is_online=$1 WHERE user_id=$2', [!!(payload && payload.isOnline), socket.userId]);
+        const online = !!(payload && payload.isOnline);
+        // D-08: لا offline مع توصيلة مُسندة نشطة (نفس قاعدة PATCH /drivers/status)
+        if (!online && await hasActiveAssignment(socket.userId)) return;
+        await pool.query('UPDATE drivers SET is_online=$1 WHERE user_id=$2', [online, socket.userId]);
       } catch { /* ignore */ }
     });
 

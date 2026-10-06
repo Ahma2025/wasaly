@@ -8,15 +8,13 @@ import RestaurantCard from '../components/RestaurantCard';
 import GradientHeader from '../components/GradientHeader';
 import { FadeIn } from '../components/Anim';
 import { Ionicons } from '@expo/vector-icons';
-import { stagger } from '../utils/motion';
+import { plural } from '../utils/plural';
+import { matchesCategoryId, restaurantsForCategory } from '../utils/categoryMatch';
 import EmptyState from '../components/EmptyState';
 import { useTheme } from '../context/ThemeContext';
 
-// مطابقة احتياطية بالاسم مع أقسام المنيو (للسيرفر/البيانات اللي ما فيها category_id)
-const fuzzy = (all, cn) => (all || []).filter(r => (r.menu_cats || []).some(mc => mc && cn && (mc.includes(cn) || cn.includes(mc))));
-const byId = (all, id) => (all || []).filter(r => id != null && String(r.category_id) === String(id));
-// الأولوية لتطابق التصنيف الدقيق؛ المطابقة بالاسم فقط لو ما في نتائج دقيقة
-const pick = (exact, loose) => (exact.length ? exact : loose);
+// نفس منطق الرئيسية بالضبط (utils/categoryMatch): category_id أولاً، ثم أقسام المنيو بالاسم
+const byId = (all, id) => (all || []).filter(r => matchesCategoryId(r, id));
 
 export default function CategoryScreen({ route, navigation }) {
   const { categoryId, categoryName } = route.params || {};
@@ -38,7 +36,7 @@ export default function CategoryScreen({ route, navigation }) {
       }
       // 2) احتياط: سيرفر قديم أو تصنيف بدون مطاعم مربوطة → مطابقة بأقسام المنيو
       let res = exact;
-      if (!res.length) { const all = await api.get('/restaurants?limit=100'); res = pick(byId(all.data || [], categoryId), fuzzy(all.data || [], cn)); }
+      if (!res.length) { const all = await api.get('/restaurants?limit=100'); res = restaurantsForCategory(all.data || [], { id: categoryId, name: cn }); }
       setList(res);
       setFailed(false);
     } catch { setFailed(true); }
@@ -49,7 +47,7 @@ export default function CategoryScreen({ route, navigation }) {
     (async () => {
       const cached = await readCache('home');
       if (cached?.restaurants?.length) {
-        setList(pick(byId(cached.restaurants, categoryId), fuzzy(cached.restaurants, categoryName || '')));
+        setList(restaurantsForCategory(cached.restaurants, { id: categoryId, name: categoryName || '' }));
         setLoading(false);
       }
       load();
@@ -61,7 +59,7 @@ export default function CategoryScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      <GradientHeader title={categoryName || 'المطاعم'} subtitle={!loading && list.length ? `${list.length} مطعم` : undefined} />
+      <GradientHeader title={categoryName || 'المطاعم'} subtitle={!loading && list.length ? plural(list.length, 'restaurant') : undefined} />
 
       {loading ? (
         <View style={{ padding: 16 }}>{[0, 1, 2].map(i => <HeroCardSkeleton key={i} />)}</View>
@@ -76,7 +74,7 @@ export default function CategoryScreen({ route, navigation }) {
           contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={COLORS.primary} colors={[COLORS.primary]} progressBackgroundColor={COLORS.card} />}
           renderItem={({ item, index }) => (
-            <FadeIn delay={stagger(index)} from={20}>
+            <FadeIn index={index} from={20}>
               <RestaurantCard restaurant={item} onPress={() => navigation.navigate('Restaurant', { restaurantId: item.id })} />
             </FadeIn>
           )}
@@ -85,11 +83,11 @@ export default function CategoryScreen({ route, navigation }) {
             <FadeIn from={8} style={styles.summary}>
               <View style={[styles.sumChip, { backgroundColor: COLORS.successBg }]}>
                 <Ionicons name="radio-button-on" size={11} color={COLORS.green} />
-                <Text style={[styles.sumTxt, { color: COLORS.successText }]}>{openCount} مفتوح الآن</Text>
+                <Text style={[styles.sumTxt, { color: COLORS.successText }]}>مفتوح الآن: {openCount}</Text>
               </View>
               <View style={[styles.sumChip, { backgroundColor: COLORS.card, borderColor: COLORS.border, borderWidth: 1 }]}>
                 <Ionicons name="restaurant-outline" size={12} color={COLORS.primary} />
-                <Text style={[styles.sumTxt, { color: COLORS.sub }]}>{sorted.length} مطعم</Text>
+                <Text style={[styles.sumTxt, { color: COLORS.sub }]}>{plural(sorted.length, 'restaurant')}</Text>
               </View>
             </FadeIn>
           )}

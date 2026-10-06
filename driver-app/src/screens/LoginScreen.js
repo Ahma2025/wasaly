@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PopIn, FadeIn, RadarRings, GradientButton, Press, haptic, isReducedMotion } from '../components/Anim';
 import FloatingField from '../components/FloatingField';
-import api from '../utils/api';
+import api, { isNetworkError } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { setToken, clearToken, ONLINE_KEY } from '../utils/storage';
 import { ADMIN_PHONE, ADMIN_WHATSAPP } from '../config';
@@ -32,7 +32,7 @@ async function quickFix() {
 const digitsOf = (p) => toLatinDigits(p).replace(/\D/g, '');
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
-// ورقة "نسيت كلمة السر؟" — التواصل مع الإدارة (واتساب / اتصال)
+// ورقة "نسيت كلمة المرور؟" — التواصل مع الإدارة (واتساب / اتصال)
 function ForgotSheet({ visible, onClose, insets }) {
   const v = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -43,7 +43,7 @@ function ForgotSheet({ visible, onClose, insets }) {
   }, [visible, v]);
   const openWhatsApp = () => {
     onClose();
-    const msg = encodeURIComponent('مرحباً، أنا مندوب في وصلّي ونسيت كلمة المرور. أرجو المساعدة في إعادة تعيينها.');
+    const msg = encodeURIComponent('مرحباً، أنا سائق في وصلّي ونسيت كلمة المرور. أرجو المساعدة في إعادة تعيينها.');
     Linking.openURL(`whatsapp://send?phone=${ADMIN_WHATSAPP}&text=${msg}`)
       .catch(() => Linking.openURL(`https://wa.me/${ADMIN_WHATSAPP}?text=${msg}`).catch(() => {}));
   };
@@ -60,8 +60,8 @@ function ForgotSheet({ visible, onClose, insets }) {
           <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
           <Ionicons name="key" size={26} color="#FFF" />
         </View>
-        <Text style={styles.sheetTitle}>نسيت كلمة السر؟</Text>
-        <Text style={styles.sheetText}>حسابات الكباتن تُدار من الإدارة. تواصل معنا وسنعيد تعيين كلمة المرور لك بسرعة.</Text>
+        <Text style={styles.sheetTitle}>نسيت كلمة المرور؟</Text>
+        <Text style={styles.sheetText}>حسابات السائقين تُدار من الإدارة. تواصل معنا وسنعيد تعيين كلمة المرور لك بسرعة.</Text>
         <Press onPress={openWhatsApp} style={[styles.sheetBtn, { backgroundColor: COLORS.greenSoft, borderColor: COLORS.greenLine }]} accessibilityLabel="مراسلة الإدارة على واتساب">
           <View style={[styles.sheetBtnIcon, { backgroundColor: '#25D366' }]}><Ionicons name="logo-whatsapp" size={20} color="#FFF" /></View>
           <View style={{ flex: 1 }}>
@@ -169,7 +169,7 @@ export default function LoginScreen() {
       if (!res?.token || !res?.user) throw { message: 'استجابة غير متوقعة من السيرفر' };
       if (res.user.role !== 'driver') {
         haptic.warn();
-        setBanner({ type: 'error', title: 'هذا الحساب ليس حساب مندوب', msg: 'استخدم تطبيق وصلّي المناسب لهذا الحساب، أو تواصل مع الإدارة.' });
+        setBanner({ type: 'error', title: 'هذا الحساب ليس حساب سائق', msg: 'استخدم تطبيق وصلّي المناسب لهذا الحساب، أو تواصل مع الإدارة.' });
         return;
       }
       // نخزّن التوكن أولاً حتى تعمل الطلبات، ثم نصبح "متصل" مع الموقع، ثم ندخل للرئيسية (بلا سباق)
@@ -191,10 +191,9 @@ export default function LoginScreen() {
       await clearToken();
       haptic.warn();
       setDone(false);
-      const NET = ['تعذّر الاتصال بالإنترنت', 'انتهت مهلة الاتصال'];
-      if (!e?.status && NET.includes(e?.message)) {
+      if (!e?.status && isNetworkError(e)) {
         // شبكة / مهلة — المدخلات تبقى كما هي، وزر إعادة المحاولة
-        setBanner({ type: 'network', title: e?.message || 'تعذّر الاتصال بالإنترنت', msg: 'تأكد من اتصالك ثم أعد المحاولة.' });
+        setBanner({ type: 'network', title: e?.message || 'تعذّر الاتصال — تأكد من الإنترنت', msg: 'تأكد من اتصالك ثم أعد المحاولة.' });
       } else {
         setBanner({ type: 'error', title: 'تعذّر الدخول', msg: e?.message || 'رقم الهاتف أو كلمة المرور غير صحيحة' });
       }
@@ -227,7 +226,7 @@ export default function LoginScreen() {
             <Text style={styles.title} accessibilityRole="header">وصلّي</Text>
             <View style={styles.tagPill}>
               <View style={styles.tagDot} />
-              <Text style={styles.subtitle}>تطبيق كباتن التوصيل</Text>
+              <Text style={styles.subtitle}>تطبيق السائق</Text>
             </View>
           </FadeIn>
         </LinearGradient>
@@ -268,8 +267,8 @@ export default function LoginScreen() {
               editable={!loading && !done} />
 
             <Pressable onPress={() => { haptic.light(); Keyboard.dismiss(); setForgot(true); }} hitSlop={10} style={styles.forgot}
-              accessibilityRole="button" accessibilityLabel="نسيت كلمة السر؟ تواصل مع الإدارة">
-              {({ pressed }) => <Text style={[styles.forgotTxt, pressed && { opacity: 0.55 }]}>نسيت كلمة السر؟</Text>}
+              accessibilityRole="button" accessibilityLabel="نسيت كلمة المرور؟ تواصل مع الإدارة">
+              {({ pressed }) => <Text style={[styles.forgotTxt, pressed && { opacity: 0.55 }]}>نسيت كلمة المرور؟</Text>}
             </Pressable>
 
             <View onLayout={(e) => { const l = e.nativeEvent.layout; layout.current.btnBottom = l.y + l.height; }}>
@@ -281,7 +280,7 @@ export default function LoginScreen() {
 
             <View style={[RTL.row, styles.noteRow]}>
               <Ionicons name="information-circle-outline" size={16} color={COLORS.gray} />
-              <Text style={styles.note}>يتم إنشاء حسابات المندوبين عبر لوحة الإدارة</Text>
+              <Text style={styles.note}>يتم إنشاء حسابات السائقين عبر لوحة الإدارة</Text>
             </View>
           </View>
         </FadeIn>

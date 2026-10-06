@@ -47,8 +47,12 @@ router.post('/', auth, adminOnly, async (req, res) => {
     const v = parseFloat(value) || 0;
     if (type !== 'free_delivery' && v <= 0) return res.status(400).json({ success: false, message: 'قيمة الخصم مطلوبة' });
     if (type === 'percentage' && v > 100) return res.status(400).json({ success: false, message: 'النسبة يجب ألا تتجاوز 100%' });
-    const { rows: dup } = await pool.query('SELECT id FROM coupons WHERE LOWER(code)=LOWER($1)', [cleanCode]);
-    if (dup[0]) return res.status(409).json({ success: false, message: 'هذا الكود موجود مسبقاً' });
+    const { rows: dup } = await pool.query('SELECT id, is_active FROM coupons WHERE LOWER(code)=LOWER($1)', [cleanCode]);
+    if (dup.some(d => d.is_active !== false)) return res.status(409).json({ success: false, code: 'COUPON_EXISTS', message: 'هذا الكود مستخدم لكوبون فعّال — احذفه أولاً أو اختر كوداً آخر' });
+    // A-20: كود كوبون محذوف (غير نشط) يُعاد استخدامه: نؤرشف القديم باسم "CODE~del<id>" (يبقى سجلّه وعدّاداته) ثم ننشئ الجديد نظيفاً
+    for (const d of dup) {
+      await pool.query(`UPDATE coupons SET code = LEFT(code, 40) || '~del' || id::text WHERE id=$1 AND is_active=false`, [d.id]);
+    }
     const usesRaw = max_uses ?? usage_limit;
     const uses = (usesRaw !== undefined && usesRaw !== null && usesRaw !== '') ? parseInt(usesRaw) : null;
     const { rows } = await pool.query(

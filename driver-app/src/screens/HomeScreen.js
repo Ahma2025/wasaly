@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, Animated, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, Animated, Pressable, Linking } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -16,6 +16,7 @@ import { COLORS, GRADIENTS, SHADOW, RTL, RADIUS } from '../theme';
 import { FadeIn, PopIn, Pulse, Skeleton, Press, CountUp, RadarRings, LoadingDots, GradientButton, haptic, isReducedMotion } from '../components/Anim';
 import { money, num, orderTitle, orderIcon, orderNo, isPersonal, driverFee, tipOf } from '../utils/format';
 import { groupNo, groupEarning, allPicked, nextStop, pickedCount } from '../utils/group';
+import { arCount } from '../utils/plural';
 
 // وصف المرحلة الحالية للطلب النشط حسب الحالة الحقيقية
 function activeStage(o) {
@@ -110,13 +111,15 @@ export default function HomeScreen() {
   const busyJob = !!(activeOrder || activeGroup);
   const { permission } = useDriverLocation();
   const [stats, setStats] = useState(null);
+  const [statsError, setStatsError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchStats = useCallback(async () => {
     try {
       const r = await api.get('/drivers/earnings?period=today');
       setStats({ deliveries: parseInt(r?.data?.stats?.deliveries, 10) || 0, earnings: num(r?.data?.stats?.earnings) });
-    } catch { setStats(s => s || { deliveries: 0, earnings: 0 }); }
+      setStatsError(false);
+    } catch { setStatsError(true); } // D-10: لا نعرض 0.00₪ وهمية — آخر قيمة معروفة أو «—»
   }, []);
 
   const refreshAll = useCallback(async () => {
@@ -128,7 +131,7 @@ export default function HomeScreen() {
   const onRefresh = async () => { setRefreshing(true); await refreshAll(); setRefreshing(false); };
 
   const rating = num(driver?.rating);
-  const name = user?.name || driver?.name || 'المندوب';
+  const name = user?.name || driver?.name || 'السائق';
   const firstName = String(name).trim().split(/\s+/)[0] || name;
   const stage = activeOrder ? activeStage(activeOrder) : null;
 
@@ -146,7 +149,7 @@ export default function HomeScreen() {
           <FadeIn from={8}>
             <View style={styles.headerRow}>
               <Press onPress={() => navigation.navigate('حسابي')} accessibilityLabel="حسابي" style={styles.avatar}>
-                <Text style={styles.avatarText}>{name?.[0] || 'م'}</Text>
+                <Text style={styles.avatarText}>{name?.[0] || 'س'}</Text>
                 {rating > 0 && (
                   <View style={styles.avatarRating}>
                     <Ionicons name="star" size={9} color={COLORS.star} />
@@ -173,7 +176,12 @@ export default function HomeScreen() {
           <FadeIn>
             <View style={styles.warn}>
               <View style={styles.warnIcon}><Ionicons name="location" size={16} color="#FFF" /></View>
-              <Text style={[styles.warnText, RTL.text]}>إذن الموقع غير مفعّل — لن تصلك الطلبات القريبة. فعّله من إعدادات الجهاز.</Text>
+              <Text style={[styles.warnText, RTL.text]}>إذن الموقع غير مفعّل — لن تصلك الطلبات القريبة.</Text>
+              {/* D-32: زر مباشر لإعدادات التطبيق */}
+              <Press onPress={() => Linking.openSettings().catch(() => {})} style={styles.warnBtn} hitSlop={6} accessibilityLabel="فتح إعدادات التطبيق لتفعيل الموقع">
+                <Ionicons name="settings-outline" size={15} color="#FFF" />
+                <Text style={styles.warnBtnText}>الإعدادات</Text>
+              </Press>
             </View>
           </FadeIn>
         )}
@@ -187,20 +195,31 @@ export default function HomeScreen() {
                   <View style={[styles.statIcon, { backgroundColor: COLORS.greenSoft }]}><Ionicons name="wallet" size={18} color={COLORS.greenDeep} /></View>
                   <Text style={styles.earnLabel}>أرباح اليوم</Text>
                 </View>
-                <Press onPress={() => navigation.navigate('الأرباح')} style={styles.linkChip} accessibilityLabel="عرض الأرباح">
+                <Press onPress={() => navigation.navigate('الأرباح')} style={styles.linkChip} hitSlop={8} accessibilityLabel="عرض الأرباح">
                   <Text style={styles.linkChipText}>التفاصيل</Text>
                   <Ionicons name="chevron-back" size={14} color={COLORS.primary} />
                 </Press>
               </View>
               {stats == null
-                ? <Skeleton width={170} height={40} radius={12} style={{ alignSelf: 'flex-end', marginTop: 12 }} />
+                ? (statsError
+                  ? (
+                    <Press onPress={fetchStats} style={styles.statsErr} hitSlop={6} accessibilityLabel="تعذّر تحميل أرباح اليوم، اضغط لإعادة المحاولة">
+                      <Text style={styles.earnValueMuted}>—</Text>
+                      <View style={[RTL.row, { gap: 4 }]}>
+                        <Ionicons name="refresh" size={13} color={COLORS.red} />
+                        <Text style={styles.statsErrText}>تعذّر التحميل — اضغط لإعادة المحاولة</Text>
+                      </View>
+                    </Press>
+                  )
+                  : <Skeleton width={170} height={40} radius={12} style={{ alignSelf: 'flex-end', marginTop: 12 }} />)
                 : <CountUp value={stats.earnings} format={money} style={styles.earnValue} adjustsFontSizeToFit />}
             </View>
           </PopIn>
 
           <View style={styles.statsRow}>
             <StatTile icon="cube" color={COLORS.blue} bg={COLORS.blueSoft} label="توصيلات اليوم" delay={180}>
-              {stats == null ? <Skeleton width={40} height={22} style={{ alignSelf: 'flex-end', marginBottom: 2 }} />
+              {stats == null ? (statsError ? <Text style={[styles.statVal, RTL.text, { color: COLORS.gray }]}>—</Text>
+                : <Skeleton width={40} height={22} style={{ alignSelf: 'flex-end', marginBottom: 2 }} />)
                 : <CountUp value={stats.deliveries} style={[styles.statVal, RTL.text]} />}
             </StatTile>
             <StatTile icon="star" color={COLORS.star} bg={COLORS.amberSoft} label="تقييمك" delay={240}>
@@ -218,12 +237,13 @@ export default function HomeScreen() {
               style={[styles.activeShadow]} accessibilityLabel={`طلب نشط رقم ${orderNo(activeOrder)}، افتح التفاصيل والتنقل`}>
               <LinearGradient colors={GRADIENTS.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.activeCard}>
                 <View style={styles.activeGlow} />
-                <View style={[RTL.row, { justifyContent: 'space-between', marginBottom: 14 }]}>
-                  <View style={[RTL.row, { gap: 8 }]}>
+                <View style={[RTL.row, { justifyContent: 'space-between', marginBottom: 14, gap: 8 }]}>
+                  {/* D-27: العنوان يتقلّص ولا يخرج عن البطاقة */}
+                  <View style={[RTL.row, { gap: 8, flex: 1 }]}>
                     <Pulse to={1.5}><View style={styles.activeLive} /></Pulse>
-                    <Text style={styles.activeTitle}>طلب نشط #{orderNo(activeOrder)}</Text>
+                    <Text style={[styles.activeTitle, { flexShrink: 1 }]} numberOfLines={1}>طلب نشط #{orderNo(activeOrder)}</Text>
                   </View>
-                  <StatusBadge status={activeOrder.status} label={stage.badge} onDark />
+                  <StatusBadge status={activeOrder.status} label={stage.badge} onDark style={{ maxWidth: '50%' }} />
                 </View>
 
                 <View style={styles.activeRoute}>
@@ -267,18 +287,18 @@ export default function HomeScreen() {
                 style={[styles.activeShadow]} accessibilityLabel={`طلب مجمّع نشط رقم ${groupNo(g)}، افتح التفاصيل والتنقل`}>
                 <LinearGradient colors={GRADIENTS.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.activeCard}>
                   <View style={styles.activeGlow} />
-                  <View style={[RTL.row, { justifyContent: 'space-between', marginBottom: 14 }]}>
+                  <View style={[RTL.row, { justifyContent: 'space-between', marginBottom: 14, gap: 8 }]}>
                     <View style={[RTL.row, { gap: 8, flex: 1 }]}>
                       <Pulse to={1.5}><View style={styles.activeLive} /></Pulse>
-                      <Text style={styles.activeTitle} numberOfLines={1}>طلب مجمّع #{groupNo(g)}</Text>
+                      <Text style={[styles.activeTitle, { flexShrink: 1 }]} numberOfLines={1}>طلب مجمّع #{groupNo(g)}</Text>
                     </View>
-                    <StatusBadge status={toCustomer ? 'on_the_way' : 'preparing'} label={toCustomer ? 'في الطريق للزبون' : `استلمت ${pickedCount(g)} من ${total}`} onDark />
+                    <StatusBadge status={toCustomer ? 'on_the_way' : 'picking_up'} label={toCustomer ? 'في الطريق للزبون' : `استلمت ${pickedCount(g)} من ${total}`} onDark style={{ maxWidth: '50%' }} />
                   </View>
 
                   <View style={styles.activeRoute}>
                     <View style={[RTL.row, { gap: 10 }]}>
                       <View style={styles.activeDotWrap}><Ionicons name="layers" size={13} color={COLORS.primary} /></View>
-                      <Text style={[styles.activeText, RTL.text]} numberOfLines={1}>{(g.stops || []).map(s => s.name).join(' • ') || `${total} مطاعم`}</Text>
+                      <Text style={[styles.activeText, RTL.text]} numberOfLines={1}>{(g.stops || []).map(s => s.name).join(' • ') || arCount(total, 'restaurant')}</Text>
                     </View>
                     <View style={styles.activeLine} />
                     <View style={[RTL.row, { gap: 10 }]}>
@@ -386,12 +406,17 @@ const styles = StyleSheet.create({
   warn: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 14, backgroundColor: COLORS.amberSoft, borderRadius: RADIUS.md, padding: 12, borderWidth: 1, borderColor: '#FFE3A3' },
   warnIcon: { width: 30, height: 30, borderRadius: 10, backgroundColor: COLORS.amber, alignItems: 'center', justifyContent: 'center' },
   warnText: { flex: 1, color: COLORS.text, fontSize: 12.5, fontWeight: '700', lineHeight: 19 },
+  warnBtn: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, backgroundColor: COLORS.amberDeep, borderRadius: RADIUS.pill, paddingHorizontal: 12, height: 40 },
+  warnBtnText: { color: '#FFF', fontWeight: '800', fontSize: 12.5 },
+  statsErr: { alignItems: 'flex-end', marginTop: 8, gap: 2 },
+  earnValueMuted: { fontSize: 38, fontWeight: '900', color: COLORS.faint, textAlign: 'right' },
+  statsErrText: { color: COLORS.red, fontSize: 12, fontWeight: '700' },
 
   section: { marginHorizontal: 16, marginTop: 16 },
   earnCard: { backgroundColor: COLORS.card, borderRadius: RADIUS.lg - 2, padding: 16, ...SHADOW.card },
   earnLabel: { fontSize: 14, fontWeight: '800', color: COLORS.sub },
   earnValue: { fontSize: 38, fontWeight: '900', color: COLORS.text, textAlign: 'right', marginTop: 8 },
-  linkChip: { flexDirection: 'row-reverse', alignItems: 'center', gap: 2, backgroundColor: COLORS.sec, borderRadius: RADIUS.pill, paddingHorizontal: 12, height: 32 },
+  linkChip: { flexDirection: 'row-reverse', alignItems: 'center', gap: 2, backgroundColor: COLORS.sec, borderRadius: RADIUS.pill, paddingHorizontal: 14, height: 40 },
   linkChipText: { color: COLORS.primary, fontWeight: '800', fontSize: 12.5 },
   statsRow: { flexDirection: 'row-reverse', gap: 10, marginTop: 10 },
   statCard: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10, backgroundColor: COLORS.card, borderRadius: RADIUS.md + 2, padding: 14, ...SHADOW.soft },

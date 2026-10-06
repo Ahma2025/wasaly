@@ -3,11 +3,19 @@ import { FiHeadphones, FiX, FiMessageCircle, FiPhone, FiSend, FiChevronLeft } fr
 import api from '../utils/api';
 import { SUPPORT_PHONE } from '../utils/config';
 import { formatDateTime } from '../utils/format';
-import { cx } from './ui';
+import { cx, useOverlay } from './ui';
+import { pl } from '../utils/plural';
 
-const SEEN_KEY = 'support_seen_admin';
+// عدّاد «المقروء» لكل حساب على حدة (كان مشتركًا بين كل الحسابات على نفس الجهاز)
+const seenKey = () => {
+  let uid = '';
+  try { uid = JSON.parse(localStorage.getItem('user') || 'null')?.id ?? ''; } catch {}
+  return `support_seen_admin_${uid || 'anon'}`;
+};
 const isMine = (m) => m.sender === 'user' || m.sender === 'restaurant' || m.is_mine === true;
 const QUICK = ['مشكلة في طلب', 'تعديل بيانات المطعم', 'استفسار عن المستحقات', 'مشكلة في الطابعة'];
+// بصمة القائمة: لا نعيد الرسم/التمرير إن لم يتغير شيء
+const sig = (list) => `${list.length}:${list[list.length - 1]?.id ?? ''}`;
 
 // زر الدعم العائم — فوق القائمة السفلية ويحترم المساحة الآمنة
 export default function SupportWidget() {
@@ -18,12 +26,19 @@ export default function SupportWidget() {
   const [sending, setSending] = useState(false);
   const [unread, setUnread] = useState(0);
   const endRef = useRef(null);
+  const listRef = useRef(null);
   const inputRef = useRef(null);
+  const sigRef = useRef('');
+  const nearBottom = useRef(true);
   const loggedIn = !!localStorage.getItem('token');
+
+  // زر الرجوع / Esc يغلق اللوحة المفتوحة (الأعلى فقط)
+  useOverlay(menu || chat, () => { setMenu(false); setChat(false); });
 
   const load = useCallback(() => api.get('/support/chat').then(r => {
     const list = r?.data || [];
-    setMessages(list);
+    const s = sig(list);
+    if (s !== sigRef.current) { sigRef.current = s; setMessages(list); }
     return list;
   }).catch(() => null), []);
 
@@ -32,8 +47,13 @@ export default function SupportWidget() {
   // أثناء فتح المحادثة: تحديث كل 4 ثوانٍ
   useEffect(() => {
     if (!chat) return;
-    load().then(list => { if (list) { localStorage.setItem(SEEN_KEY, String(adminCount(list))); setUnread(0); } });
-    const t = setInterval(() => load().then(list => { if (list) localStorage.setItem(SEEN_KEY, String(adminCount(list))); }), 4000);
+    nearBottom.current = true;
+    sigRef.current = '';
+    load().then(list => { if (list) { localStorage.setItem(seenKey(), String(adminCount(list))); setUnread(0); } });
+    const t = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      load().then(list => { if (list) localStorage.setItem(seenKey(), String(adminCount(list))); });
+    }, 4000);
     return () => clearInterval(t);
   }, [chat, load]);
 
@@ -44,7 +64,7 @@ export default function SupportWidget() {
       if (document.visibilityState !== 'visible') return;
       load().then(list => {
         if (!list) return;
-        const seen = parseInt(localStorage.getItem(SEEN_KEY) || '0');
+        const seen = parseInt(localStorage.getItem(seenKey()) || '0');
         setUnread(Math.max(0, adminCount(list) - seen));
       });
     };
@@ -53,22 +73,24 @@ export default function SupportWidget() {
     return () => clearInterval(t);
   }, [chat, loggedIn, load]);
 
-  useEffect(() => { if (chat) endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, chat]);
-
-  // Esc يغلق اللوحة
+  // التمرير للأسفل فقط عند وصول رسالة جديدة وكان المستخدم قريبًا من الأسفل (لا يقاطع قراءة الرسائل القديمة)
   useEffect(() => {
-    if (!menu && !chat) return;
-    const onKey = (e) => { if (e.key === 'Escape') { setMenu(false); setChat(false); } };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [menu, chat]);
+    if (!chat || !nearBottom.current) return;
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, chat]);
+  const onScroll = () => {
+    const el = listRef.current;
+    if (el) nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   const send = async () => {
     const msg = text.trim();
     if (!msg || sending) return;
     setText(''); setSending(true);
+    nearBottom.current = true;
+    sigRef.current = '';
     setMessages(m => [...m, { id: `tmp-${Date.now()}`, sender: 'user', message: msg, created_at: new Date().toISOString(), pending: true }]);
-    try { await api.post('/support/chat', { message: msg }); await load(); }
+    try { await api.post('/support/chat', { message: msg }); sigRef.current = ''; await load(); }
     catch { setText(msg); setMessages(m => m.filter(x => !x.pending)); }
     finally { setSending(false); }
   };
@@ -98,7 +120,7 @@ export default function SupportWidget() {
             </div>
             <button onClick={() => setChat(false)} aria-label="إغلاق المحادثة" className="relative z-[1] w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center"><FiX /></button>
           </div>
-          <div className="flex-1 overflow-y-auto p-3.5 flex flex-col gap-2.5 bg-surface" aria-live="polite">
+          <div ref={listRef} onScroll={onScroll} className="flex-1 overflow-y-auto p-3.5 flex flex-col gap-2.5 bg-surface" aria-live="polite">
             {messages.length === 0 && (
               <div className="text-center mt-6 px-4 animate-fade-up">
                 <div className="w-16 h-16 mx-auto rounded-[20px] bg-white shadow-soft text-brand-500 flex items-center justify-center mb-3"><FiMessageCircle size={28} aria-hidden /></div>
@@ -148,7 +170,7 @@ export default function SupportWidget() {
             className="flex items-center gap-3 bg-white text-ink ps-2 pe-3 h-14 rounded-[18px] font-bold text-sm shadow-lift border border-surface-line min-w-[230px]">
             <span className="w-10 h-10 rounded-[12px] bg-brand-50 text-brand-600 flex items-center justify-center"><FiMessageCircle size={18} aria-hidden /></span>
             <span className="flex-1 text-right">محادثة مع الإدارة</span>
-            {unread > 0 ? <span className="chip bg-coral text-white tnum">{unread}</span> : <FiChevronLeft className="text-ink-3" aria-hidden />}
+            {unread > 0 ? <span className="chip bg-coral text-white tnum" aria-label={`${pl(unread, 'message')} جديدة`}>{unread}</span> : <FiChevronLeft className="text-ink-3" aria-hidden />}
           </button>
           <a href={`tel:${SUPPORT_PHONE}`} onClick={() => setMenu(false)}
             className="pressable flex items-center gap-3 bg-white text-ink ps-2 pe-3 h-14 rounded-[18px] font-bold text-sm shadow-lift border border-surface-line min-w-[230px]">

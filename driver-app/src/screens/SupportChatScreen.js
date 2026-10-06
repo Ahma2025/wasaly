@@ -3,13 +3,17 @@ import { View, Text, TextInput, FlatList, StyleSheet, KeyboardAvoidingView, Plat
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import api from '../utils/api';
+import { useSocketEvent } from '../utils/socket';
+import { useDriver } from '../context/DriverContext';
 import GradientHeader from '../components/GradientHeader';
 import { FadeIn, Skeleton, Press, LoadingDots, EmptyState, haptic } from '../components/Anim';
 import { COLORS, GRADIENTS, SHADOW, RTL, KAV_BEHAVIOR, RADIUS } from '../theme';
 import { fmtTime, fmtDate } from '../utils/format';
 
-const POLL_MS = 4000;
+// D-11: الرسائل الجديدة تصل فوراً عبر السوكِت (support_message)؛ الاستطلاع احتياط بطيء فقط
+const POLL_MS = 20000;
 
 // هيكل تحميل على شكل فقاعات محادثة
 function ChatSkeleton() {
@@ -27,6 +31,8 @@ export default function SupportChatScreen() {
   const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const { markSupportRead } = useDriver();
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -44,8 +50,14 @@ export default function SupportChatScreen() {
       const sig = `${list.length}:${last?.id}:${last?.message}`;
       if (!seenIds.current) seenIds.current = new Set(list.map((m, i) => String(m.id ?? i)));
       if (sig !== sigRef.current) { sigRef.current = sig; setMessages(list); } // لا إعادة رسم بلا داعٍ
-    } catch {} finally { setLoading(false); }
+      setError(false);
+    } catch { setError(true); } finally { setLoading(false); } // D-25
   }, []);
+
+  // المحادثة مفتوحة = مقروءة (نقطة التنبيه في الرئيسية/حسابي تختفي)
+  useFocusEffect(useCallback(() => { markSupportRead && markSupportRead(); }, [markSupportRead]));
+  useSocketEvent('support_message', () => { load(); markSupportRead && markSupportRead(); });
+  useSocketEvent('__reconnected', () => load());
 
   useEffect(() => {
     load();
@@ -113,6 +125,12 @@ export default function SupportChatScreen() {
     <KeyboardAvoidingView style={styles.container} behavior={KAV_BEHAVIOR}>
       <GradientHeader title="وصلّي - الإدارة" subtitle="الدعم الفني · نرد عادةً خلال دقائق" />
 
+      {error && messages.length > 0 && (
+        <View style={[RTL.row, styles.offline]}>
+          <Ionicons name="cloud-offline-outline" size={16} color={COLORS.redDeep} />
+          <Text style={[styles.offlineText, RTL.text]}>تعذّر التحديث — تعرض آخر رسائل محمّلة</Text>
+        </View>
+      )}
       {loading ? (
         <View style={{ flex: 1 }}><ChatSkeleton /></View>
       ) : (
@@ -134,7 +152,11 @@ export default function SupportChatScreen() {
           renderItem={renderItem}
           ListEmptyComponent={
             <View style={{ flex: 1, justifyContent: 'center' }}>
-              <EmptyState icon="chatbubbles-outline" title="ابدأ محادثة مع فريق وصلّي" text="اكتب سؤالك أو مشكلتك وسنرد عليك بأسرع وقت — طلبات السحب أيضاً من هنا" />
+              {error ? (
+                <EmptyState icon="cloud-offline-outline" tone="red" title="تعذّر تحميل المحادثة" text="تحقّق من الاتصال ثم أعد المحاولة" actionLabel="إعادة المحاولة" actionIcon="refresh" onAction={() => { setLoading(true); load(); }} />
+              ) : (
+                <EmptyState icon="chatbubbles-outline" title="ابدأ محادثة مع فريق وصلّي" text="اكتب سؤالك أو مشكلتك وسنرد عليك بأسرع وقت — طلبات السحب أيضاً من هنا" />
+              )}
             </View>
           }
         />
@@ -159,6 +181,8 @@ export default function SupportChatScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   dayWrap: { alignItems: 'center', marginVertical: 8 },
+  offline: { gap: 6, marginHorizontal: 16, marginTop: 10, backgroundColor: COLORS.redSoft, borderRadius: RADIUS.sm, paddingHorizontal: 12, paddingVertical: 8 },
+  offlineText: { flex: 1, color: COLORS.redDeep, fontWeight: '700', fontSize: 12.5 },
   day: { fontSize: 11.5, color: COLORS.sub, backgroundColor: COLORS.card, borderRadius: RADIUS.pill, paddingHorizontal: 12, paddingVertical: 4, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.line, fontWeight: '500' },
   bubble: { maxWidth: '82%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   // RTL: رسائلي على اليمين (بداية السطر)، رسائل الإدارة على اليسار
