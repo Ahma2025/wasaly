@@ -8,7 +8,7 @@ import * as Location from 'expo-location';
 import api from '../utils/api';
 import { emit as socketEmit, isSocketConnected } from '../utils/socket';
 import { startBackgroundTracking, stopBackgroundTracking } from '../tasks/locationTask';
-import { LOCATION_UPLOAD_MS } from '../config';
+import { LOCATION_UPLOAD_MS, ANDROID_BACKGROUND_TRACKING } from '../config';
 
 const LocationContext = createContext({});
 
@@ -166,6 +166,7 @@ export function LocationProvider({ children }) {
         const r = await Location.requestForegroundPermissionsAsync();
         if (r.status !== 'granted') return false;
       }
+      if (Platform.OS === 'android' && !ANDROID_BACKGROUND_TRACKING) return false; // موقوف مؤقتاً (إقرار Google Play)
       let bg = await Location.getBackgroundPermissionsAsync();
       if (bg.status !== 'granted') {
         if (bgAskedThisSession.current) return false;

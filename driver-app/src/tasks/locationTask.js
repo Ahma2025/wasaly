@@ -1,8 +1,8 @@
 // مهمة تتبّع الموقع في الخلفية — تعمل فقط أثناء توصيل نشط (تُشغَّل/تُوقف من LocationContext)
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
-import { API_BASE, LOCATION_UPLOAD_MS } from '../config';
+import { API_BASE, LOCATION_UPLOAD_MS, ANDROID_BACKGROUND_TRACKING } from '../config';
 import { readTokenFresh } from '../utils/storage';
 
 export const LOCATION_TASK = 'wasaly-driver-location';
@@ -65,6 +65,7 @@ export async function isBackgroundTrackingRunning() {
 }
 
 export async function startBackgroundTracking() {
+  if (Platform.OS === 'android' && !ANDROID_BACKGROUND_TRACKING) return false;
   try {
     if (await isBackgroundTrackingRunning()) return true;
     await Location.startLocationUpdatesAsync(LOCATION_TASK, {

@@ -2,7 +2,7 @@
   "expo": {
     "name": "وصلّي - مندوب",
     "slug": "wasaly-driver",
-    "version": "2.6.1",
+    "version": "2.6.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -23,7 +23,6 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_LOCATION",
         "VIBRATE",
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED"
@@ -35,24 +34,33 @@
       "supportsTablet": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["location", "fetch"],
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ],
         "NSLocationWhenInUseUsageDescription": "نحتاج موقعك لعرضه للزبون أثناء توصيل الطلب",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "نحتاج موقعك في الخلفية لمتابعة التوصيل وعرض حركتك للزبون حتى وأنت تقود"
       }
     },
     "plugins": [
-      ["expo-location", {
-        "locationAlwaysAndWhenInUsePermission": "نحتاج موقعك لمتابعة التوصيلات وعرض حركتك للزبون",
-        "isIosBackgroundLocationEnabled": true,
-        "isAndroidBackgroundLocationEnabled": true,
-        "isAndroidForegroundServiceEnabled": true
-      }],
-      ["expo-notifications", {
-        "icon": "./assets/notification-icon.png",
-        "color": "#FF6B00",
-        "androidMode": "default",
-        "androidCollapsedTitle": "وصلّي - مندوب"
-      }]
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "نحتاج موقعك لمتابعة التوصيلات وعرض حركتك للزبون",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#FF6B00",
+          "androidMode": "default",
+          "androidCollapsedTitle": "وصلّي - مندوب"
+        }
+      ]
     ]
   }
 }
