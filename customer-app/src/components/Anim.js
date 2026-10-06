@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Animated, Pressable, Easing, View, ActivityIndicator } from 'react-native';
+import { Animated, Pressable, Easing, View, ActivityIndicator, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
@@ -42,15 +42,29 @@ export function PopIn({ children, delay = 0, style, from = 0.88 }) {
 }
 
 /* ضغطة بموشن (scale .96 + haptic) */
+// خصائص التخطيط لازم تكون على الـ Pressable نفسه (وإلا flex:1 وأخواته ما بتشتغل والزر بينضغط)
+const OUTER_KEYS = ['flex', 'flexGrow', 'flexShrink', 'flexBasis', 'alignSelf', 'width', 'minWidth', 'maxWidth',
+  'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight', 'marginHorizontal', 'marginVertical', 'marginStart', 'marginEnd',
+  'position', 'top', 'bottom', 'left', 'right', 'zIndex'];
+function splitStyle(style) {
+  const flat = StyleSheet.flatten(style) || {};
+  const outer = {}, inner = {};
+  Object.keys(flat).forEach(k => { (OUTER_KEYS.includes(k) ? outer : inner)[k] = flat[k]; });
+  if (outer.flex != null || outer.flexGrow != null || outer.width != null || outer.alignSelf === 'stretch') inner.flexGrow = 1;
+  if (outer.width != null) inner.width = '100%';
+  return [outer, inner];
+}
+
 export function Press({ children, onPress, onLongPress, style, scaleTo = 0.96, haptic: withHaptic = true, disabled, accessibilityLabel, accessibilityRole, hitSlop }) {
   const scale = useRef(new Animated.Value(1)).current;
   const down = () => Animated.spring(scale, { toValue: scaleTo, ...SPRING, stiffness: 320 }).start();
   const up = () => Animated.spring(scale, { toValue: 1, ...SPRING_POP }).start();
+  const [outer, inner] = splitStyle(style);
   return (
-    <Pressable onPressIn={down} onPressOut={up} disabled={disabled} hitSlop={hitSlop} onLongPress={onLongPress}
+    <Pressable style={outer} onPressIn={down} onPressOut={up} disabled={disabled} hitSlop={hitSlop} onLongPress={onLongPress}
       accessibilityLabel={accessibilityLabel} accessibilityRole={accessibilityRole}
       onPress={() => { if (withHaptic) haptic.light(); onPress && onPress(); }}>
-      <Animated.View style={[style, { transform: [{ scale }] }]}>{children}</Animated.View>
+      <Animated.View style={[inner, { transform: [{ scale }] }]}>{children}</Animated.View>
     </Pressable>
   );
 }

@@ -209,17 +209,7 @@ export default function LoginScreen() {
   const lay = (k) => (e) => { const { y, height } = e.nativeEvent.layout; L.f[k] = { y, h: height }; };
   const onFieldFocus = (k) => () => { focusedKey.current = k; if (kbRef.current) setTimeout(ensureVisible, 60); };
 
-  // ── مؤشر التبويب المنزلق ──
-  const [tabsW, setTabsW] = useState(0);
-  const tabX = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (!tabsW) return;
-    const half = (tabsW - 10) / 2;
-    // RTL: "تسجيل الدخول" على اليمين
-    if (reduce) tabX.setValue(tab === 'login' ? half : 0);
-    else Animated.spring(tabX, { toValue: tab === 'login' ? half : 0, ...SPRING }).start();
-  }, [tab, tabsW]);
-  useEffect(() => { if (tabsW) tabX.setValue(tab === 'login' ? (tabsW - 10) / 2 : 0); }, [tabsW]);
+
 
   // ── انتقال النموذج (تبويب/خطوة): انزلاق باتجاه الحركة ──
   const formV = useRef(new Animated.Value(1)).current;
@@ -578,15 +568,11 @@ export default function LoginScreen() {
               )}
             </View>
 
-            <View style={styles.tabs} onLayout={e => setTabsW(e.nativeEvent.layout.width)} accessibilityRole="tablist">
-              {tabsW > 0 && (
-                <Animated.View style={[styles.tabIndicator, { width: (tabsW - 10) / 2, transform: [{ translateX: tabX }] }]}>
-                  <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
-                </Animated.View>
-              )}
+            <View style={styles.tabs} accessibilityRole="tablist">
               {[['login', 'تسجيل الدخول'], ['register', 'حساب جديد']].map(([k, l]) => (
-                <TouchableOpacity key={k} style={styles.tab} onPress={() => switchTab(k)} activeOpacity={0.85} disabled={loading}
+                <TouchableOpacity key={k} style={[styles.tab, tab === k && styles.tabActive]} onPress={() => switchTab(k)} activeOpacity={0.85} disabled={loading}
                   accessibilityRole="tab" accessibilityState={{ selected: tab === k, disabled: loading }} accessibilityLabel={l}>
+                  {tab === k && <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[StyleSheet.absoluteFill, { borderRadius: 14 }]} />}
                   <Text style={[styles.tabText, tab === k && styles.tabTextActive]}>{l}</Text>
                 </TouchableOpacity>
               ))}
@@ -723,8 +709,8 @@ const makeStyles = (C) => StyleSheet.create({
   stepPill: { backgroundColor: C.tint, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5, borderWidth: 1, borderColor: C.tintBorder },
   stepPillTxt: { color: C.primary, fontWeight: '900', fontSize: 12.5 },
   tabs: { flexDirection: 'row-reverse', backgroundColor: C.inputBg, borderRadius: 18, padding: 5, marginBottom: 14 },
-  tabIndicator: { position: 'absolute', top: 5, bottom: 5, left: 5, borderRadius: 14, overflow: 'hidden', ...C.shadow.glow },
-  tab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 14, minHeight: 44, justifyContent: 'center' },
+  tab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 14, minHeight: 44, justifyContent: 'center', overflow: 'hidden' },
+  tabActive: { ...C.shadow.glow },
   tabText: { fontWeight: '800', color: C.gray, fontSize: 14 },
   tabTextActive: { color: '#FFF' },
   progTrack: { height: 5, borderRadius: 3, overflow: 'hidden', marginBottom: 16, flexDirection: 'row-reverse' },

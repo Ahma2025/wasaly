@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, Animated, Pressable, Easing } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, Animated, Pressable, Easing, I18nManager } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -7,7 +7,7 @@ import api from '../utils/api';
 import GradientHeader from '../components/GradientHeader';
 import { useTabBarOffset } from '../components/FloatingTabBar';
 import { COLORS, GRADIENTS, SHADOW, RTL, RADIUS } from '../theme';
-import { FadeIn, Skeleton, Press, CountUp, AnimatedBar, EmptyState, haptic, isReducedMotion } from '../components/Anim';
+import { FadeIn, PopIn, Skeleton, Press, CountUp, AnimatedBar, EmptyState, haptic, isReducedMotion } from '../components/Anim';
 import { readCache, writeCache } from '../utils/cache';
 import { money, num, fmtDay } from '../utils/format';
 
@@ -17,30 +17,18 @@ const CHART_DAYS = 14;
 
 // ───────── مبدّل الفترة بمؤشر منزلق ─────────
 function Segmented({ value, onChange }) {
-  const [w, setW] = useState(0);
-  const n = PERIODS.length;
-  const segW = w > 0 ? (w - 10) / n : 0;
-  const idx = Math.max(0, PERIODS.findIndex(p => p.id === value));
-  const x = useRef(new Animated.Value(0)).current;
-  const ready = useRef(false);
-  useEffect(() => {
-    if (!segW) return;
-    const to = (n - 1 - idx) * segW; // row-reverse: الأول يميناً
-    if (!ready.current || isReducedMotion()) { x.setValue(to); ready.current = true; return; }
-    Animated.spring(x, { toValue: to, useNativeDriver: true, damping: 18, stiffness: 220 }).start();
-  }, [idx, segW, n, x]);
   return (
-    <View style={styles.seg} onLayout={(e) => setW(e.nativeEvent.layout.width)} accessibilityRole="tablist">
-      {segW > 0 && (
-        <Animated.View pointerEvents="none" style={[styles.segIndicator, { width: segW, transform: [{ translateX: x }] }]}>
-          <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.segPill, SHADOW.glow]} />
-        </Animated.View>
-      )}
+    <View style={[styles.seg, { flexDirection: I18nManager.isRTL ? 'row' : 'row-reverse' }]} accessibilityRole="tablist">
       {PERIODS.map(p => {
         const on = value === p.id;
         return (
           <Pressable key={p.id} style={styles.segBtn} onPress={() => { if (!on) { haptic.select(); onChange(p.id); } }}
             accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={p.label}>
+            {on && (
+              <PopIn from={0.85} style={StyleSheet.absoluteFill}>
+                <LinearGradient colors={GRADIENTS.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.segPill, SHADOW.glow]} />
+              </PopIn>
+            )}
             <Text style={[styles.segText, on && { color: '#FFF', fontWeight: '900' }]}>{p.label}</Text>
           </Pressable>
         );

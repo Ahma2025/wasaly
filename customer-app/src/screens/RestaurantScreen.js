@@ -416,10 +416,6 @@ export default function RestaurantScreen() {
     <ScrollView ref={ref} horizontal showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.tabsContent} accessibilityRole="tablist">
       <View style={{ flexDirection: 'row-reverse' }}>
-        {/* المؤشر: حبّة متدرّجة خلف التبويب النشط */}
-        <Animated.View pointerEvents="none" style={[styles.indicator, { width: indW, transform: [{ translateX: indX }] }]}>
-          <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
-        </Animated.View>
         {menu.map((cat, idx) => {
           const on = activeCategory === idx;
           const has = sections[idx]?.items.length > 0;
@@ -429,7 +425,8 @@ export default function RestaurantScreen() {
                 tabLayouts.current[idx] = e.nativeEvent.layout;
                 if (idx === activeCategory) moveIndicator(idx, false);
               }}
-              style={[styles.catTab, !has && { opacity: 0.35 }]} accessibilityRole="tab" accessibilityState={{ selected: on, disabled: !has }}>
+              style={[styles.catTab, on && styles.catTabOn, !has && { opacity: 0.35 }]} accessibilityRole="tab" accessibilityState={{ selected: on, disabled: !has }}>
+              {on && <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[StyleSheet.absoluteFill, { borderRadius: 19 }]} />}
               <Text style={[styles.catTabText, on && styles.catTabTextActive]} numberOfLines={1}>{cat.name_ar}</Text>
             </TouchableOpacity>
           );
@@ -725,7 +722,7 @@ const makeStyles = (C) => StyleSheet.create({
   catTab: { paddingHorizontal: 16, height: 38, justifyContent: 'center', borderRadius: 19, zIndex: 2 },
   catTabText: { fontSize: 13.5, color: C.sub, fontWeight: '700' },
   catTabTextActive: { color: '#FFF', fontWeight: '800' },
-  indicator: { position: 'absolute', left: 0, height: 38, borderRadius: 19, overflow: 'hidden', zIndex: 1, ...C.shadow.glow },
+  catTabOn: { ...C.shadow.glow },
   menuSection: { paddingHorizontal: 16, paddingTop: 18 },
   catTitleRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginBottom: 12 },
   catTitle: { fontSize: 19, fontWeight: '900', color: C.text, textAlign: 'right' },
