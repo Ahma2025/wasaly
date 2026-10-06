@@ -26,6 +26,7 @@ import CartScreen from './src/screens/CartScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import RestaurantScreen from './src/screens/RestaurantScreen';
 import OrderTrackingScreen from './src/screens/OrderTrackingScreen';
+import GroupTrackingScreen from './src/screens/GroupTrackingScreen';
 import OrdersHistoryScreen from './src/screens/OrdersHistoryScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 import AddAddressScreen from './src/screens/AddAddressScreen';
@@ -140,6 +141,7 @@ function AppNavigator() {
           <Stack.Screen name="Main" component={MainTabs} options={{ animation: 'fade' }} />
           <Stack.Screen name="Restaurant" component={RestaurantScreen} />
           <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
+          <Stack.Screen name="GroupTracking" component={GroupTrackingScreen} />
           <Stack.Screen name="Notifications" component={NotificationsScreen} />
           <Stack.Screen name="Addresses" component={AddressesScreen} />
           <Stack.Screen name="AddAddress" component={AddAddressScreen} />
@@ -170,6 +172,8 @@ function NotificationRouter({ navigationRef, navReady }) {
     if (id) handled.current.add(id);
     const data = notificationData(response);
     if (data?.type === 'cart_reminder') { pending.current = { name: 'Main', params: { screen: 'سلتي' } }; }
+    // طلب مجمّع (عدة مطاعم) → شاشة تتبّع المجموعة
+    else if (data?.group_id && data.group_id !== 'null' && !data.code) { pending.current = { name: 'GroupTracking', params: { groupId: data.group_id } }; }
     else if (data?.order_id) { pending.current = { name: 'OrderTracking', params: { orderId: data.order_id } }; }
     flush();
   };

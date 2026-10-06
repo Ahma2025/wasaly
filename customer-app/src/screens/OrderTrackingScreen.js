@@ -135,13 +135,15 @@ export default function OrderTrackingScreen() {
     try {
       const data = await api.get(`/orders/${id}`);
       const o = data.data || data;
+      // جزء من طلب مجمّع → شاشة تتبّع الطلب المجمّع (التتبّع والإلغاء والدفع على مستوى المجموعة)
+      if (o?.group_id) { navigation.replace('GroupTracking', { groupId: o.group_id, fromCheckout }); return; }
       setOrder(o);
       setLoadError('');
       if (o.driver_lat && o.driver_lng) setDriverLoc({ lat: parseFloat(o.driver_lat), lng: parseFloat(o.driver_lng) });
     } catch (e) {
       setLoadError(e?.message === 'Network error' ? 'تعذّر الاتصال — تأكد من الإنترنت' : (e?.message || 'تعذّر تحميل الطلب'));
     } finally { setLoading(false); }
-  }, [id]);
+  }, [id, navigation, fromCheckout]);
 
   // تحديث عند كل رجوع للشاشة (مثلاً بعد التقييم) + كل 30 ثانية احتياطاً
   useFocusEffect(useCallback(() => {
@@ -547,7 +549,7 @@ function TimelineStep({ step, idx, effIdx, last, isDelivered, C, styles }) {
 }
 
 /* شاشة احتفال قصيرة بعد إتمام الطلب */
-function CheckoutSuccess({ onDone, C, orderNo }) {
+export function CheckoutSuccess({ onDone, C, orderNo }) {
   const v = useRef(new Animated.Value(0)).current;
   const check = useRef(new Animated.Value(0)).current;
   useEffect(() => {

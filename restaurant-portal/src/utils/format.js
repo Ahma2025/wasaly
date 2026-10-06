@@ -89,6 +89,33 @@ export function parseOptions(it) {
 export const optionName = (o) => (typeof o === 'string' ? o : (o?.name_ar || o?.name || o?.label || ''));
 export const optionPrice = (o) => (typeof o === 'object' && o ? num(o.price ?? o.extra_price) : 0);
 
+// ─── الطلب المجمّع (سائق واحد يجمع من عدة مطاعم) ───
+export const isGroupOrder = (o) => !!(o && (o.group_id != null || o.is_group === true || o.is_group === 'true'));
+export const groupStops = (o) => parseInt(o?.group_stops_count ?? o?.stops_count ?? o?.stops_total) || 0;
+// «طلب مجمّع (مطعم 2 من 3)» — رقم المطعم = ترتيب الاستلام
+export function groupLabel(o) {
+  if (!isGroupOrder(o)) return '';
+  const n = groupStops(o);
+  const x = parseInt(o?.stop_sequence) || 0;
+  if (x && n) return `طلب مجمّع (مطعم ${x} من ${n})`;
+  if (n) return `طلب مجمّع (${n} مطاعم)`;
+  return 'طلب مجمّع';
+}
+export const GROUP_STATUS_LABELS = {
+  pending: 'بانتظار المطاعم', confirmed: 'نبحث عن سائق', picking_up: 'السائق يجمع الطلبات',
+  on_the_way: 'في الطريق', delivered: 'تم التوصيل', cancelled: 'ملغي',
+};
+
+// المسافة بالكيلومتر بين نقطتين (Haversine)
+export function distanceKm(aLat, aLng, bLat, bLng) {
+  const [a1, b1, a2, b2] = [aLat, aLng, bLat, bLng].map(Number);
+  if (![a1, b1, a2, b2].every(Number.isFinite)) return null;
+  const R = 6371, toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(a2 - a1), dLng = toRad(b2 - b1);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a1)) * Math.cos(toRad(a2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 // مفتاح تاريخ محلي YYYY-MM-DD
 export const dayKey = (d) => {
   const x = new Date(d);

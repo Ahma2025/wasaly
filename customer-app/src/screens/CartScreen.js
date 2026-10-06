@@ -22,6 +22,25 @@ import { FREE_DELIVERY_THRESHOLD, POINT_VALUE, DEFAULT_DELIVERY_FEE } from '../c
 const money = (v) => `${(Number(v) || 0).toFixed(2)}₪`;
 const num = (v, d = 0) => { const n = parseFloat(v); return Number.isFinite(n) ? n : d; };
 const addrLabel = (a) => a?.label || (a?.title && a.title !== a.address ? a.title : '') || 'عنوان';
+const sameId = (a, b) => a != null && b != null && String(a) === String(b);
+
+// شكل الأصناف المرسَل للسيرفر (مشترك بين الطلب العادي والمجمّع)
+const toOrderItems = (list) => list.map(i => ({
+  id: i.id,
+  quantity: i.quantity,
+  notes: i.notes || '',
+  // ids حتى يسعّر السيرفر الإضافات من قاعدة البيانات (السعر للتوافق فقط)
+  options: (i.addons || i.selectedOptions || []).map(a => ({
+    ...(a.id != null ? { id: a.id } : {}),
+    ...(a.option_id != null ? { option_id: a.option_id } : {}),
+    name: a.name,
+    price: num(a.price),
+    ...(a.group ? { group: a.group } : {}),
+  })),
+}));
+
+// أخطاء الطلب المجمّع اللي ما إلها علاقة بمطعم معيّن ونعرضها بمكانها الخاص (الدفع/الاستلام)
+const HIDDEN_GENERAL_CODES = ['card_not_allowed', 'pickup_not_allowed'];
 
 export default function CartScreen() {
   const navigation = useNavigation();
@@ -29,12 +48,20 @@ export default function CartScreen() {
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   const headerTop = useHeaderTop(10);
   const tabInset = useTabBarInset();
-  const { items, total, count, removeItem, incrementItem, clearCart, restaurantId, restaurantName, updateItemNote, groupOrder } = useCart();
+  const {
+    items, total, count, removeItem, incrementItem, clearCart, restaurantId, restaurantName, updateItemNote, groupOrder,
+    carts = [], removeRestaurant, multiConfig = {}, multiEnabled, maxRestaurants = 1, refreshMultiConfig, updateRestaurantInfo,
+  } = useCart();
+  const multi = carts.length > 1; // طلب مجمّع: أكثر من مطعم بسائق واحد
 
-  const [deliveryType, setDeliveryTypeRaw] = useState('delivery'); // 'delivery' | 'pickup'
+  const [deliveryTypeSel, setDeliveryTypeRaw] = useState('delivery'); // 'delivery' | 'pickup'
+  const deliveryType = multi ? 'delivery' : deliveryTypeSel;          // المجمّع للتوصيل فقط
   const [addresses, setAddresses] = useState([]);
   const [selectedAddressId, setSelectedAddressId] = useState(null);
-  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [paymentMethodSel, setPaymentMethod] = useState('cash');
+  const paymentMethod = multi ? 'cash' : paymentMethodSel;            // المجمّع كاش فقط (+ المحفظة)
+  const [restNotes, setRestNotes] = useState({});                    // ملاحظة لكل مطعم (المجمّع)
+  const [createErrors, setCreateErrors] = useState([]);              // أخطاء من POST /orders/multi
   const [notes, setNotes] = useState('');
   const [tip, setTip] = useState(0);
   const [leaveAtDoor, setLeaveAtDoor] = useState(false);
@@ -57,6 +84,7 @@ export default function CartScreen() {
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState('');
   const quoteSupported = useRef(true);
+  const multiQuoteSupported = useRef(true);
   const quoteSeq = useRef(0);
 
   const selectedAddress = addresses.find(a => String(a.id) === String(selectedAddressId)) || null;
@@ -104,46 +132,45 @@ export default function CartScreen() {
 
   useFocusEffect(useCallback(() => {
     refreshProfile(); fetchAddresses(); checkFirstOrder();
-  }, [refreshProfile, fetchAddresses, checkFirstOrder]));
+    if (refreshMultiConfig) refreshMultiConfig();
+  }, [refreshProfile, fetchAddresses, checkFirstOrder, refreshMultiConfig]));
 
-  // ── معلومات المطعم تُجلب من جديد كلما تغيّر مطعم السلة ──
+  // ── معلومات كل مطاعم السلة (مفتوح/حد أدنى/لوجو) تُجلب من جديد كلما تغيّرت المطاعم ──
+  const [restInfos, setRestInfos] = useState({});
+  const ridsKey = carts.map(c => c.restaurant?.id).join(',');
   useEffect(() => {
     let alive = true;
-    setRestaurantInfo(null);
-    if (!restaurantId) return;
-    (async () => {
-      const cached = await readCache('rest_' + restaurantId);
-      if (alive && cached?.restaurant) setRestaurantInfo(cached.restaurant);
+    carts.forEach(async (c) => {
+      const rid = c.restaurant?.id;
+      if (rid == null) return;
+      const cached = await readCache('rest_' + rid);
+      if (alive && cached?.restaurant) setRestInfos(p => (p[rid] ? p : { ...p, [rid]: cached.restaurant }));
       try {
-        const data = await api.get(`/restaurants/${restaurantId}`);
-        if (alive) setRestaurantInfo(data.data);
+        const data = await api.get(`/restaurants/${rid}`);
+        if (alive && data?.data) {
+          setRestInfos(p => ({ ...p, [rid]: data.data }));
+          if (updateRestaurantInfo) updateRestaurantInfo(rid, data.data);
+        }
       } catch {}
-    })();
+    });
     return () => { alive = false; };
-  }, [restaurantId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ridsKey]);
+  useEffect(() => { setRestaurantInfo(restaurantId != null ? (restInfos[restaurantId] || null) : null); }, [restaurantId, restInfos]);
 
   // لو تفرّغت السلة نصفّر الاختيارات المؤقتة
   useEffect(() => {
-    if (items.length === 0) { setQuote(null); setCouponCode(null); setLocalCoupon({ discount: 0, error: '' }); setUsePoints(false); setUseWallet(false); }
+    if (items.length === 0) { setQuote(null); setCouponCode(null); setLocalCoupon({ discount: 0, error: '' }); setUsePoints(false); setUseWallet(false); setRestNotes({}); setCreateErrors([]); }
   }, [items.length]);
+
+  // التحويل بين عادي ↔ مجمّع: تسعيرة النوع الآخر ما بتنفع
+  useEffect(() => { setQuote(null); setQuoteError(''); setCreateErrors([]); }, [multi]);
 
   // ── جسم الطلب (نفس الشكل لـ /orders/quote و /orders) ──
   const buildBody = useCallback(() => {
     const body = {
       restaurant_id: restaurantId,
-      items: items.map(i => ({
-        id: i.id,
-        quantity: i.quantity,
-        notes: i.notes || '',
-        // ids حتى يسعّر السيرفر الإضافات من قاعدة البيانات (السعر للتوافق فقط)
-        options: (i.addons || i.selectedOptions || []).map(a => ({
-          ...(a.id != null ? { id: a.id } : {}),
-          ...(a.option_id != null ? { option_id: a.option_id } : {}),
-          name: a.name,
-          price: num(a.price),
-          ...(a.group ? { group: a.group } : {}),
-        })),
-      })),
+      items: toOrderItems(items),
       payment_method: paymentMethod,
       coupon_code: couponCode || undefined,
       redeem_points: usePoints ? loyaltyPoints : 0,
@@ -161,27 +188,56 @@ export default function CartScreen() {
     return body;
   }, [restaurantId, items, paymentMethod, couponCode, usePoints, loyaltyPoints, useWallet, notes, deliveryType, leaveAtDoor, tip, selectedAddress]);
 
+  // ── جسم الطلب المجمّع (نفس الشكل لـ /orders/multi/quote و /orders/multi) ──
+  const buildMultiBody = useCallback(() => {
+    const body = {
+      carts: carts.map(c => {
+        const n = (restNotes[c.restaurant.id] || '').trim();
+        return { restaurant_id: c.restaurant.id, items: toOrderItems(c.items), ...(n ? { notes: n } : {}) };
+      }),
+      order_type: 'delivery',
+      payment_method: 'cash',
+      coupon_code: couponCode || undefined,
+      redeem_points: usePoints ? loyaltyPoints : 0,
+      use_wallet: useWallet,
+      notes: [notes.trim(), leaveAtDoor ? '🚪 اترك الطلب على الباب' : ''].filter(Boolean).join(' — '),
+      tip: num(tip),
+    };
+    if (selectedAddress) {
+      body.address_id = selectedAddress.id;
+      body.delivery_address = selectedAddress.address;
+      body.delivery_lat = selectedAddress.lat;
+      body.delivery_lng = selectedAddress.lng;
+    }
+    return body;
+  }, [carts, restNotes, couponCode, usePoints, loyaltyPoints, useWallet, notes, leaveAtDoor, tip, selectedAddress]);
+
   const quoteKey = JSON.stringify([
-    items.map(i => [i._key, i.quantity]), restaurantId, deliveryType, selectedAddress?.id, selectedAddress?.lat, selectedAddress?.lng,
+    multi, items.map(i => [i._key, i.quantity]), restaurantId, deliveryType, selectedAddress?.id, selectedAddress?.lat, selectedAddress?.lng,
     couponCode, deliveryType === 'delivery' ? tip : 0, usePoints, loyaltyPoints, useWallet, walletBalance,
   ]);
 
-  // ── POST /orders/quote (مؤجّل) عند أي تغيير مؤثر على السعر ──
+  // ── POST /orders/quote أو /orders/multi/quote (مؤجّل) عند أي تغيير مؤثر على السعر ──
   useEffect(() => {
-    if (!items.length || !restaurantId || !quoteSupported.current) return;
-    if (deliveryType === 'delivery' && !selectedAddress) { setQuote(null); return; }
+    setCreateErrors([]);
+    const supported = multi ? multiQuoteSupported.current : quoteSupported.current;
+    if (!items.length || !restaurantId || !supported) { ++quoteSeq.current; setQuoteLoading(false); return; }
+    if (deliveryType === 'delivery' && !selectedAddress) { ++quoteSeq.current; setQuoteLoading(false); setQuote(null); return; }
     const seq = ++quoteSeq.current;
+    const isMultiReq = multi;
     setQuoteLoading(true);
     const t = setTimeout(async () => {
       try {
-        const r = await api.post('/orders/quote', buildBody());
+        const r = await api.post(isMultiReq ? '/orders/multi/quote' : '/orders/quote', isMultiReq ? buildMultiBody() : buildBody());
         if (seq !== quoteSeq.current) return;
-        if (r?.data && typeof r.data === 'object' && r.data.total != null) { setQuote(r.data); setQuoteError(''); }
+        if (r?.data && typeof r.data === 'object' && r.data.total != null) { setQuote({ ...r.data, _multi: isMultiReq }); setQuoteError(''); }
         else { setQuote(null); }
       } catch (e) {
         if (seq !== quoteSeq.current) return;
-        if (e?.status === 404) quoteSupported.current = false; // سيرفر قديم → حساب محلي
-        else setQuoteError(e?.status && e.status < 500 ? (e.message || '') : '');
+        if (e?.status === 404) {
+          if (isMultiReq) { multiQuoteSupported.current = false; setQuoteError('الطلب من أكثر من مطعم غير متاح حالياً — خلّي مطعم واحد بالسلة'); }
+          else quoteSupported.current = false; // سيرفر قديم → حساب محلي
+        } else setQuoteError(e?.status && e.status < 500 ? (e.message || '') : '');
         setQuote(null);
       } finally {
         if (seq === quoteSeq.current) setQuoteLoading(false);
@@ -190,7 +246,9 @@ export default function CartScreen() {
     return () => clearTimeout(t);
   }, [quoteKey]);
 
-  const usingLocal = !quote;
+  // التسعيرة صالحة فقط لنفس نوع السلة (عادي/مجمّع)
+  const activeQuote = quote && !!quote._multi === multi ? quote : null;
+  const usingLocal = !activeQuote;
 
   // ── احتياطي: رسوم التوصيل من إحداثيات العنوان المختار (مش GPS الهاتف) ──
   useEffect(() => {
@@ -222,10 +280,37 @@ export default function CartScreen() {
 
   // ── الأرقام المعروضة: من السيرفر إن توفرت، وإلا حساب محلي مطابق لمنطق السيرفر ──
   const summary = useMemo(() => {
-    if (quote) {
-      const q = quote;
+    if (activeQuote && multi) {
+      const q = activeQuote;
+      return {
+        subtotal: num(q.subtotal, total),
+        deliveryFee: num(q.delivery_fee),
+        baseFee: num(q.base_fee),
+        extraStopsFee: num(q.extra_stops_fee),
+        extraStopUnit: num(q.extra_stop_fee, num(multiConfig.extra_stop_fee, 3)),
+        stops: num(q.stops_count, carts.length),
+        freeDelivery: !!q.free_delivery,
+        firstOrderDiscount: num(q.first_order_discount),
+        couponDiscount: num(q.coupon_discount),
+        couponError: q.coupon_error || '',
+        pointsValue: num(q.points_value),
+        tip: num(q.tip),
+        walletUsed: num(q.wallet_used),
+        total: num(q.total),
+        minOrder: 0,
+        meetsMin: true,
+        distanceKm: q.distance_km,
+        valid: q.valid !== false,
+        errors: Array.isArray(q.errors) ? q.errors : [],
+        restaurants: Array.isArray(q.restaurants) ? q.restaurants : [],
+        source: 'server',
+      };
+    }
+    if (activeQuote) {
+      const q = activeQuote;
       const minOrder = num(q.min_order, num(restaurantInfo?.min_order));
       return {
+        extraStopsFee: 0, valid: true, errors: [], restaurants: [],
         subtotal: num(q.subtotal, total),
         deliveryFee: deliveryType === 'delivery' ? num(q.delivery_fee) : 0,
         freeDelivery: !!q.free_delivery,
@@ -248,23 +333,63 @@ export default function CartScreen() {
     const deliveryFee = isDel ? (freeDelivery ? 0 : num(localFee, DEFAULT_DELIVERY_FEE)) : 0;
     const firstOrderDiscount = isFirstOrder ? Math.min(10, subtotal * 0.15) : 0;
     const couponDiscount = couponCode ? localCoupon.discount : 0;
-    const discount = couponDiscount + firstOrderDiscount;
-    const pointsValue = usePoints ? Math.min(loyaltyPoints * POINT_VALUE, Math.max(0, subtotal + deliveryFee - discount)) : 0;
+    const discount = multi ? Math.min(subtotal, couponDiscount + firstOrderDiscount) : couponDiscount + firstOrderDiscount;
+    // المجمّع: رسوم توقف إضافي لكل مطعم بعد الأول (التوصيل المجاني ما بيلغيها)
+    const extraStopUnit = num(multiConfig.extra_stop_fee, 3);
+    const extraStopsFee = multi ? extraStopUnit * (carts.length - 1) : 0;
+    const pointsValue = usePoints ? Math.min(loyaltyPoints * POINT_VALUE, Math.max(0, subtotal + deliveryFee + extraStopsFee - discount)) : 0;
     const tipAmt = isDel ? num(tip) : 0;
-    const due = Math.max(0, subtotal + deliveryFee - discount - pointsValue) + tipAmt;
+    const due = Math.max(0, subtotal + deliveryFee + extraStopsFee - discount - pointsValue) + tipAmt;
     const walletUsed = useWallet ? Math.min(walletBalance, due) : 0;
-    const minOrder = num(restaurantInfo?.min_order);
+    const minOrder = multi ? 0 : num(restaurantInfo?.min_order);
     return {
-      subtotal, deliveryFee, freeDelivery, firstOrderDiscount, couponDiscount, couponError: couponCode ? localCoupon.error : '',
+      subtotal, deliveryFee, baseFee: deliveryFee, extraStopsFee, extraStopUnit, stops: carts.length, freeDelivery, firstOrderDiscount, couponDiscount, couponError: couponCode ? localCoupon.error : '',
       pointsValue, tip: tipAmt, walletUsed, total: Math.max(0, due - walletUsed), minOrder, meetsMin: subtotal >= minOrder, source: 'local',
+      valid: true, errors: [], restaurants: [],
     };
-  }, [quote, total, deliveryType, localFee, isFirstOrder, couponCode, localCoupon, usePoints, loyaltyPoints, tip, useWallet, walletBalance, restaurantInfo?.min_order]);
+  }, [activeQuote, multi, carts.length, multiConfig.extra_stop_fee, total, deliveryType, localFee, isFirstOrder, couponCode, localCoupon, usePoints, loyaltyPoints, tip, useWallet, walletBalance, restaurantInfo?.min_order]);
+
+  // ── المجمّع: حالة كل مطعم (حد أدنى/مغلق/أخطاء التسعيرة) ──
+  const allErrors = useMemo(() => [...(summary.errors || []), ...createErrors], [summary.errors, createErrors]);
+  const restRows = useMemo(() => carts.map(c => {
+    const rid = c.restaurant.id;
+    const info = restInfos[rid] || {};
+    const q = (summary.restaurants || []).find(r => sameId(r.restaurant_id, rid));
+    const localSub = c.items.reduce((s, i) => s + linePrice(i) * i.quantity, 0);
+    const subtotal = q ? num(q.subtotal, localSub) : localSub;
+    const minOrder = num(q?.min_order, num(info.min_order, num(c.restaurant.min_order)));
+    const meetsMin = q?.meets_min_order != null && !quoteLoading ? !!q.meets_min_order : subtotal >= minOrder;
+    const errs = allErrors.filter(e => sameId(e?.restaurant_id, rid));
+    // تكرار الرسائل (من التسعيرة ومن الإنشاء) يُحذف
+    const errors = errs.filter((e, i) => errs.findIndex(x => x?.message === e?.message) === i);
+    return {
+      rid, cart: c, info,
+      name: info.name_ar || c.restaurant.name_ar || 'مطعم',
+      logo: info.logo || c.restaurant.logo,
+      count: c.items.reduce((s, i) => s + i.quantity, 0),
+      subtotal, minOrder, meetsMin,
+      closed: info.is_open === false,
+      sequence: q?.sequence,
+      distanceKm: q?.distance_km,
+      errors,
+      tooFar: errors.some(e => e?.code === 'too_far'),
+    };
+  }), [carts, restInfos, summary.restaurants, allErrors, quoteLoading]);
+  const generalErrors = useMemo(() => {
+    const list = allErrors.filter(e => e && e.restaurant_id == null && !HIDDEN_GENERAL_CODES.includes(e.code));
+    return list.filter((e, i) => list.findIndex(x => x.message === e.message) === i);
+  }, [allErrors]);
+  const multiBlocked = multi && (!multiEnabled || carts.length > maxRestaurants || !multiQuoteSupported.current);
+  const multiProblem = multi && (
+    restRows.some(r => !r.meetsMin && r.minOrder > 0) || restRows.some(r => r.closed) || summary.valid === false || createErrors.length > 0
+  );
 
   const calculating = quoteLoading || (usingLocal && (feeLoading || couponChecking));
   const needsAddress = deliveryType === 'delivery' && !selectedAddress;
-  const belowMin = !summary.meetsMin && summary.minOrder > 0;
-  const restaurantClosed = restaurantInfo && restaurantInfo.is_open === false;
-  const canOrder = !placing && !belowMin && !needsAddress && !restaurantClosed && items.length > 0;
+  const belowMin = !multi && !summary.meetsMin && summary.minOrder > 0;
+  const restaurantClosed = !multi && restaurantInfo && restaurantInfo.is_open === false;
+  const canOrder = !placing && !belowMin && !needsAddress && !restaurantClosed && items.length > 0
+    && !(multi && (multiBlocked || multiProblem || quoteLoading));
 
   const applyCoupon = () => {
     const code = couponInput.trim().toUpperCase();
@@ -281,9 +406,69 @@ export default function CartScreen() {
     ]);
   };
 
+  const confirmRemoveRestaurant = (row) => {
+    haptic.warning();
+    Alert.alert('حذف المطعم من السلة', `بدك تحذف كل أصناف «${row.name}» (${row.count} صنف) من السلة؟`, [
+      { text: 'إلغاء', style: 'cancel' },
+      { text: 'احذف', style: 'destructive', onPress: () => { removeRestaurant && removeRestaurant(row.rid); setRestNotes(p => { const n = { ...p }; delete n[row.rid]; return n; }); } },
+    ]);
+  };
+
+  // ── إنشاء الطلب المجمّع: POST /orders/multi ──
+  const placeMultiOrder = async () => {
+    if (multiBlocked) return Alert.alert('الطلب المجمّع', !multiEnabled || !multiQuoteSupported.current
+      ? 'الطلب من أكثر من مطعم غير متاح حالياً — خلّي مطعم واحد بالسلة'
+      : `بتقدر تطلب من ${maxRestaurants} مطاعم كحد أقصى — احذف مطعم من السلة`);
+    const bad = restRows.find(r => r.closed || (!r.meetsMin && r.minOrder > 0) || r.errors.length);
+    if (bad) {
+      const msg = bad.errors[0]?.message || (bad.closed ? `«${bad.name}» مغلق حالياً، احذفه من السلة أو اطلب لاحقاً` : `الحد الأدنى للطلب من «${bad.name}» هو ${money(bad.minOrder)}`);
+      return Alert.alert('راجع سلتك', msg);
+    }
+    if (generalErrors.length) return Alert.alert('راجع سلتك', generalErrors[0].message || 'تعذّر إتمام الطلب');
+    submittingRef.current = true;
+    setPlacing(true);
+    try {
+      // العقد: إعادة فحص الميزة قبل الدفع مباشرة
+      if (refreshMultiConfig) {
+        const fresh = await refreshMultiConfig();
+        if (fresh && (!fresh.enabled || carts.length > fresh.max_restaurants)) {
+          Alert.alert('الطلب المجمّع', !fresh.enabled
+            ? 'الطلب من أكثر من مطعم غير متاح حالياً — خلّي مطعم واحد بالسلة'
+            : `بتقدر تطلب من ${fresh.max_restaurants} مطاعم كحد أقصى — احذف مطعم من السلة`);
+          return;
+        }
+      }
+      const r = await api.post('/orders/multi', buildMultiBody());
+      const g = r?.data || {};
+      const groupId = g.id || g.group_id;
+      clearCart();
+      setNotes(''); setTip(0); setLeaveAtDoor(false); setCouponCode(null); setCouponInput(''); setUsePoints(false); setUseWallet(false); setRestNotes({});
+      refreshProfile();
+      if (r?.coupon_error || g.coupon_error) Alert.alert('ملاحظة عن الكوبون', r.coupon_error || g.coupon_error);
+      if (groupId) navigation.navigate('GroupTracking', { groupId, fromCheckout: true });
+      else navigation.navigate('Main', { screen: 'طلباتي' });
+    } catch (e) {
+      if (e?.status === 409) {
+        Alert.alert('تغيّر رصيدك', `${e.message || 'تغيّرت بيانات الطلب'} — حدّثنا الأسعار، راجعها وأكّد من جديد.`);
+        refreshProfile();
+        setQuote(null);
+      } else if (Array.isArray(e?.errors) && e.errors.length) {
+        setCreateErrors(e.errors);
+        haptic.error && haptic.error();
+        Alert.alert('راجع سلتك', e.message || e.errors[0]?.message || 'تعذّر إتمام الطلب');
+      } else {
+        Alert.alert('تعذّر إتمام الطلب', e?.message || 'فشل في إتمام الطلب، حاول مرة أخرى');
+      }
+    } finally {
+      setPlacing(false);
+      submittingRef.current = false;
+    }
+  };
+
   const placeOrder = async () => {
     if (submittingRef.current) return;
     if (needsAddress) return Alert.alert('عنوان التوصيل', 'الرجاء اختيار أو إضافة عنوان التوصيل');
+    if (multi) return placeMultiOrder();
     if (belowMin) return Alert.alert('الحد الأدنى للطلب', `الحد الأدنى لهذا المطعم ${money(summary.minOrder)}`);
     if (restaurantClosed) return Alert.alert('المطعم مغلق', 'المطعم مغلق حالياً، جرّب لاحقاً');
     if (items.length === 0) return;
@@ -344,7 +529,12 @@ export default function CartScreen() {
           <IconButton icon="arrow-forward" onPress={goHome} label="رجوع للرئيسية" onGradient />
           <View style={{ flex: 1, alignItems: 'center' }}>
             <Text style={styles.title}>سلّتي</Text>
-            {!!restaurantName && (
+            {multi ? (
+              <View style={styles.restPill}>
+                <Ionicons name="git-network" size={12} color="#FFF" />
+                <Text style={styles.headerSub} numberOfLines={1}>طلب مجمّع · {carts.length} مطاعم · {count} صنف</Text>
+              </View>
+            ) : !!restaurantName && (
               <View style={styles.restPill}>
                 <Ionicons name="storefront" size={12} color="#FFF" />
                 <Text style={styles.headerSub} numberOfLines={1}>{restaurantName} · {count} صنف</Text>
@@ -375,7 +565,47 @@ export default function CartScreen() {
           </FadeIn>
         )}
 
-        {/* الأصناف */}
+        {/* الطلب المجمّع: شرح + تنبيه لو الميزة متوقفة */}
+        {multi && (
+          <FadeIn style={styles.multiHero}>
+            <LinearGradient colors={COLORS.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+            <LinearGradient colors={COLORS.gradients.sheen} style={styles.multiSheen} pointerEvents="none" />
+            <View style={styles.multiHeroIcon}><Ionicons name="bicycle" size={22} color="#FFF" /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.multiHeroTitle}>طلب مجمّع من {carts.length} مطاعم</Text>
+              <Text style={styles.multiHeroSub}>سائق واحد بيستلم من كل المطاعم وبيوصلك مرة وحدة 🛵</Text>
+            </View>
+          </FadeIn>
+        )}
+        {multiBlocked && (
+          <FadeIn style={[styles.infoBanner, { backgroundColor: COLORS.dangerBg, borderColor: COLORS.dangerBorder }]}>
+            <Ionicons name="alert-circle" size={18} color={COLORS.red} />
+            <Text style={[styles.infoBannerTxt, { color: COLORS.red }]}>
+              {!multiEnabled || !multiQuoteSupported.current
+                ? 'الطلب من أكثر من مطعم غير متاح حالياً — احذف المطاعم الإضافية وخلّي مطعم واحد'
+                : `بتقدر تطلب من ${maxRestaurants} مطاعم كحد أقصى بالطلب الواحد — احذف مطعم من السلة`}
+            </Text>
+          </FadeIn>
+        )}
+
+        {/* الأصناف — المجمّع: قسم لكل مطعم */}
+        {multi && restRows.map((row, ri) => (
+          <RestaurantSection key={String(row.rid)} row={row} index={ri} C={COLORS} styles={styles}
+            note={restNotes[row.rid] || ''} onNote={(t) => setRestNotes(p => ({ ...p, [row.rid]: t }))}
+            onRemove={() => confirmRemoveRestaurant(row)}
+            onAddMore={() => navigation.navigate('Restaurant', { restaurantId: row.rid })}
+            onInc={(k) => { haptic.select(); incrementItem(k); }}
+            onDec={(k) => { haptic.select(); removeItem(k); }}
+            onItemNote={updateItemNote} />
+        ))}
+        {multi && carts.length < maxRestaurants && !multiBlocked && (
+          <TouchableOpacity style={styles.addRestBtn} onPress={goHome} accessibilityRole="button">
+            <Ionicons name="add-circle-outline" size={18} color={COLORS.primary} />
+            <Text style={styles.addMoreTxt}>أضف مطعم كمان (حتى {maxRestaurants} مطاعم)</Text>
+          </TouchableOpacity>
+        )}
+
+        {!multi && (
         <Section index={0} icon="receipt" title="طلباتك" C={COLORS} styles={styles}
           right={<View style={styles.countPill}><Text style={styles.countPillTxt}>{count}</Text></View>}>
           {items.map((item, i) => (
@@ -412,7 +642,15 @@ export default function CartScreen() {
             <Ionicons name="add-circle" size={18} color={COLORS.primary} />
             <Text style={styles.addMoreTxt}>أضف أصناف أخرى</Text>
           </TouchableOpacity>
+          {multiEnabled && !groupOrder?.id && maxRestaurants > 1 && (
+            <TouchableOpacity style={styles.multiTip} onPress={goHome} accessibilityRole="button" activeOpacity={0.8}>
+              <Ionicons name="git-network-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.multiTipTxt}>بدك من مطعم ثاني كمان؟ ضيف من حتى {maxRestaurants} مطاعم وسائق واحد بيجيبهم سوا</Text>
+              <Ionicons name="chevron-back" size={14} color={COLORS.primary} />
+            </TouchableOpacity>
+          )}
         </Section>
+        )}
 
         {/* الحد الأدنى للطلب */}
         {belowMin && (
@@ -431,7 +669,7 @@ export default function CartScreen() {
             {freeReached ? (
               <PopIn style={styles.progressHead}>
                 <Ionicons name="gift" size={18} color={COLORS.green} />
-                <Text style={styles.freeDelivDone}>مبروك! حصلت على توصيل مجاني 🎉</Text>
+                <Text style={styles.freeDelivDone}>{multi ? 'مبروك! التوصيل الأساسي مجاني 🎉 (رسوم التوقف الإضافي تبقى)' : 'مبروك! حصلت على توصيل مجاني 🎉'}</Text>
               </PopIn>
             ) : (
               <>
@@ -447,6 +685,12 @@ export default function CartScreen() {
 
         {/* طريقة الاستلام */}
         <Section index={1} icon="navigate" title="طريقة الاستلام" C={COLORS} styles={styles}>
+          {multi ? (
+            <View style={[styles.feeBox, { marginBottom: 10 }]}>
+              <Ionicons name="information-circle" size={17} color={COLORS.primary} />
+              <Text style={styles.feeLabel}>الطلب المجمّع للتوصيل فقط — السائق بيجمع طلبك من كل المطاعم</Text>
+            </View>
+          ) : (
           <View style={styles.toggleRow}>
             {[
               { k: 'delivery', l: 'توصيل لعنواني', s: 'لباب البيت', i: 'bicycle' },
@@ -456,6 +700,7 @@ export default function CartScreen() {
                 onPress={() => setDeliveryType(o.k)} style={{ flex: 1 }} vertical />
             ))}
           </View>
+          )}
 
           {deliveryType === 'delivery' ? (
             <View style={styles.feeBox}>
@@ -504,11 +749,23 @@ export default function CartScreen() {
             {[
               { id: 'cash', label: 'كاش عند الاستلام', sub: 'ادفع للسائق أو بالمحل', icon: 'cash' },
               { id: 'card', label: 'بطاقة ائتمان', sub: 'دفع آمن ومشفّر', icon: 'card' },
-            ].map(pm => (
-              <SelectCard key={pm.id} on={paymentMethod === pm.id} icon={pm.icon} title={pm.label} sub={pm.sub} C={COLORS} styles={styles}
-                onPress={() => setPaymentMethod(pm.id)} />
-            ))}
+            ].map(pm => {
+              const off = multi && pm.id === 'card';
+              return (
+                <SelectCard key={pm.id} on={paymentMethod === pm.id} icon={pm.icon} title={pm.label} C={COLORS} styles={styles}
+                  sub={off ? 'غير متاح للطلب المجمّع حالياً' : pm.sub} disabled={off}
+                  onPress={() => (off
+                    ? Alert.alert('الدفع بالبطاقة', 'الدفع بالبطاقة غير متاح للطلب المجمّع حالياً — اختر الدفع نقداً عند الاستلام (وبتقدر تستخدم رصيد المحفظة).')
+                    : setPaymentMethod(pm.id))} />
+              );
+            })}
           </View>
+          {multi && (
+            <View style={styles.payNote}>
+              <Ionicons name="information-circle-outline" size={15} color={COLORS.gray} />
+              <Text style={styles.payNoteTxt}>الطلب المجمّع بيندفع كاش للسائق مرة وحدة — وبتقدر تدفع جزء أو الكل من محفظتك</Text>
+            </View>
+          )}
         </Section>
 
         {/* خيارات التوصيل (للتوصيل فقط) */}
@@ -525,10 +782,10 @@ export default function CartScreen() {
         )}
 
         {/* ملاحظات */}
-        <Section index={5} icon="create" title="ملاحظات للمطعم" C={COLORS} styles={styles}>
+        <Section index={5} icon="create" title={multi ? 'ملاحظة عامة للطلب' : 'ملاحظات للمطعم'} C={COLORS} styles={styles}>
           <TextInput
             style={styles.notesInput}
-            placeholder="أي طلبات خاصة..."
+            placeholder={multi ? 'للسائق ولكل المطاعم (مثلاً: رقم الشقة، اتصل قبل ما توصل...)' : 'أي طلبات خاصة...'}
             value={notes}
             onChangeText={setNotes}
             multiline
@@ -601,6 +858,10 @@ export default function CartScreen() {
             <SummaryRow C={COLORS} styles={styles} label="رسوم التوصيل" text={needsAddress ? '—' : (summary.deliveryFee === 0 ? 'مجاني' : null)}
               value={summary.deliveryFee} green={!needsAddress && summary.deliveryFee === 0} />
           )}
+          {multi && summary.extraStopsFee > 0 && (
+            <SummaryRow C={COLORS} styles={styles} value={summary.extraStopsFee}
+              label={`رسوم توقف إضافي (${Math.max(1, (summary.stops || carts.length) - 1)} × ${money(summary.extraStopUnit)})`} />
+          )}
           {summary.firstOrderDiscount > 0 && <SummaryRow C={COLORS} styles={styles} label="🎁 خصم أول طلب" value={summary.firstOrderDiscount} minus green />}
           {summary.couponDiscount > 0 && <SummaryRow C={COLORS} styles={styles} label="خصم الكوبون" value={summary.couponDiscount} minus green />}
           {summary.pointsValue > 0 && <SummaryRow C={COLORS} styles={styles} label="خصم النقاط" value={summary.pointsValue} minus green />}
@@ -617,6 +878,15 @@ export default function CartScreen() {
               <Text style={styles.cashbackHint}>بتربح كاش باك ≈ {money(summary.subtotal * 0.02)} لمحفظتك على هالطلب</Text>
             </View>
           )}
+          {multi && generalErrors.map((e, i) => (
+            <View key={`ge${i}`} style={[styles.errRow, { backgroundColor: COLORS.dangerBg, borderColor: COLORS.dangerBorder }]}>
+              <Ionicons name="alert-circle" size={15} color={COLORS.red} />
+              <Text style={styles.errTxt}>{e.message}</Text>
+            </View>
+          ))}
+          {multi && restRows.some(r => r.errors.length) && (
+            <Text style={styles.warnTxt}>في ملاحظات على بعض المطاعم بالأعلى — راجعها قبل التأكيد</Text>
+          )}
           {!!quoteError && <Text style={styles.warnTxt}>{quoteError}</Text>}
           {summary.source === 'local' && !quoteSupported.current && (
             <Text style={styles.estimateHint}>الأرقام تقديرية — المبلغ النهائي يحدده النظام عند التأكيد</Text>
@@ -625,11 +895,13 @@ export default function CartScreen() {
       </ScrollView>
 
       <View style={[styles.footer, { bottom: tabInset + 10 }]} pointerEvents="box-none">
-        {(belowMin || needsAddress) && (
+        {(belowMin || needsAddress || (multi && !placing && (multiBlocked || multiProblem))) && (
           <FadeIn from={8} style={[styles.footerHint, { backgroundColor: COLORS.card, borderColor: COLORS.border }]}>
             <Ionicons name="information-circle" size={16} color={COLORS.primary} />
-            <Text style={styles.footerHintTxt}>
-              {needsAddress ? 'اختر عنوان التوصيل للمتابعة' : `أضف ${money(summary.minOrder - summary.subtotal)} للوصول للحد الأدنى`}
+            <Text style={styles.footerHintTxt} numberOfLines={1}>
+              {needsAddress ? 'اختر عنوان التوصيل للمتابعة'
+                : multi ? (multiBlocked ? 'خلّي مطعم واحد أو قلّل عدد المطاعم' : 'راجع ملاحظات المطاعم بالسلة')
+                  : `أضف ${money(summary.minOrder - summary.subtotal)} للوصول للحد الأدنى`}
             </Text>
           </FadeIn>
         )}
@@ -643,7 +915,7 @@ export default function CartScreen() {
                 <>
                   <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 8 }}>
                     <Ionicons name={paymentMethod === 'card' ? 'card' : 'checkmark-circle'} size={20} color="#FFF" />
-                    <Text style={styles.orderBtnText}>{paymentMethod === 'card' ? 'تأكيد والدفع' : 'تأكيد الطلب'}</Text>
+                    <Text style={styles.orderBtnText}>{paymentMethod === 'card' ? 'تأكيد والدفع' : multi ? 'تأكيد الطلب المجمّع' : 'تأكيد الطلب'}</Text>
                   </View>
                   <View style={styles.orderTotalPill}>
                     <AnimatedNumber value={summary.total} suffix="₪" style={styles.orderBtnText} />
@@ -673,13 +945,115 @@ function Section({ icon, title, right, children, C, styles, index = 0 }) {
   );
 }
 
-function SelectCard({ on, icon, title, sub, onPress, C, styles, style, vertical }) {
+/* قسم مطعم داخل السلة المجمّعة: لوجو/اسم/أصناف/مجموع/حد أدنى/أخطاء التسعيرة/حذف المطعم */
+function RestaurantSection({ row, index, C, styles, note, onNote, onRemove, onAddMore, onInc, onDec, onItemNote }) {
+  const items = row.cart.items;
+  const short = row.minOrder > 0 && !row.meetsMin ? Math.max(0, row.minOrder - row.subtotal) : 0;
+  const hasIssue = row.closed || short > 0 || row.errors.length > 0;
+  return (
+    <FadeIn delay={stagger(index, 50)} from={14} style={[styles.card, hasIssue && { borderColor: C.dangerBorder, borderWidth: 1 }]}>
+      <View style={styles.rsHead}>
+        <View style={styles.rsLogoWrap}>
+          {row.logo
+            ? <Image source={{ uri: row.logo }} style={styles.rsLogo} />
+            : <View style={[styles.rsLogo, { alignItems: 'center', justifyContent: 'center', backgroundColor: C.tint }]}><Ionicons name="storefront" size={20} color={C.primary} /></View>}
+          <View style={[styles.rsSeq, { borderColor: C.card }]}><Text style={styles.rsSeqTxt}>{index + 1}</Text></View>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rsName} numberOfLines={1}>{row.name}</Text>
+          <Text style={styles.rsMeta} numberOfLines={1}>
+            {row.count} صنف{row.distanceKm != null ? ` · يبعد ${Number(row.distanceKm).toFixed(1)} كم عنك` : ''}{row.closed ? ' · مغلق الآن' : ''}
+          </Text>
+        </View>
+        <TouchableOpacity onPress={onRemove} style={styles.rsRemove} accessibilityRole="button" accessibilityLabel={`حذف ${row.name} من السلة`}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Ionicons name="trash-outline" size={17} color={C.red} />
+        </TouchableOpacity>
+      </View>
+
+      {items.map((item, i) => (
+        <View key={item._key} style={[styles.itemRow, i === items.length - 1 && { borderBottomWidth: 0 }]}>
+          {item.image
+            ? <Image source={{ uri: item.image }} style={styles.itemImg} />
+            : <View style={[styles.itemImg, { alignItems: 'center', justifyContent: 'center' }]}><Ionicons name="fast-food-outline" size={22} color={C.primary} /></View>}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.itemName} numberOfLines={2}>{item.name_ar || item.name}</Text>
+            {item.addons?.length > 0 && (
+              <Text style={styles.itemOptions} numberOfLines={2}>{item.addons.map(a => a.name).join(' • ')}</Text>
+            )}
+            <View style={styles.itemBottom}>
+              <AnimatedNumber value={linePrice(item) * item.quantity} suffix="₪" style={styles.itemPrice} />
+              <LineQty item={item} C={C} styles={styles} onInc={() => onInc(item._key)} onDec={() => onDec(item._key)} />
+            </View>
+            <TextInput
+              style={styles.itemNoteInput}
+              placeholder="ملاحظة (بدون بصل، حار زيادة...)"
+              placeholderTextColor={C.faint}
+              value={item.notes || ''}
+              onChangeText={(t) => onItemNote(item._key, t)}
+              textAlign="right"
+              maxLength={200}
+            />
+          </View>
+        </View>
+      ))}
+
+      <TextInput
+        style={[styles.itemNoteInput, { marginTop: 4 }]}
+        placeholder={`ملاحظة لـ ${row.name} (اختياري)`}
+        placeholderTextColor={C.faint}
+        value={note}
+        onChangeText={onNote}
+        textAlign="right"
+        maxLength={300}
+      />
+
+      {/* الحالة: حد أدنى / مغلق / أخطاء من السيرفر بجانب المطعم نفسه */}
+      {short > 0 && (
+        <View style={[styles.errRow, { backgroundColor: C.warnBg, borderColor: C.warnBorder }]}>
+          <Ionicons name="alert-circle" size={15} color={C.warnFill} />
+          <Text style={[styles.errTxt, { color: C.text }]}>الحد الأدنى من هالمطعم {money(row.minOrder)} — أضف {money(short)} كمان</Text>
+        </View>
+      )}
+      {row.closed && !row.errors.some(e => e?.code === 'restaurant_closed') && (
+        <View style={[styles.errRow, { backgroundColor: C.dangerBg, borderColor: C.dangerBorder }]}>
+          <Ionicons name="lock-closed" size={14} color={C.red} />
+          <Text style={styles.errTxt}>المطعم مغلق حالياً — احذفه من السلة أو اطلب لاحقاً</Text>
+        </View>
+      )}
+      {row.errors.filter(e => !(short > 0 && e?.code === 'min_order')).map((e, i) => (
+        <View key={`e${i}`} style={[styles.errRow, { backgroundColor: C.dangerBg, borderColor: C.dangerBorder }]}>
+          <Ionicons name={e?.code === 'too_far' ? 'navigate-circle' : 'alert-circle'} size={15} color={C.red} />
+          <Text style={styles.errTxt}>{e?.message || 'في مشكلة بهالمطعم'}</Text>
+          {(e?.code === 'too_far' || e?.code === 'restaurant_closed' || e?.code === 'restaurant_unavailable' || e?.code === 'restaurant_location') && (
+            <TouchableOpacity onPress={onRemove} style={styles.errAction} accessibilityRole="button">
+              <Text style={styles.errActionTxt}>احذفه</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      ))}
+
+      <View style={styles.rsFoot}>
+        <TouchableOpacity style={[styles.addMoreBtn, { paddingTop: 0 }]} onPress={onAddMore} accessibilityRole="button">
+          <Ionicons name="add-circle" size={18} color={C.primary} />
+          <Text style={styles.addMoreTxt}>أضف أصناف</Text>
+        </TouchableOpacity>
+        <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 6 }}>
+          <Text style={styles.rsSubLbl}>المجموع</Text>
+          <AnimatedNumber value={row.subtotal} suffix="₪" style={styles.rsSubVal} />
+        </View>
+      </View>
+    </FadeIn>
+  );
+}
+
+function SelectCard({ on, icon, title, sub, onPress, C, styles, style, vertical, disabled }) {
   const v = useRef(new Animated.Value(on ? 1 : 0)).current;
   useEffect(() => { Animated.spring(v, { toValue: on ? 1 : 0, ...SPRING_POP }).start(); }, [on]);
   const dot = v.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
   return (
     <Press onPress={() => { haptic.select(); onPress(); }} haptic={false} scaleTo={0.97} accessibilityRole="radio" accessibilityLabel={title}
-      style={[styles.selCard, vertical && styles.selCardV, on && styles.selCardOn, style]}>
+      style={[styles.selCard, vertical && styles.selCardV, on && styles.selCardOn, disabled && { opacity: 0.5 }, style]}>
       <View style={[styles.selIcon, on && { backgroundColor: C.primary }]}>
         <Ionicons name={on ? icon : `${icon}-outline`} size={19} color={on ? '#FFF' : C.primary} />
       </View>
@@ -828,6 +1202,32 @@ const makeStyles = (C) => StyleSheet.create({
   cashbackHint: { fontSize: 12, color: C.primary, fontWeight: '700', textAlign: 'right', flexShrink: 1 },
   estimateHint: { fontSize: 11.5, color: C.faint, fontWeight: '500', marginTop: 6, textAlign: 'right' },
   warnTxt: { fontSize: 12.5, color: C.red, fontWeight: '700', marginTop: 6, textAlign: 'right' },
+  // الطلب المجمّع
+  multiHero: { flexDirection: 'row-reverse', alignItems: 'center', gap: 12, marginHorizontal: 14, marginTop: 12, borderRadius: 22, padding: 14, overflow: 'hidden', ...C.shadow.float },
+  multiSheen: { position: 'absolute', top: 0, left: 0, right: 0, height: 34 },
+  multiHeroIcon: { width: 44, height: 44, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)', alignItems: 'center', justifyContent: 'center' },
+  multiHeroTitle: { color: '#FFF', fontSize: 15.5, fontWeight: '900', textAlign: 'right' },
+  multiHeroSub: { color: 'rgba(255,255,255,0.92)', fontSize: 12.5, fontWeight: '500', textAlign: 'right', marginTop: 2, lineHeight: 18 },
+  multiTip: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, marginTop: 12, backgroundColor: C.tint, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 9, borderWidth: 1, borderColor: C.tintBorder },
+  multiTipTxt: { flex: 1, fontSize: 12.5, color: C.text, fontWeight: '700', textAlign: 'right', lineHeight: 18 },
+  addRestBtn: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: 14, marginTop: 12, paddingVertical: 12, borderRadius: 18, borderWidth: 1.5, borderStyle: 'dashed', borderColor: C.tintBorder, backgroundColor: C.card },
+  rsHead: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10, paddingBottom: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
+  rsLogoWrap: { width: 48, height: 48 },
+  rsLogo: { width: 48, height: 48, borderRadius: 15, backgroundColor: C.inputBg },
+  rsSeq: { position: 'absolute', bottom: -4, left: -4, minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 4, backgroundColor: C.primary, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  rsSeqTxt: { color: '#FFF', fontSize: 10.5, fontWeight: '900' },
+  rsName: { fontSize: 15.5, fontWeight: '900', color: C.text, textAlign: 'right' },
+  rsMeta: { fontSize: 12, color: C.gray, fontWeight: '500', textAlign: 'right', marginTop: 2 },
+  rsRemove: { width: 36, height: 36, borderRadius: 12, backgroundColor: C.dangerBg, alignItems: 'center', justifyContent: 'center' },
+  rsFoot: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border },
+  rsSubLbl: { fontSize: 12.5, color: C.gray, fontWeight: '600' },
+  rsSubVal: { fontSize: 16, color: C.primary, fontWeight: '900' },
+  errRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 7, marginTop: 8, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8 },
+  errTxt: { flex: 1, fontSize: 12.5, color: C.red, fontWeight: '700', textAlign: 'right', lineHeight: 18 },
+  errAction: { backgroundColor: C.red, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  errActionTxt: { color: '#FFF', fontSize: 11.5, fontWeight: '900' },
+  payNote: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, marginTop: 10 },
+  payNoteTxt: { flex: 1, fontSize: 12, color: C.gray, fontWeight: '500', textAlign: 'right', lineHeight: 18 },
   footer: { position: 'absolute', left: 16, right: 16, zIndex: 30 },
   footerHint: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6, alignSelf: 'center', borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6, marginBottom: 8, ...C.shadow.soft },
   footerHintTxt: { fontSize: 12.5, color: C.text, fontWeight: '700' },

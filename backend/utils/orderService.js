@@ -110,11 +110,53 @@ function effectiveMax(opt, valuesCount) {
 async function priceOrder(db, userId, body, opts = {}) {
   const quote = !!opts.quote;
   const {
-    restaurant_id, address_id, items, coupon_code,
+    restaurant_id, items, coupon_code,
     order_type = 'delivery', tip = 0, redeem_points = 0, use_wallet = false,
   } = body || {};
 
   if (!['delivery', 'pickup'].includes(order_type)) throw new HttpError(400, 'نوع الطلب غير صحيح');
+  const { restaurant, lines, subtotal, minOrder, meetsMinOrder } = await priceItems(db, restaurant_id, items);
+  if (!meetsMinOrder && !quote) throw new HttpError(400, `الحد الأدنى للطلب ${minOrder}₪`);
+
+  // ── موقع التوصيل: من العنوان المحفوظ (يجب أن يخص المستخدم) وإلا من إحداثيات العميل ──
+  let deliveryLat = null, deliveryLng = null, addressRow = null, distanceKm = null, zoneFee = 0;
+  if (order_type === 'delivery') {
+    ({ deliveryLat, deliveryLng, addressRow } = await resolveDeliveryPoint(db, userId, body));
+    if (validCoord(restaurant.lat, restaurant.lng)) {
+      distanceKm = round2(haversineKm(num(restaurant.lat), num(restaurant.lng), deliveryLat, deliveryLng));
+    }
+    zoneFee = await getZoneFee(db, distanceKm);
+  }
+
+  // ── الكوبون + خصم أول طلب ──
+  const { coupon, couponDiscount, couponError, couponFreeDelivery } = await evaluateCoupon(db, userId, coupon_code, subtotal, order_type);
+  const firstOrderDiscount = await firstOrderDiscountFor(db, userId, subtotal);
+  const discount = round2(Math.min(subtotal, couponDiscount + firstOrderDiscount));
+
+  // ── رسوم التوصيل: الزبون قد يحصل على توصيل مجاني (≥ الحد أو كوبون) لكن السائق يأخذ رسوم المنطقة دائماً ──
+  const freeDelivery = order_type === 'delivery' && (subtotal >= FREE_DELIVERY_THRESHOLD || couponFreeDelivery);
+  const deliveryFee = order_type === 'delivery' ? (freeDelivery ? 0 : zoneFee) : 0;
+  const driverFee = order_type === 'delivery' ? zoneFee : 0;
+
+  const pay = await applyPayments(db, userId, { subtotal, fees: deliveryFee, discount, tip, redeem_points, use_wallet, userRow: opts.userRow });
+
+  return {
+    restaurant, lines, coupon, addressRow,
+    delivery_lat: deliveryLat, delivery_lng: deliveryLng,
+    delivery_address: body.delivery_address || addressRow?.address || null,
+    subtotal, delivery_fee: deliveryFee, driver_fee: driverFee, free_delivery: freeDelivery,
+    discount, first_order_discount: firstOrderDiscount, coupon_discount: couponDiscount, coupon_error: couponError,
+    points_value: pay.points_value, points_redeemed: pay.points_redeemed, tip: pay.tip, wallet_used: pay.wallet_used,
+    total: pay.total, min_order: minOrder, meets_min_order: meetsMinOrder, distance_km: distanceKm,
+    points_earned: pay.points_earned, cashback: pay.cashback,
+  };
+}
+
+/**
+ * تسعير أصناف مطعم واحد من قاعدة البيانات (أسعار الإضافات، المجموعات الإجبارية، التوفّر، الحد الأدنى).
+ * يُستخدم للطلب العادي وللطلب المجمّع (لكل مطعم).
+ */
+async function priceItems(db, restaurant_id, items) {
   if (!isIntId(restaurant_id)) throw new HttpError(400, 'المطعم غير متاح');
   if (!Array.isArray(items) || items.length === 0) throw new HttpError(400, 'السلة فارغة');
   if (items.length > 50) throw new HttpError(400, 'عدد الأصناف كبير جداً');
@@ -205,29 +247,80 @@ async function priceOrder(db, userId, body, opts = {}) {
 
   const minOrder = round2(num(restaurant.min_order));
   const meetsMinOrder = subtotal >= minOrder;
-  if (!meetsMinOrder && !quote) throw new HttpError(400, `الحد الأدنى للطلب ${minOrder}₪`);
+  return { restaurant, lines, subtotal, minOrder, meetsMinOrder };
+}
 
-  // ── موقع التوصيل: من العنوان المحفوظ (يجب أن يخص المستخدم) وإلا من إحداثيات العميل ──
-  let deliveryLat = null, deliveryLng = null, addressRow = null, distanceKm = null, zoneFee = 0;
-  if (order_type === 'delivery') {
-    if (address_id !== undefined && address_id !== null && address_id !== '') {
-      if (!isIntId(address_id)) throw new HttpError(400, 'العنوان غير صحيح');
-      const { rows: ar } = await db.query('SELECT * FROM addresses WHERE id=$1 AND user_id=$2', [address_id, userId]);
-      if (!ar[0]) throw new HttpError(400, 'العنوان غير موجود');
-      addressRow = ar[0];
-      if (validCoord(addressRow.lat, addressRow.lng)) { deliveryLat = num(addressRow.lat); deliveryLng = num(addressRow.lng); }
-    }
-    if (deliveryLat === null && validCoord(body.delivery_lat, body.delivery_lng)) {
-      deliveryLat = num(body.delivery_lat); deliveryLng = num(body.delivery_lng);
-    }
-    if (deliveryLat === null) throw new HttpError(400, 'حدّد موقع التوصيل على الخريطة (الإحداثيات مطلوبة)');
-    if (validCoord(restaurant.lat, restaurant.lng)) {
-      distanceKm = round2(haversineKm(num(restaurant.lat), num(restaurant.lng), deliveryLat, deliveryLng));
-    }
-    zoneFee = await getZoneFee(db, distanceKm);
+// موقع التوصيل: من العنوان المحفوظ (يجب أن يخص المستخدم) وإلا من إحداثيات العميل — إلزامي للتوصيل
+async function resolveDeliveryPoint(db, userId, body) {
+  const { address_id } = body || {};
+  let deliveryLat = null, deliveryLng = null, addressRow = null;
+  if (address_id !== undefined && address_id !== null && address_id !== '') {
+    if (!isIntId(address_id)) throw new HttpError(400, 'العنوان غير صحيح');
+    const { rows: ar } = await db.query('SELECT * FROM addresses WHERE id=$1 AND user_id=$2', [address_id, userId]);
+    if (!ar[0]) throw new HttpError(400, 'العنوان غير موجود');
+    addressRow = ar[0];
+    if (validCoord(addressRow.lat, addressRow.lng)) { deliveryLat = num(addressRow.lat); deliveryLng = num(addressRow.lng); }
   }
+  if (deliveryLat === null && validCoord(body?.delivery_lat, body?.delivery_lng)) {
+    deliveryLat = num(body.delivery_lat); deliveryLng = num(body.delivery_lng);
+  }
+  if (deliveryLat === null) throw new HttpError(400, 'حدّد موقع التوصيل على الخريطة (الإحداثيات مطلوبة)');
+  return { deliveryLat, deliveryLng, addressRow };
+}
 
-  // ── الكوبون (case-insensitive + حد الاستخدام العام + لكل مستخدم) ──
+// خصم أول طلب: فقط إن لم يكن له أي طلب غير ملغى
+async function firstOrderDiscountFor(db, userId, subtotal) {
+  const { rows: prev } = await db.query("SELECT COUNT(*)::int AS c FROM orders WHERE customer_id=$1 AND status <> 'cancelled'", [userId]);
+  return (prev[0]?.c || 0) === 0 ? round2(Math.min(FIRST_ORDER_MAX, subtotal * FIRST_ORDER_RATE)) : 0;
+}
+
+// قيمة خصم كوبون صالح على مجموع معيّن (بدون فحص الصلاحية/الاستخدام)
+function couponValueFor(c, subtotal) {
+  const type = String(c.type || 'fixed').toLowerCase();
+  const maxD = num(c.max_discount);
+  if (type === 'percentage' || type === 'percent') {
+    let d = subtotal * num(c.value) / 100;
+    if (maxD > 0) d = Math.min(d, maxD);
+    return { discount: round2(Math.min(d, subtotal)), freeDelivery: false };
+  }
+  if (type === 'free_delivery') return { discount: 0, freeDelivery: true };
+  let d = num(c.value);
+  if (maxD > 0) d = Math.min(d, maxD);
+  return { discount: round2(Math.min(d, subtotal)), freeDelivery: false };
+}
+
+/**
+ * نقاط الولاء + البقشيش + المحفظة → الإجمالي. fees = ما يدفعه الزبون من رسوم توصيل (بعد التوصيل المجاني).
+ */
+async function applyPayments(db, userId, { subtotal, fees, discount, tip, redeem_points, use_wallet, userRow }) {
+  if (!userRow) {
+    const { rows: ur } = await db.query('SELECT wallet_balance, loyalty_points FROM users WHERE id=$1', [userId]);
+    userRow = ur[0] || {};
+  }
+  let pointsRedeemed = 0, pointsValue = 0;
+  const wantRedeem = Math.max(0, parseInt(redeem_points) || 0);
+  if (wantRedeem > 0) {
+    const available = Math.max(0, parseInt(userRow.loyalty_points) || 0);
+    const maxValue = Math.max(0, subtotal + fees - discount);
+    pointsRedeemed = Math.min(wantRedeem, available, Math.floor(maxValue / POINT_VALUE + 1e-9));
+    pointsValue = round2(pointsRedeemed * POINT_VALUE);
+  }
+  const tipAmount = round2(Math.min(MAX_TIP, Math.max(0, num(tip))));
+  const due = round2(Math.max(0, subtotal + fees - discount - pointsValue) + tipAmount);
+  let walletUsed = 0;
+  if (truthy(use_wallet)) {
+    const bal = Math.max(0, round2(num(userRow.wallet_balance)));
+    walletUsed = round2(Math.min(bal, due));
+  }
+  const total = round2(Math.max(0, due - walletUsed));
+  return {
+    points_redeemed: pointsRedeemed, points_value: pointsValue, tip: tipAmount, due, wallet_used: walletUsed, total,
+    points_earned: Math.max(0, Math.floor(subtotal - discount)), cashback: round2(subtotal * CASHBACK_RATE),
+  };
+}
+
+// ── الكوبون (case-insensitive + حد الاستخدام العام + لكل مستخدم) ──
+async function evaluateCoupon(db, userId, coupon_code, subtotal, order_type) {
   let coupon = null, couponDiscount = 0, couponError = null, couponFreeDelivery = false;
   const code = String(coupon_code || '').trim();
   if (code) {
@@ -244,74 +337,15 @@ async function priceOrder(db, userId, body, opts = {}) {
       if ((used[0]?.c || 0) >= perUser) couponError = 'استخدمت هذا الكوبون مسبقاً';
     }
     if (!couponError) {
-      const type = String(c.type || 'fixed').toLowerCase();
-      const maxD = num(c.max_discount);
-      if (type === 'percentage' || type === 'percent') {
-        let d = subtotal * num(c.value) / 100;
-        if (maxD > 0) d = Math.min(d, maxD);
-        couponDiscount = round2(Math.min(d, subtotal));
-      } else if (type === 'free_delivery') {
+      const v = couponValueFor(c, subtotal);
+      if (v.freeDelivery) {
         if (order_type !== 'delivery') couponError = 'كوبون التوصيل المجاني للطلبات بالتوصيل فقط';
         else couponFreeDelivery = true;
-      } else {
-        let d = num(c.value);
-        if (maxD > 0) d = Math.min(d, maxD);
-        couponDiscount = round2(Math.min(d, subtotal));
-      }
+      } else couponDiscount = v.discount;
       if (!couponError) coupon = c;
     }
   }
-
-  // ── خصم أول طلب: فقط إن لم يكن له أي طلب غير ملغى ──
-  let firstOrderDiscount = 0;
-  {
-    const { rows: prev } = await db.query("SELECT COUNT(*)::int AS c FROM orders WHERE customer_id=$1 AND status <> 'cancelled'", [userId]);
-    if ((prev[0]?.c || 0) === 0) firstOrderDiscount = round2(Math.min(FIRST_ORDER_MAX, subtotal * FIRST_ORDER_RATE));
-  }
-  const discount = round2(Math.min(subtotal, couponDiscount + firstOrderDiscount));
-
-  // ── رسوم التوصيل: الزبون قد يحصل على توصيل مجاني (≥ الحد أو كوبون) لكن السائق يأخذ رسوم المنطقة دائماً ──
-  const freeDelivery = order_type === 'delivery' && (subtotal >= FREE_DELIVERY_THRESHOLD || couponFreeDelivery);
-  const deliveryFee = order_type === 'delivery' ? (freeDelivery ? 0 : zoneFee) : 0;
-  const driverFee = order_type === 'delivery' ? zoneFee : 0;
-
-  // ── نقاط الولاء (100 نقطة = 5₪) ──
-  let userRow = opts.userRow;
-  if (!userRow) {
-    const { rows: ur } = await db.query('SELECT wallet_balance, loyalty_points FROM users WHERE id=$1', [userId]);
-    userRow = ur[0] || {};
-  }
-  let pointsRedeemed = 0, pointsValue = 0;
-  const wantRedeem = Math.max(0, parseInt(redeem_points) || 0);
-  if (wantRedeem > 0) {
-    const available = Math.max(0, parseInt(userRow.loyalty_points) || 0);
-    const maxValue = Math.max(0, subtotal + deliveryFee - discount);
-    pointsRedeemed = Math.min(wantRedeem, available, Math.floor(maxValue / POINT_VALUE + 1e-9));
-    pointsValue = round2(pointsRedeemed * POINT_VALUE);
-  }
-
-  const tipAmount = round2(Math.min(MAX_TIP, Math.max(0, num(tip))));
-  const due = round2(Math.max(0, subtotal + deliveryFee - discount - pointsValue) + tipAmount);
-
-  let walletUsed = 0;
-  if (truthy(use_wallet)) {
-    const bal = Math.max(0, round2(num(userRow.wallet_balance)));
-    walletUsed = round2(Math.min(bal, due));
-  }
-  const total = round2(Math.max(0, due - walletUsed));
-  const pointsEarned = Math.max(0, Math.floor(subtotal - discount));
-  const cashback = round2(subtotal * CASHBACK_RATE);
-
-  return {
-    restaurant, lines, coupon, addressRow,
-    delivery_lat: deliveryLat, delivery_lng: deliveryLng,
-    delivery_address: body.delivery_address || addressRow?.address || null,
-    subtotal, delivery_fee: deliveryFee, driver_fee: driverFee, free_delivery: freeDelivery,
-    discount, first_order_discount: firstOrderDiscount, coupon_discount: couponDiscount, coupon_error: couponError,
-    points_value: pointsValue, points_redeemed: pointsRedeemed, tip: tipAmount, wallet_used: walletUsed,
-    total, min_order: minOrder, meets_min_order: meetsMinOrder, distance_km: distanceKm,
-    points_earned: pointsEarned, cashback,
-  };
+  return { coupon, couponDiscount, couponError, couponFreeDelivery };
 }
 
 function quoteView(p) {
@@ -360,17 +394,24 @@ async function pushTo(userId, title, body, data, bundle) {
 }
 
 // إرسال الطلب الجديد للمطعم (بعد الإنشاء، أو بعد تأكيد الدفع بالبطاقة)
-async function notifyRestaurantNewOrder(io, order) {
+// group (اختياري) = { group_id, group_number, stops_count } لطلب مجمّع — يُضاف للحدث والإشعارات حتى تُميّزه بطاقة المطعم
+async function notifyRestaurantNewOrder(io, order, group = null) {
   try {
     await cache.invalidateRestaurantOrders(order.restaurant_id);
     const { rows } = await pool.query('SELECT id, owner_id FROM restaurants WHERE id=$1', [order.restaurant_id]);
     const restaurant = rows[0];
     if (!restaurant || !restaurant.owner_id) return;
     const ownerId = restaurant.owner_id;
-    notifyUser(io, ownerId, 'new_order', { order_id: order.id, order_number: order.order_number, restaurant_id: restaurant.id });
-    saveNotification(ownerId, `طلب جديد #${order.order_number}`, 'new_order', { order_id: order.id });
-    pushTo(ownerId, '🛎️ طلب جديد!', `طلب #${order.order_number} ينتظر موافقتك`, { type: 'new_order', order_id: String(order.id) }, 'com.wasaly.restaurant');
-    sendWebPush(restaurant.id, '🛎️ طلب جديد!', `طلب #${order.order_number} ينتظر موافقتك`, { order_id: order.id }).catch(() => {});
+    const g = group ? { group_id: group.group_id, group_number: group.group_number, stops_count: group.stops_count, is_group: true } : {};
+    const gPush = group ? { group_id: String(group.group_id), group_number: String(group.group_number), stops_count: String(group.stops_count), is_group: 'true' } : {};
+    const title = group ? '🛎️ طلب مجمّع جديد!' : '🛎️ طلب جديد!';
+    const body = group
+      ? `طلب #${order.order_number} (ضمن طلب مجمّع من ${group.stops_count} مطاعم — سائق واحد) ينتظر موافقتك`
+      : `طلب #${order.order_number} ينتظر موافقتك`;
+    notifyUser(io, ownerId, 'new_order', { order_id: order.id, order_number: order.order_number, restaurant_id: restaurant.id, ...g });
+    saveNotification(ownerId, group ? `طلب مجمّع جديد #${order.order_number}` : `طلب جديد #${order.order_number}`, 'new_order', { order_id: order.id, ...g });
+    pushTo(ownerId, title, body, { type: 'new_order', order_id: String(order.id), ...gPush }, 'com.wasaly.restaurant');
+    sendWebPush(restaurant.id, title, body, { order_id: order.id, ...g }).catch(() => {});
 
     const { rows: vip } = await pool.query('SELECT 1 FROM vip_customers WHERE restaurant_id=$1 AND customer_id=$2', [String(restaurant.id), String(order.customer_id)]);
     if (vip[0]) {
@@ -416,19 +457,26 @@ const isAwaitingCardPayment = (o) => o.payment_method === 'card' && o.payment_st
 //    (الدائرة داخل المربّع) حتى تبقى النتيجة "الأقرب فعلاً" مثل الاستعلام القديم. بلا إحداثيات → آخر القائمة.
 const DISPATCH_RADII_KM = [5, 15, 50];
 const BBOX_MARGIN_KM = 1;
-async function findNearestDriver(lat, lng, orderId, tried) {
+async function findNearestDriver(lat, lng, orderId, tried, groupId = null) {
+  // السائقون الذين لديهم عرض قائم (طلب عادي أو طلب مجمّع) لا يُعرض عليهم عرض آخر
   const { rows: offered } = await pool.query(
-    `SELECT DISTINCT driver_id FROM orders
+    `SELECT driver_id FROM orders
      WHERE driver_assigned_at IS NULL AND driver_id IS NOT NULL
-       AND status IN ('confirmed','preparing','ready') AND id <> $1`, [orderId]);
+       AND status IN ('confirmed','preparing','ready') AND id <> $1
+     UNION
+     SELECT driver_id FROM order_groups
+     WHERE driver_assigned_at IS NULL AND driver_id IS NOT NULL AND status = 'confirmed' AND id <> $2`,
+    [orderId || 0, groupId || 0]);
   const exclude = new Set([...tried].map(String));
   for (const r of offered) exclude.add(String(r.driver_id));
 
   const cosLat = Math.cos(lat * Math.PI / 180) || 1e-6;
   // السائقون أولاً (جدول صغير) ثم تحقق المستخدم بمفتاحه الأساسي (LATERAL = بحث PK لكل سائق) — يمنع خطة Merge Join تمسح كل جدول users
+  // 🧺 الطلب المجمّع: فقط السائقون بتطبيق يدعمه (supports_groups) — وإلا يبقى confirmed ويُعاد المحاولة
+  const groupsOnly = groupId ? 'AND supports_groups = true' : '';
   const q = (where) => `WITH d AS MATERIALIZED (
       SELECT user_id, current_lat, current_lng FROM drivers
-      WHERE is_online = true AND COALESCE(is_busy, false) = false ${where})
+      WHERE is_online = true AND COALESCE(is_busy, false) = false ${groupsOnly} ${where})
     SELECT d.user_id, d.current_lat, d.current_lng FROM d
     CROSS JOIN LATERAL (SELECT 1 FROM users u WHERE u.id = d.user_id AND u.is_active = true
       AND COALESCE(u.is_blocked, false) = false AND u.role = 'driver' LIMIT 1) ok`;
@@ -476,10 +524,11 @@ async function dispatchOrder(io, orderId, excludeDriverId = null) {
 
     const { rows } = await pool.query(
       `SELECT o.id, o.status, o.order_type, o.driver_id, o.driver_assigned_at, o.payment_method, o.payment_status, o.total,
-              o.pickup_lat, o.pickup_lng, r.lat AS r_lat, r.lng AS r_lng
+              o.pickup_lat, o.pickup_lng, o.group_id, r.lat AS r_lat, r.lng AS r_lng
        FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id WHERE o.id=$1`, [orderId]);
     const o = rows[0];
-    if (!o || !DISPATCH_STATUSES.includes(o.status) || o.order_type === 'pickup' || o.driver_assigned_at || isAwaitingCardPayment(o)) {
+    // أبناء الطلب المجمّع يوزَّعون كمجموعة واحدة (groupService.dispatchGroup) — لا عرض فردي
+    if (!o || o.group_id || !DISPATCH_STATUSES.includes(o.status) || o.order_type === 'pickup' || o.driver_assigned_at || isAwaitingCardPayment(o)) {
       stopDispatch(orderId); return null;
     }
     if (o.driver_id) return null; // عرض قائم بالفعل لسائق
@@ -540,27 +589,81 @@ async function recoverDispatch(io) {
     const { rows } = await pool.query(
       `SELECT id FROM orders
        WHERE status IN ('confirmed','preparing','ready') AND driver_assigned_at IS NULL
-         AND COALESCE(order_type,'delivery') <> 'pickup'
+         AND COALESCE(order_type,'delivery') <> 'pickup' AND group_id IS NULL
          AND NOT (payment_method='card' AND COALESCE(payment_status,'pending') <> 'paid' AND COALESCE(total,0) > 0)
          AND created_at > NOW() - INTERVAL '24 hours'
        ORDER BY created_at`);
     rows.forEach((r, i) => { const t = setTimeout(() => dispatchOrder(io, r.id).catch(() => {}), 500 + i * 300); if (t.unref) t.unref(); });
     console.log(`🛵 Dispatch recovery: ${rows.length} order(s) re-queued`);
   } catch (e) { console.error('recoverDispatch error:', e.message); }
+  // 🧺 الطلبات المجمّعة: نفس الاستعادة (عروض معلّقة تُمسح ويُعاد التوزيع)
+  try { await require('./groupService').recoverGroupDispatch(io); }
+  catch (e) { console.error('recoverGroupDispatch error:', e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════
 //  ✅ التسليم — ذرّي ومرة واحدة فقط (سائق: رسوم المنطقة + البقشيش؛ زبون: كاش باك + نقاط + الدعوة)
 // ═══════════════════════════════════════════════════════════════
+/**
+ * تسوية مالية مشتركة للتسليم (داخل معاملة) — تُستدعى مرة واحدة لكل طلب عادي أو لكل طلب مجمّع (وليس لأبنائه):
+ *  سائق: محفظة += driverEarning، is_busy=false، total_deliveries+1
+ *  زبون: كاش باك 2% من cashbackBase، نقاط الولاء (إن لم تُضف سابقاً) + المستوى، مكافأة الدعوة لأول تسليم
+ * @returns { cashback, pointsCredited, referral }
+ */
+async function settleDelivery(client, { driverId, driverEarning, customerId, cashbackBase, label, points, pointsAlreadyCredited, loyaltyOrderId }) {
+  if (driverId) {
+    await client.query(
+      `UPDATE drivers SET wallet_balance = ROUND((COALESCE(wallet_balance,0)::numeric + $1::numeric), 2),
+              is_busy=false, total_deliveries = COALESCE(total_deliveries,0) + 1
+       WHERE user_id=$2`, [round2(driverEarning), driverId]);
+  }
+
+  // 💰 كاش باك عند التسليم (وليس عند الإنشاء)
+  const cashback = round2(num(cashbackBase) * CASHBACK_RATE);
+  if (cashback > 0) {
+    await client.query('UPDATE users SET wallet_balance = ROUND((COALESCE(wallet_balance,0)::numeric + $1::numeric), 2) WHERE id=$2', [cashback, customerId]);
+    await client.query(`INSERT INTO wallet_transactions (user_id, type, amount, description) VALUES ($1,'credit',$2,$3)`,
+      [customerId, cashback, `كاش باك ${label}`]);
+  }
+
+  // 🏆 نقاط الولاء + تحديث المستوى (حسب مجموع النقاط المكتسبة مدى الحياة)
+  const pts = parseInt(points) || 0;
+  let pointsCredited = false;
+  if (pts > 0 && !pointsAlreadyCredited) {
+    await client.query('UPDATE users SET loyalty_points = COALESCE(loyalty_points,0) + $1 WHERE id=$2', [pts, customerId]);
+    pointsCredited = true;
+    await optionalQuery(client, `INSERT INTO loyalty_transactions (user_id, points, type, description, order_id) VALUES ($1,$2,'earned',$3,$4)`,
+      [customerId, pts, `نقاط ${label}`, loyaltyOrderId || null]);
+    const { rows: life } = await client.query(
+      `SELECT COALESCE(SUM(loyalty_points_earned),0)::int AS p FROM orders WHERE customer_id=$1 AND status='delivered'`, [customerId]);
+    await client.query('UPDATE users SET loyalty_tier=$1 WHERE id=$2', [loyaltyTierFor(life[0]?.p || 0), customerId]);
+  }
+
+  // 🎁 مكافأة الدعوة: عند تسليم أول طلب للمدعو فقط (مرة واحدة)
+  let referral = false;
+  const { rows: ref } = await client.query(
+    `UPDATE users SET referral_rewarded=true WHERE id=$1 AND referred_by IS NOT NULL AND COALESCE(referral_rewarded,false)=false
+     RETURNING referred_by`, [customerId]);
+  if (ref[0] && ref[0].referred_by && String(ref[0].referred_by) !== String(customerId)) {
+    for (const [uid, desc] of [[ref[0].referred_by, 'مكافأة دعوة صديق'], [customerId, 'مكافأة التسجيل بكود دعوة']]) {
+      await client.query('UPDATE users SET wallet_balance = ROUND((COALESCE(wallet_balance,0)::numeric + $1::numeric), 2) WHERE id=$2', [REFERRAL_REWARD, uid]);
+      await client.query(`INSERT INTO wallet_transactions (user_id, type, amount, description) VALUES ($1,'credit',$2,$3)`, [uid, REFERRAL_REWARD, desc]);
+    }
+    referral = true;
+  }
+  return { cashback, pointsCredited, referral };
+}
+
 async function markDelivered(io, orderId, fromStatuses) {
   const result = await withTransaction(async (client) => {
     const params = [orderId];
     let cond = `status NOT IN ('delivered','cancelled')`;
     if (fromStatuses && fromStatuses.length) { params.push(fromStatuses); cond = `status = ANY($2::text[])`; }
+    // أبناء الطلب المجمّع لا يُسوَّون فردياً أبداً (التسوية مرة واحدة على مستوى المجموعة)
     const { rows } = await client.query(
       `UPDATE orders SET status='delivered', delivered_at=NOW(), actual_delivery_time=NOW(), updated_at=NOW(),
               payment_status = CASE WHEN payment_method='card' THEN payment_status ELSE 'paid' END
-       WHERE id=$1 AND ${cond} RETURNING *`, params);
+       WHERE id=$1 AND group_id IS NULL AND ${cond} RETURNING *`, params);
     const order = rows[0];
     if (!order) return { order: null };
 
@@ -568,44 +671,15 @@ async function markDelivered(io, orderId, fromStatuses) {
     if (order.driver_id) {
       const fee = order.driver_fee !== null && order.driver_fee !== undefined ? num(order.driver_fee) : num(order.delivery_fee);
       driverEarning = round2(fee + num(order.tip));
-      await client.query(
-        `UPDATE drivers SET wallet_balance = ROUND((COALESCE(wallet_balance,0)::numeric + $1::numeric), 2),
-                is_busy=false, total_deliveries = COALESCE(total_deliveries,0) + 1
-         WHERE user_id=$2`, [driverEarning, order.driver_id]);
     }
-
-    // 💰 كاش باك عند التسليم (وليس عند الإنشاء)
-    const cashback = order.restaurant_id ? round2(num(order.subtotal) * CASHBACK_RATE) : 0;
-    if (cashback > 0) {
-      await client.query('UPDATE users SET wallet_balance = ROUND((COALESCE(wallet_balance,0)::numeric + $1::numeric), 2) WHERE id=$2', [cashback, order.customer_id]);
-      await client.query('UPDATE orders SET cashback_given=$1 WHERE id=$2', [cashback, order.id]);
-      await client.query(`INSERT INTO wallet_transactions (user_id, type, amount, description) VALUES ($1,'credit',$2,$3)`,
-        [order.customer_id, cashback, `كاش باك طلب #${order.order_number}`]);
-    }
-
-    // 🏆 نقاط الولاء + تحديث المستوى (حسب مجموع النقاط المكتسبة مدى الحياة)
-    const pts = parseInt(order.loyalty_points_earned) || 0;
-    if (pts > 0 && !truthy(order.points_credited)) {
-      await client.query('UPDATE users SET loyalty_points = COALESCE(loyalty_points,0) + $1 WHERE id=$2', [pts, order.customer_id]);
-      await client.query('UPDATE orders SET points_credited=true WHERE id=$1', [order.id]);
-      await optionalQuery(client, `INSERT INTO loyalty_transactions (user_id, points, type, description, order_id) VALUES ($1,$2,'earned',$3,$4)`,
-        [order.customer_id, pts, `نقاط طلب #${order.order_number}`, order.id]);
-      const { rows: life } = await client.query(
-        `SELECT COALESCE(SUM(loyalty_points_earned),0)::int AS p FROM orders WHERE customer_id=$1 AND status='delivered'`, [order.customer_id]);
-      await client.query('UPDATE users SET loyalty_tier=$1 WHERE id=$2', [loyaltyTierFor(life[0]?.p || 0), order.customer_id]);
-    }
-
-    // 🎁 مكافأة الدعوة: عند تسليم أول طلب للمدعو فقط (مرة واحدة)
-    const { rows: ref } = await client.query(
-      `UPDATE users SET referral_rewarded=true WHERE id=$1 AND referred_by IS NOT NULL AND COALESCE(referral_rewarded,false)=false
-       RETURNING referred_by`, [order.customer_id]);
-    if (ref[0] && ref[0].referred_by && String(ref[0].referred_by) !== String(order.customer_id)) {
-      for (const [uid, desc] of [[ref[0].referred_by, 'مكافأة دعوة صديق'], [order.customer_id, 'مكافأة التسجيل بكود دعوة']]) {
-        await client.query('UPDATE users SET wallet_balance = ROUND((COALESCE(wallet_balance,0)::numeric + $1::numeric), 2) WHERE id=$2', [REFERRAL_REWARD, uid]);
-        await client.query(`INSERT INTO wallet_transactions (user_id, type, amount, description) VALUES ($1,'credit',$2,$3)`, [uid, REFERRAL_REWARD, desc]);
-      }
-      await client.query('UPDATE orders SET referral_processed=true WHERE id=$1', [order.id]);
-    }
+    const s = await settleDelivery(client, {
+      driverId: order.driver_id, driverEarning, customerId: order.customer_id,
+      cashbackBase: order.restaurant_id ? num(order.subtotal) : 0, label: `طلب #${order.order_number}`,
+      points: order.loyalty_points_earned, pointsAlreadyCredited: truthy(order.points_credited), loyaltyOrderId: order.id,
+    });
+    if (s.cashback > 0) await client.query('UPDATE orders SET cashback_given=$1 WHERE id=$2', [s.cashback, order.id]);
+    if (s.pointsCredited) await client.query('UPDATE orders SET points_credited=true WHERE id=$1', [order.id]);
+    if (s.referral) await client.query('UPDATE orders SET referral_processed=true WHERE id=$1', [order.id]);
     return { order, driverEarning };
   });
 
@@ -666,15 +740,17 @@ async function refundOrderBenefits(orderId) {
  * @param by 'customer'|'restaurant'|'admin'
  */
 async function cancelOrder(io, order, by, reason, allowedFrom) {
+  // ابن طلب مجمّع: لا يُلغى بعد استلامه من المطعم (picked_up_at) — المال على مستوى المجموعة
   const { rows } = await pool.query(
     `UPDATE orders SET status='cancelled', cancel_reason=COALESCE(NULLIF($2,''), cancel_reason), cancelled_at=NOW(), updated_at=NOW(),
             driver_offer_expires_at=NULL
-     WHERE id=$1 AND status = ANY($3::text[]) RETURNING *`,
+     WHERE id=$1 AND status = ANY($3::text[]) AND NOT (group_id IS NOT NULL AND picked_up_at IS NOT NULL) RETURNING *`,
     [order.id, String(reason || '').slice(0, 500), allowedFrom]);
   const cancelled = rows[0];
   if (!cancelled) return null;
+  const grouped = !!cancelled.group_id;
   stopDispatch(order.id);
-  if (cancelled.driver_id) {
+  if (cancelled.driver_id && !grouped) {
     await pool.query('UPDATE drivers SET is_busy=false WHERE user_id=$1', [cancelled.driver_id]).catch(() => {});
   }
   await refundOrderBenefits(order.id);
@@ -682,18 +758,24 @@ async function cancelOrder(io, order, by, reason, allowedFrom) {
   // 📡 أحداث: order_status للجميع + order_cancelled للسائق وصاحب المطعم
   await emitOrderStatus(io, cancelled, 'cancelled');
   const ownerId = await getOwnerId(cancelled.restaurant_id);
+  const gx = grouped ? { group_id: cancelled.group_id } : {};
   for (const uid of [cancelled.driver_id, ownerId].filter(Boolean)) {
-    notifyUser(io, uid, 'order_cancelled', { order_id: cancelled.id, by });
+    notifyUser(io, uid, 'order_cancelled', { order_id: cancelled.id, by, ...gx });
+  }
+  // 🧺 ابن طلب مجمّع → إعادة حساب المجموعة واسترجاع الفرق + إشعار الزبون (بدل "تم إلغاء طلبك")
+  if (grouped) {
+    try { await require('./groupService').onChildCancelled(io, cancelled, by); }
+    catch (e) { console.error('group child cancel hook:', e.message); }
   }
   const nctx = { personal: cancelled.order_type === 'personal', service: cancelled.service_type };
   try {
-    if (by !== 'customer') await Notify.orderCancelled(io, cancelled.customer_id, cancelled.id, nctx);
+    if (by !== 'customer' && !grouped) await Notify.orderCancelled(io, cancelled.customer_id, cancelled.id, nctx);
     if (ownerId && by !== 'restaurant') {
       const msg = `❌ الطلب #${cancelled.order_number} أُلغي${by === 'customer' ? ' من الزبون' : ' من الإدارة'}`;
       saveNotification(ownerId, msg, 'order_cancelled', { order_id: cancelled.id });
       pushTo(ownerId, '❌ تم إلغاء طلب', msg, { type: 'order_cancelled', order_id: String(cancelled.id) }, 'com.wasaly.restaurant');
     }
-    if (cancelled.driver_id) {
+    if (cancelled.driver_id && !grouped) {
       const msg = `❌ الطلب #${cancelled.order_number} أُلغي`;
       saveNotification(cancelled.driver_id, msg, 'order_cancelled', { order_id: cancelled.id });
       pushTo(cancelled.driver_id, '❌ تم إلغاء الطلب', msg, { type: 'order_cancelled', order_id: String(cancelled.id) }, 'com.wasaly.driver');
@@ -723,11 +805,22 @@ async function releaseCardOrder(io, orderId, { paid, reference } = {}) {
   return order || null;
 }
 
+// 💵 مصدر "الإيراد" (ما دفعه الزبون لكل عملية دفع) — الطلبات العادية + الطلبات المجمّعة مرة واحدة
+// (أبناء المجموعة مستثنَون؛ إجمالي المجموعة يشمل رسوم التوصيل + المحطات الإضافية − الخصومات/النقاط/المحفظة + البقشيش، تماماً كـ orders.total)
+// الاستخدام: FROM ${REVENUE_SOURCE} x WHERE x.status='delivered' ...  (الأعمدة: created_at, total, status)
+const REVENUE_SOURCE = `(SELECT created_at, total, status FROM orders WHERE group_id IS NULL
+  UNION ALL SELECT created_at, total, status FROM order_groups)`;
+
 module.exports = {
   round2, num, truthy, isIntId, HttpError, haversineKm, validCoord, getZoneFee, loyaltyTierFor,
   OFFER_SECONDS, DISPATCH_STATUSES, ACTIVE_STATUSES, STATUS_LABELS, FREE_DELIVERY_THRESHOLD,
-  priceOrder, quoteView, withTransaction, optionalQuery,
+  POINT_VALUE, CASHBACK_RATE, FIRST_ORDER_RATE, FIRST_ORDER_MAX, MAX_TIP,
+  priceOrder, priceItems, resolveDeliveryPoint, evaluateCoupon, couponValueFor, firstOrderDiscountFor, applyPayments,
+  quoteView, withTransaction, optionalQuery,
   emitOrderStatus, touchOrder, notifyRestaurantNewOrder, findNearestDriver, getOwnerId, pushTo,
   dispatchOrder, stopDispatch, recoverDispatch, isAwaitingCardPayment,
-  markDelivered, refundOrderBenefits, cancelOrder, releaseCardOrder,
+  settleDelivery, markDelivered, refundOrderBenefits, cancelOrder, releaseCardOrder,
+  REVENUE_SOURCE,
+  // للتوزيع المجمّع (نفس خرائط المؤقتات بمفاتيح 'g<id>')
+  _dispatchState: { triedDrivers, offerTimers, retryTimers, clearTimer },
 };

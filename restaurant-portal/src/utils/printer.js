@@ -7,7 +7,7 @@
 //  يعتمد على: thermal-printer-cordova-plugin + إضافة أذونات محلية (PrinterPermissions)
 // ═══════════════════════════════════════════════════════════════
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import { orderNo, num, parseOptions, optionName, optionPrice, paymentLabel } from './format';
+import { orderNo, num, parseOptions, optionName, optionPrice, paymentLabel, isGroupOrder, groupLabel } from './format';
 
 const PKEY = 'wasaly_printer';
 const AUTOKEY = 'wasaly_printer_autoprint';
@@ -209,6 +209,10 @@ export function renderTicketCanvas(order, restaurant, items = []) {
   text(restaurant?.name_ar || 'وصلّي', { size: 34, bold: true, align: 'center' });
   text(`طلب #${orderNo(order)}`, { size: 44, bold: true, align: 'center', gapAfter: 8 });
   banner(isDelivery ? 'توصيل' : 'استلام من المحل');
+  if (isGroupOrder(order)) {
+    banner(groupLabel(order), 24);
+    text('سائق واحد يجمع من عدة مطاعم — جهّز الطلب في وقته', { size: 20, align: 'center' });
+  }
   const d = new Date(order.created_at || Date.now());
   text(`${d.toLocaleDateString('ar-EG')}  ${d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`, { size: 22, align: 'center' });
   hr();
@@ -235,7 +239,7 @@ export function renderTicketCanvas(order, restaurant, items = []) {
   const subtotal = order.subtotal != null ? num(order.subtotal)
     : (items || []).reduce((s, it) => s + (num(it.subtotal) || num(it.price) * (parseInt(it.quantity) || 1)), 0);
   text('المجموع الفرعي', { size: 23, price: subtotal.toFixed(2), gapAfter: 2 });
-  if (isDelivery) text('رسوم التوصيل', { size: 23, price: num(order.delivery_fee).toFixed(2), gapAfter: 2 });
+  if (isDelivery && !isGroupOrder(order)) text('رسوم التوصيل', { size: 23, price: num(order.delivery_fee).toFixed(2), gapAfter: 2 });
   const discounts = [
     ['الخصم', order.discount],
     ['خصم الكوبون', order.coupon_discount],

@@ -2,7 +2,7 @@
 import { AppState, Platform } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
-import { API_BASE, LOCATION_UPLOAD_MS, ANDROID_BACKGROUND_TRACKING } from '../config';
+import { API_BASE, LOCATION_UPLOAD_MS, ANDROID_BACKGROUND_TRACKING, CLIENT_FEATURES, FEATURES_HEADER } from '../config';
 import { readTokenFresh } from '../utils/storage';
 
 export const LOCATION_TASK = 'wasaly-driver-location';
@@ -36,14 +36,17 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
     if (now - lastCheck > CHECK_EVERY_MS) {
       lastCheck = now;
       try {
-        const r = await fetch(`${API_BASE}/drivers/me`, { headers: { Authorization: `Bearer ${token}` } });
+        const r = await fetch(`${API_BASE}/drivers/me`, { headers: { Authorization: `Bearer ${token}`, [FEATURES_HEADER]: CLIENT_FEATURES } });
         if (r.status === 401) { await stopSelf(); return; }
         if (r.ok) {
           const j = await r.json();
           const o = j?.data?.active_order;
           const offer = o && (o.is_offer === true || j?.data?.is_offer === true);
           const accepted = o && !offer && (o.status === 'on_the_way' || (o.driver_assigned_at !== undefined ? !!o.driver_assigned_at : ['preparing', 'ready'].includes(o.status)));
-          if (!accepted) { await stopSelf(); return; }
+          // 🧺 طلب مجمّع مقبول (يجمع من المطاعم أو في الطريق للزبون) = توصيل نشط أيضاً
+          const g = j?.data?.active_group;
+          const groupActive = g && !g.is_offer && !!g.driver_assigned_at && ['picking_up', 'on_the_way'].includes(g.status);
+          if (!accepted && !groupActive) { await stopSelf(); return; }
         }
       } catch { /* شبكة مؤقتة */ }
     }
@@ -54,7 +57,7 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
     lastSent = now;
     await fetch(`${API_BASE}/drivers/location`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, [FEATURES_HEADER]: CLIENT_FEATURES },
       body: JSON.stringify({ lat, lng }),
     });
   } catch { /* تجاهل أخطاء الشبكة المؤقتة في الخلفية */ }

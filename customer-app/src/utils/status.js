@@ -33,4 +33,26 @@ export const statusMeta = (s) => STATUS_META[s] || { color: '#8A90A0', icon: 'he
 // لون بخلفية شفافة تعمل بالوضعين الفاتح والداكن
 export const softBg = (hex, alpha = '22') => (hex && hex.length === 7 ? hex + alpha : 'rgba(138,144,160,0.15)');
 
-export const isPersonalOrder = (o) => o?.order_type === 'personal' || (!o?.restaurant_id && !!o?.service_type);
+// ── الطلب المجمّع (عدة مطاعم + سائق واحد) ──
+export const GROUP_STATUS_LABELS = {
+  pending: 'بانتظار المطاعم',
+  confirmed: 'نبحث عن سائق',
+  picking_up: 'السائق يجمع الطلبات',
+  on_the_way: 'في الطريق',
+  delivered: 'تم التوصيل',
+  cancelled: 'ملغي',
+};
+export const GROUP_STATUS_META = {
+  pending:    { color: '#FF9500', icon: 'time-outline' },
+  confirmed:  { color: '#007AFF', icon: 'search-outline' },
+  picking_up: { color: '#AF52DE', icon: 'git-network-outline' },
+  on_the_way: { color: '#FF6B00', icon: 'bicycle-outline' },
+  delivered:  { color: '#25C26E', icon: 'gift-outline' },
+  cancelled:  { color: '#FF3B30', icon: 'close-circle-outline' },
+};
+export const ACTIVE_GROUP_STATUSES = ['pending', 'confirmed', 'picking_up', 'on_the_way'];
+export const GROUP_PROGRESS = ['pending', 'confirmed', 'picking_up', 'on_the_way', 'delivered'];
+export const groupStatusLabel = (s, g) => g?.status_label || GROUP_STATUS_LABELS[s] || (s ? String(s) : 'غير معروف');
+export const groupStatusMeta = (s) => GROUP_STATUS_META[s] || { color: '#8A90A0', icon: 'help-circle-outline' };
+
+export const isPersonalOrder =(o) => o?.order_type === 'personal' || (!o?.restaurant_id && !!o?.service_type);

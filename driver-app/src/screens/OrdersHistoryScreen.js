@@ -9,13 +9,48 @@ import StatusBadge from '../components/StatusBadge';
 import { useTabBarOffset } from '../components/FloatingTabBar';
 import { FadeIn, SkeletonCard, Press, LoadingDots, EmptyState } from '../components/Anim';
 import { COLORS, SHADOW, RTL, RADIUS } from '../theme';
-import { money, orderTitle, orderIcon, orderNo, isPersonal, fmtDate, driverFee, tipOf, isAccepted, statusInfo } from '../utils/format';
+import { money, orderTitle, orderIcon, orderNo, isPersonal, fmtDate, driverFee, tipOf, isAccepted, statusInfo, num } from '../utils/format';
+
+// 🧺 أبناء الطلب المجمّع يصلون منفصلين — نعرضهم توصيلة واحدة بأجرها (المال على "الابن الحامل" فقط)
+const earnOf = (o) => (o.driver_earning != null ? num(o.driver_earning) : driverFee(o) + tipOf(o));
+function mergeGroups(list) {
+  const out = [];
+  const rows = new Map();
+  list.forEach((o) => {
+    if (!o.group_id) { out.push(o); return; }
+    const k = String(o.group_id);
+    let row = rows.get(k);
+    if (!row) {
+      row = { id: `g${k}`, is_group_row: true, group_id: o.group_id, children: [] };
+      rows.set(k, row);
+      out.push(row);
+    }
+    row.children.push(o);
+  });
+  rows.forEach((row) => {
+    const kids = row.children.slice().sort((a, b) => (a.stop_sequence || 99) - (b.stop_sequence || 99));
+    const live = kids.filter(k => k.status !== 'cancelled');
+    row.status = !live.length ? 'cancelled'
+      : live.every(k => k.status === 'delivered') ? 'delivered'
+        : live.every(k => ['on_the_way', 'delivered'].includes(k.status)) ? 'on_the_way' : 'preparing';
+    row.earned = kids.reduce((sum, k) => sum + earnOf(k), 0);
+    row.names = (live.length ? live : kids).map(k => k.restaurant_name).filter(Boolean);
+    row.stops = (live.length ? live : kids).length;
+    row.customer_name = kids[0].customer_name;
+    row.delivery_address = kids[0].delivery_address;
+    row.created_at = kids.reduce((m, k) => (!m || (k.created_at && k.created_at < m) ? k.created_at : m), null);
+    row.delivered_at = kids.reduce((m, k) => (k.delivered_at && (!m || k.delivered_at > m) ? k.delivered_at : m), null);
+    row.inProgress = !['delivered', 'cancelled'].includes(row.status) && kids.some(k => !!k.driver_assigned_at);
+  });
+  return out;
+}
+const rowActive = (o) => (o.is_group_row ? o.inProgress : isAccepted(o));
 
 const LIMIT = 20;
 
 const FILTERS = [
   { id: 'all', label: 'الكل', icon: 'apps-outline', test: () => true },
-  { id: 'active', label: 'جارية', icon: 'bicycle-outline', test: (o) => isAccepted(o) },
+  { id: 'active', label: 'جارية', icon: 'bicycle-outline', test: (o) => rowActive(o) },
   { id: 'delivered', label: 'مكتملة', icon: 'checkmark-done', test: (o) => o.status === 'delivered' },
   { id: 'cancelled', label: 'ملغاة', icon: 'close-circle-outline', test: (o) => o.status === 'cancelled' },
 ];
@@ -74,15 +109,66 @@ export default function OrdersHistoryScreen() {
   const onRefresh = async () => { setRefreshing(true); busyRef.current = false; await fetchPage(1); setRefreshing(false); };
   const onEnd = () => { if (hasMore && !busyRef.current && !loading) fetchPage(pageRef.current + 1); };
 
+  const rows = useMemo(() => mergeGroups(orders), [orders]);
   const counts = useMemo(() => {
     const c = {};
-    FILTERS.forEach(f => { c[f.id] = orders.filter(f.test).length; });
+    FILTERS.forEach(f => { c[f.id] = rows.filter(f.test).length; });
     return c;
-  }, [orders]);
+  }, [rows]);
   const activeFilter = FILTERS.find(f => f.id === filter) || FILTERS[0];
-  const shown = useMemo(() => orders.filter(activeFilter.test), [orders, activeFilter]);
+  const shown = useMemo(() => rows.filter(activeFilter.test), [rows, activeFilter]);
+
+  const renderGroup = (o, index) => {
+    const s = statusInfo(o.status);
+    const cancelled = o.status === 'cancelled';
+    return (
+      <FadeIn delay={Math.min(index, 8) * 45}>
+        <Press disabled={!o.inProgress} scaleTo={o.inProgress ? 0.97 : 1} hapticStyle={o.inProgress ? 'light' : null}
+          onPress={() => navigation.navigate('Delivery', { groupId: o.group_id })}
+          style={[styles.card, o.inProgress && styles.cardActive]}
+          accessibilityLabel={`طلب مجمّع من ${o.stops} مطاعم، ${s.label}، ${money(o.earned)}`}>
+          <View style={[styles.stripe, { backgroundColor: s.color }]} />
+          <View style={styles.cardTop}>
+            <View style={[styles.iconBox, { backgroundColor: COLORS.sec }]}>
+              <Ionicons name="layers-outline" size={21} color={COLORS.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={[RTL.row, { gap: 6 }]}>
+                <Text style={[styles.title, RTL.text, { flexShrink: 1 }]} numberOfLines={1}>طلب مجمّع</Text>
+                <View style={styles.groupChip}><Text style={styles.groupChipText}>{o.stops} مطاعم</Text></View>
+              </View>
+              <Text style={[styles.sub, RTL.text]} numberOfLines={1}>{o.names.join(' • ') || '—'}{o.customer_name ? ` · ${o.customer_name}` : ''}</Text>
+            </View>
+            <View style={{ alignItems: 'flex-start', gap: 6 }}>
+              <Text style={[styles.fee, cancelled && styles.feeCancelled]}>{money(o.earned)}</Text>
+              <StatusBadge status={o.status} />
+            </View>
+          </View>
+          {!!o.delivery_address && (
+            <View style={[RTL.row, styles.addrRow]}>
+              <Ionicons name="location-outline" size={15} color={COLORS.gray} />
+              <Text style={[styles.address, RTL.text]} numberOfLines={1}>{o.delivery_address}</Text>
+            </View>
+          )}
+          <View style={[RTL.row, { justifyContent: 'space-between', marginTop: 10 }]}>
+            <View style={[RTL.row, { gap: 5 }]}>
+              <Ionicons name="time-outline" size={13} color={COLORS.gray} />
+              <Text style={styles.time}>{fmtDate(o.delivered_at || o.created_at)}</Text>
+            </View>
+            {o.inProgress && (
+              <View style={styles.followChip}>
+                <Text style={styles.followText}>متابعة</Text>
+                <Ionicons name="chevron-back" size={13} color="#FFF" />
+              </View>
+            )}
+          </View>
+        </Press>
+      </FadeIn>
+    );
+  };
 
   const renderItem = ({ item: o, index }) => {
+    if (o.is_group_row) return renderGroup(o, index);
     const personal = isPersonal(o);
     const inProgress = isAccepted(o);
     const earned = driverFee(o) + tipOf(o);
@@ -205,4 +291,6 @@ const styles = StyleSheet.create({
   time: { fontSize: 11.5, color: COLORS.gray, fontWeight: '500' },
   followChip: { flexDirection: 'row-reverse', alignItems: 'center', gap: 2, backgroundColor: COLORS.primary, borderRadius: RADIUS.pill, paddingHorizontal: 12, height: 30 },
   followText: { fontSize: 12.5, color: '#FFF', fontWeight: '800' },
+  groupChip: { backgroundColor: COLORS.sec, borderRadius: RADIUS.pill, paddingHorizontal: 8, paddingVertical: 2 },
+  groupChipText: { fontSize: 11, fontWeight: '900', color: COLORS.primary },
 });

@@ -8,13 +8,14 @@ import { MdDeliveryDining, MdOutlineDirectionsWalk, MdOutlineSoupKitchen } from 
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import OrderMap from '../components/OrderMap';
+import { GroupBadge, GroupHint, GroupSection } from '../components/GroupInfo';
 import * as Printer from '../utils/printer';
 import { useRestaurant } from '../context/RestaurantContext';
 import { useLiveOrders } from '../context/LiveOrdersContext';
 import { PageHeader, EmptyState, ErrorState, ListSkeleton, Spinner, useConfirm, Tabs, Sheet, Button, useMediaQuery, cx } from '../components/ui';
 import {
   statusLabel, STATUS_ACCENT, paymentLabel, money, num, orderNo, formatDateTime,
-  parseOptions, optionName, optionPrice,
+  parseOptions, optionName, optionPrice, isGroupOrder,
 } from '../utils/format';
 
 const PAGE = 20;
@@ -53,8 +54,9 @@ const dedupe = (list) => {
 };
 
 // أزرار المطعم حسب الحالة — المطعم لا يضع «في الطريق» أبدًا (هذه مهمة السائق)
+// الطلب المجمّع: الاستلام يتم من السائق عبر مسار المجمّع — لا زر «في الطريق»/«تم التسليم» للمطعم
 function nextAction(order) {
-  const isDelivery = order.order_type === 'delivery';
+  const isDelivery = order.order_type === 'delivery' || isGroupOrder(order);
   if (order.status === 'pending') return { label: 'قبول الطلب', icon: FiCheck, variant: 'primary', kind: 'accept' };
   if (order.status === 'confirmed') return { label: 'بدء التحضير', icon: FiPlay, variant: 'sky', kind: 'status', to: 'preparing' };
   if (order.status === 'preparing') return { label: 'جاهز للاستلام', icon: FiCheckCircle, variant: 'teal', kind: 'status', to: 'ready' };
@@ -154,7 +156,8 @@ export default function Orders() {
     try {
       await api.patch(`/orders/${order.id}/confirm`);
       patchLocal(order.id, { status: 'confirmed' });
-      toast.success(order.order_type === 'delivery' ? 'تم قبول الطلب — جاري البحث عن سائق' : 'تم قبول الطلب');
+      toast.success(isGroupOrder(order) ? 'تم قبول الطلب — سائق واحد سيجمعه مع باقي المطاعم، جهّزه في وقته'
+        : order.order_type === 'delivery' ? 'تم قبول الطلب — جاري البحث عن سائق' : 'تم قبول الطلب');
       refreshNow();
     } catch (e) { toast.error(e.message || 'فشل قبول الطلب'); }
     finally { setBusy(null); }
@@ -167,7 +170,7 @@ export default function Orders() {
       patchLocal(order.id, { status });
       const msgs = {
         preparing: 'بدأ تحضير الطلب',
-        ready: order.order_type === 'delivery' ? 'الطلب جاهز — بانتظار السائق' : 'الطلب جاهز للاستلام',
+        ready: isGroupOrder(order) ? 'الطلب جاهز — السائق يجمعه ضمن الطلب المجمّع' : order.order_type === 'delivery' ? 'الطلب جاهز — بانتظار السائق' : 'الطلب جاهز للاستلام',
         delivered: 'تم تسليم الطلب للزبون',
       };
       toast.success(msgs[status] || 'تم تحديث الحالة');
@@ -179,7 +182,9 @@ export default function Orders() {
   const cancelOrder = async (order) => {
     const res = await confirm({
       title: `إلغاء الطلب #${orderNo(order)}؟`,
-      message: order.driver_id
+      message: isGroupOrder(order)
+        ? 'هذا الطلب جزء من طلب مجمّع — سيُلغى طلبك فقط ويكمل الزبون طلبه من باقي المطاعم. لا يمكن التراجع.'
+        : order.driver_id
         ? 'تم تعيين سائق لهذا الطلب — سيتم إبلاغ السائق والزبون بالإلغاء.'
         : 'سيتم إبلاغ الزبون بإلغاء الطلب. لا يمكن التراجع عن هذه الخطوة.',
       confirmText: 'نعم، إلغاء الطلب', cancelText: 'تراجع', danger: true, reasons: CANCEL_REASONS,
@@ -360,6 +365,7 @@ function OrderCard({ order, busy, fresh, onOpen, onAction }) {
             <div className="flex items-center gap-1.5 flex-wrap min-w-0">
               <span className="font-black text-ink text-[17px] tnum">#{orderNo(order)}</span>
               <TypeChip order={order} />
+              <GroupBadge order={order} />
               {isPending && <span className="chip bg-coral text-white"><span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" /> جديد{ago ? ` · ${ago}` : ''}</span>}
             </div>
             <StatusChip order={order} />
@@ -369,6 +375,7 @@ function OrderCard({ order, busy, fresh, onOpen, onAction }) {
               <p className="text-[14px] font-bold text-ink truncate flex items-center gap-1.5"><FiUser size={13} className="text-ink-3 flex-shrink-0" aria-hidden /> {order.customer_name || 'زبون'}</p>
               <p className="text-[12px] text-ink-3 flex items-center gap-1.5"><FiClock size={12} aria-hidden /> {formatDateTime(order.created_at)}</p>
               <DriverChip order={order} />
+              <GroupHint order={order} />
             </div>
             <div className="text-left flex-shrink-0">
               <p className="text-[10.5px] text-ink-3 font-bold leading-none mb-1">الإجمالي</p>
@@ -501,6 +508,8 @@ function OrderDetailsSheet({ open, order, restaurant, busy, isVip, onClose, onAc
       <div className="space-y-3">
         <Timeline order={full} />
 
+        {isGroupOrder(full) && <GroupSection order={full} restaurant={restaurant} open={open} />}
+
         {isDelivery && (
           <OrderMap key={full.delivery_lat ? "with-customer" : "no-customer"} order={{ ...full, restaurant_lat: full.restaurant_lat || restaurant.lat, restaurant_lng: full.restaurant_lng || restaurant.lng, restaurant_name: restaurant.name_ar }} />
         )}
@@ -537,7 +546,7 @@ function OrderDetailsSheet({ open, order, restaurant, busy, isVip, onClose, onAc
         </Section>
 
         {/* السائق */}
-        {isDelivery && !['delivered', 'cancelled', 'pending'].includes(order.status) && (
+        {isDelivery && !isGroupOrder(full) && !['delivered', 'cancelled', 'pending'].includes(order.status) && (
           <Section title="السائق">
             {full.driver_id ? (
               <div className="flex items-center justify-between gap-2">
@@ -631,11 +640,13 @@ function OrderItems({ items }) {
 // الملخص من أرقام السيرفر مباشرة (لا إعادة حساب — الأسعار المخفّضة والمحفظة والنقاط محسوبة هناك)
 function OrderSummary({ order, items }) {
   const isDelivery = order.order_type === 'delivery';
+  const grouped = isGroupOrder(order);
   const subtotal = order.subtotal != null
     ? num(order.subtotal)
     : items.reduce((s, it) => s + (num(it.subtotal) || num(it.price) * (parseInt(it.quantity) || 1)), 0);
   const rows = [['المجموع الفرعي', subtotal, '']];
-  if (isDelivery) rows.push(['رسوم التوصيل', num(order.delivery_fee), '']);
+  // الطلب المجمّع: رسوم التوصيل والخصومات على مستوى المجمّع — هنا أصناف مطعمك فقط
+  if (isDelivery && !grouped) rows.push(['رسوم التوصيل', num(order.delivery_fee), '']);
   [['الخصم', order.discount], ['خصم الكوبون', order.coupon_discount], ['خصم الطلب الأول', order.first_order_discount],
     ['نقاط الولاء', order.points_value], ['من المحفظة', order.wallet_used]]
     .forEach(([l, v]) => { if (num(v) > 0) rows.push([l, num(v), 'discount']); });
@@ -650,9 +661,10 @@ function OrderSummary({ order, items }) {
         </div>
       ))}
       <div className="flex justify-between items-center font-black text-base border-t border-dashed border-gray-300 pt-2.5 mt-1.5">
-        <span>الإجمالي</span>
+        <span>{grouped ? 'إجمالي أصنافك' : 'الإجمالي'}</span>
         <span className="text-brand-600 text-lg tnum">{money(order.total)}</span>
       </div>
+      {grouped && <p className="text-[11px] text-ink-3">رسوم التوصيل والدفع تُحسب على الطلب المجمّع كاملاً.</p>}
     </section>
   );
 }

@@ -9,7 +9,13 @@ const cache = require('../utils/cache');
 const driverLoc = require('../utils/driverLocation');
 const { serverError, clampInt, strParam } = require('../utils/http');
 
+const G = require('../utils/groupService');
+
 const LAHZA_ENABLED = () => !!process.env.LAHZA_SECRET_KEY;
+const GROUP_CHILD_MSG = 'هذا الطلب جزء من طلب مجمّع — استخدم مسارات الطلب المجمّع';
+
+// 🧺 الطلب المجمّع: /multi, /multi/quote, /multi/config, /groups/...
+router.use(require('./multi-orders'));
 
 const sendError = (res, e, tag) => {
   if (e instanceof HttpError) return res.status(e.status).json({ success: false, message: e.message, ...e.extra });
@@ -185,9 +191,12 @@ router.get('/my', auth, async (req, res) => {
     const status = strParam(req.query.status);
     const safeLimit = clampInt(req.query.limit, 20, 1, 100);
     const safeOffset = clampInt(req.query.offset, 0, 0, 1000000);
+    // أبناء الطلب المجمّع يظهرون كطلبات عادية + group_id/group_number/... حتى يدمجها التطبيق
     let q = `SELECT o.*, r.name_ar as restaurant_name, r.logo as restaurant_logo,
-             (SELECT COUNT(*) FROM order_items WHERE order_id=o.id) as items_count
+             (SELECT COUNT(*) FROM order_items WHERE order_id=o.id) as items_count,
+             g.group_number, g.status AS group_status, g.total AS group_total, g.stops_total AS group_stops_count
              FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
+             LEFT JOIN order_groups g ON g.id = o.group_id
              WHERE o.customer_id=$1`;
     const params = [req.user.id];
     if (status === 'active') q += ` AND o.status NOT IN ('delivered','cancelled')`;
@@ -208,10 +217,12 @@ router.get('/:id', auth, async (req, res) => {
       `SELECT o.*, r.name_ar as restaurant_name, r.logo, r.lat as restaurant_lat, r.lng as restaurant_lng,
               r.phone as restaurant_phone, r.owner_id as restaurant_owner_id, u.name as driver_name, u.phone as driver_phone,
               d.current_lat as driver_lat, d.current_lng as driver_lng, d.vehicle_type, d.vehicle_plate,
-              cu.phone as customer_phone, cu.name as customer_name
+              cu.phone as customer_phone, cu.name as customer_name,
+              g.group_number, g.status AS group_status, g.stops_total AS group_stops_count
        FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
        LEFT JOIN users u ON o.driver_id=u.id LEFT JOIN drivers d ON d.user_id=o.driver_id
        LEFT JOIN users cu ON o.customer_id=cu.id
+       LEFT JOIN order_groups g ON g.id = o.group_id
        WHERE o.id=$1`, [req.params.id]);
     const o = orders[0];
     if (!o) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
@@ -230,7 +241,9 @@ router.get('/:id', auth, async (req, res) => {
     const extra = {
       tip: round2(num(o.tip)),
       status_label: S.STATUS_LABELS[o.status] || o.status,
-      cash_to_collect: (o.payment_method !== 'card' && o.payment_status !== 'paid') ? round2(num(o.total)) : 0,
+      // ابن طلب مجمّع: التحصيل على مستوى المجموعة (GET /orders/groups/:id → cash_to_collect)
+      cash_to_collect: (!o.group_id && o.payment_method !== 'card' && o.payment_status !== 'paid') ? round2(num(o.total)) : 0,
+      is_group: !!o.group_id,
     };
     if (isDriver && !o.driver_assigned_at && o.driver_offer_expires_at) {
       const exp = new Date(o.driver_offer_expires_at);
@@ -279,6 +292,16 @@ async function confirmOrder(io, order) {
     `UPDATE orders SET status='confirmed', restaurant_accepted_at=NOW(), updated_at=NOW() WHERE id=$1 AND status='pending' RETURNING *`, [order.id]);
   const updated = rows[0];
   if (!updated) throw transitionError(order, 'confirmed');
+  if (updated.group_id) {
+    // 🧺 ابن طلب مجمّع: التوزيع للمجموعة كاملة عندما تؤكّد كل المطاعم
+    await S.emitOrderStatus(io, updated, 'confirmed');
+    try {
+      const { rows: rn } = await pool.query('SELECT name_ar FROM restaurants WHERE id=$1', [updated.restaurant_id]);
+      saveNotification(updated.customer_id, `✅ ${rn[0]?.name_ar || 'المطعم'} قبل طلبك`, 'order_confirmed', { order_id: updated.id, group_id: updated.group_id });
+    } catch (e) { console.error('notify confirm err:', e.message); }
+    await G.maybeConfirmGroup(io, updated.group_id);
+    return updated;
+  }
   if (updated.order_type !== 'pickup') await S.dispatchOrder(io, updated.id);
   await S.emitOrderStatus(io, updated, 'confirmed');
   try { await Notify.orderConfirmed(io, updated.customer_id, updated.id); } catch (e) { console.error('notify confirm err:', e.message); }
@@ -330,6 +353,13 @@ router.patch('/:id/status', auth, async (req, res) => {
       if (status === 'cancelled' && order.status === 'on_the_way') throw transitionError(order, status);
     } else if (role !== 'admin') {
       return res.status(403).json({ success: false, message: 'غير مصرح' });
+    }
+    // 🧺 ابن طلب مجمّع: الاستلام/التسليم عبر /orders/groups/:id/pickup|deliver فقط (التسوية مرة واحدة للمجموعة)
+    if (order.group_id && ['on_the_way', 'delivered'].includes(status)) {
+      return res.status(400).json({ success: false, message: GROUP_CHILD_MSG, group_id: order.group_id });
+    }
+    if (order.group_id && status === 'cancelled' && order.picked_up_at) {
+      return res.status(400).json({ success: false, message: 'لا يمكن إلغاء طلب استلمه السائق ضمن طلب مجمّع' });
     }
 
     if (status === 'delivered' && order.status === 'delivered') return res.json({ success: true, already: true });
@@ -383,6 +413,8 @@ router.post('/:id/accept', auth, async (req, res) => {
        RETURNING *`, [req.params.id, req.user.id]);
     const order = rows[0];
     if (!order) {
+      const { rows: gc } = await pool.query('SELECT group_id FROM orders WHERE id=$1 AND group_id IS NOT NULL', [req.params.id]);
+      if (gc[0]) return res.status(400).json({ success: false, message: 'هذا طلب مجمّع من عدة مطاعم — حدّث تطبيق السائق لقبوله', group_id: gc[0].group_id });
       // إعادة محاولة من نفس السائق بعد قبول ناجح → نجاح (idempotent)
       const { rows: mine } = await pool.query(
         `SELECT id FROM orders WHERE id=$1 AND driver_id=$2 AND driver_assigned_at IS NOT NULL AND status IN ('confirmed','preparing','ready','on_the_way')`,
@@ -425,6 +457,9 @@ router.patch('/:id/cancel', auth, async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM orders WHERE id=$1 AND customer_id=$2', [req.params.id, req.user.id]);
     const order = rows[0];
     if (!order) return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
+    if (order.group_id) {
+      return res.status(400).json({ success: false, message: 'هذا الطلب جزء من طلب مجمّع — يمكنك إلغاء الطلب المجمّع كاملاً فقط', group_id: order.group_id });
+    }
     if (!['pending', 'confirmed'].includes(order.status)) {
       return res.status(400).json({ success: false, message: 'لا يمكن إلغاء الطلب في هذه المرحلة' });
     }

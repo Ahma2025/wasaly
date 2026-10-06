@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { API_BASE } from '../config';
+import { API_BASE, CLIENT_FEATURES, FEATURES_HEADER } from '../config';
 import { getToken } from './storage';
 
 const api = axios.create({ baseURL: API_BASE, timeout: 15000 });
@@ -12,6 +12,8 @@ export function setUnauthorizedHandler(fn) { unauthorizedHandler = fn; }
 api.interceptors.request.use(async config => {
   const token = await getToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  // 🧺 إعلان دعم الطلب المجمّع (بدونه لا تُعرض علينا طلبات عدة مطاعم)
+  config.headers[FEATURES_HEADER] = CLIENT_FEATURES;
   return config;
 });
 

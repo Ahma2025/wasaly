@@ -61,14 +61,18 @@ export default function OrderMap({ order }) {
   // موقع السائق المباشر عبر اتصال Socket المشترك
   useEffect(() => {
     if (!socket || !order?.id) return;
-    const onLoc = ({ lat, lng, order_id } = {}) => {
-      if (order_id && String(order_id) !== String(order.id)) return;
-      if (!order_id && !order.driver_id) return;
+    const onLoc = ({ lat, lng, order_id, group_id } = {}) => {
+      // طلب مجمّع: السيرفر يرسل موقع السائق مع group_id (و order_id لأي طلب فرعي)
+      const sameGroup = order.group_id != null && group_id != null && String(group_id) === String(order.group_id);
+      if (!sameGroup) {
+        if (order_id && String(order_id) !== String(order.id)) return;
+        if (!order_id && !order.driver_id) return;
+      }
       setDriverLoc({ lat: parseFloat(lat), lng: parseFloat(lng) });
     };
     socket.on('driver:location', onLoc);
     return () => socket.off('driver:location', onLoc);
-  }, [socket, order?.id, order?.driver_id]);
+  }, [socket, order?.id, order?.driver_id, order?.group_id]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -94,7 +98,7 @@ export default function OrderMap({ order }) {
   return (
     <div className="relative isolate rounded-[18px] overflow-hidden border border-surface-line bg-white shadow-soft">
       <div ref={mapContainerRef} style={{ height: 240, width: '100%', zIndex: 0 }} />
-      {driverLoc && order?.status === 'on_the_way' && (
+      {driverLoc && (order?.status === 'on_the_way' || order?.group_id != null) && (
         <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-coral text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg z-[1000]">
           <span className="w-2 h-2 rounded-full bg-white animate-ping" /> مباشر
         </div>

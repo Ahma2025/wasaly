@@ -4,6 +4,7 @@ const pool = require('../config/database');
 const cache = require('./cache');
 const { isTokenDenied } = require('./security');
 const driverLoc = require('./driverLocation');
+const { noteDriverFeatures } = require('./driverFeatures');
 
 // كاش المصادقة (60 ث): موجات الاتصال (إعادة نشر/انقطاع شبكة) لا تضرب القاعدة بـ SELECT لكل handshake
 const AUTH_TTL = Number(process.env.SOCKET_AUTH_CACHE_MS) || 60000;
@@ -35,6 +36,10 @@ module.exports = (io) => {
       if (!u || u.none) return next(new Error('User not found'));
       socket.userId = u.id;
       socket.userRole = u.role;
+      if (u.role === 'driver') {
+        const feats = (socket.handshake.auth && socket.handshake.auth.features) || socket.handshake.headers['x-wasaly-features'];
+        if (feats) await noteDriverFeatures(u.id, feats);
+      }
       next();
     } catch {
       next(new Error('Invalid token'));
@@ -49,16 +54,37 @@ module.exports = (io) => {
     const hit = _orderCache.get(key);
     if (hit && Date.now() - hit.at < CACHE_TTL) return hit.info;
     const { rows } = await pool.query(
-      `SELECT o.customer_id, o.driver_id, o.driver_assigned_at, o.status, r.owner_id
+      `SELECT o.customer_id, o.driver_id, o.driver_assigned_at, o.status, o.group_id, r.owner_id
        FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id WHERE o.id=$1`, [orderId]);
     const info = rows[0] ? {
       customer_id: rows[0].customer_id, owner_id: rows[0].owner_id, driver_id: rows[0].driver_id,
-      assigned: !!rows[0].driver_assigned_at, status: rows[0].status,
+      assigned: !!rows[0].driver_assigned_at, status: rows[0].status, group_id: rows[0].group_id || null,
     } : null;
     if (_orderCache.size > 10000) _orderCache.clear();
     _orderCache.set(key, { at: Date.now(), info });
     return info;
   }
+
+  // 🧺 الطلب المجمّع: groupId → { customer_id, driver_id, assigned, status, owner_ids, first_order_id } — نفس كاش الـ 30ث
+  async function getGroupInfo(groupId) {
+    const key = `g${groupId}`;
+    const hit = _orderCache.get(key);
+    if (hit && Date.now() - hit.at < CACHE_TTL) return hit.info;
+    const { rows } = await pool.query(
+      `SELECT g.customer_id, g.driver_id, g.driver_assigned_at, g.status,
+              (SELECT array_agg(DISTINCT r.owner_id) FROM orders o JOIN restaurants r ON r.id=o.restaurant_id
+                WHERE o.group_id=g.id AND o.status <> 'cancelled' AND r.owner_id IS NOT NULL) AS owner_ids,
+              (SELECT o.id FROM orders o WHERE o.group_id=g.id AND o.status <> 'cancelled' ORDER BY o.stop_sequence NULLS LAST, o.id LIMIT 1) AS first_order_id
+       FROM order_groups g WHERE g.id=$1`, [groupId]);
+    const info = rows[0] ? {
+      customer_id: rows[0].customer_id, driver_id: rows[0].driver_id, assigned: !!rows[0].driver_assigned_at,
+      status: rows[0].status, owner_ids: rows[0].owner_ids || [], first_order_id: rows[0].first_order_id,
+    } : null;
+    if (_orderCache.size > 10000) _orderCache.clear();
+    _orderCache.set(key, { at: Date.now(), info });
+    return info;
+  }
+  const GROUP_ACTIVE = ['picking_up', 'on_the_way'];
 
   io.on('connection', (socket) => {
     socket.join(`user:${socket.userId}`);
@@ -69,8 +95,25 @@ module.exports = (io) => {
         if (socket.userRole !== 'driver' || !payload) return;
         const { lat, lng } = payload;
         const orderId = payload.orderId ?? payload.order_id;
+        let groupId = payload.groupId ?? payload.group_id;
         if (!validCoord(lat, lng)) return;
-        if (orderId && /^\d+$/.test(String(orderId))) {
+        if (!groupId && orderId && /^\d+$/.test(String(orderId))) {
+          const oi = await getOrderInfo(orderId);
+          if (oi && oi.group_id) groupId = oi.group_id;
+        }
+        if (groupId && /^\d+$/.test(String(groupId))) {
+          // 🧺 طلب مجمّع: فقط السائق المُسند، والموقع للزبون + كل أصحاب المطاعم
+          const gi = await getGroupInfo(groupId);
+          if (gi && gi.assigned && String(gi.driver_id) === String(socket.userId) && GROUP_ACTIVE.includes(gi.status)) {
+            const oid = Number(orderId && /^\d+$/.test(String(orderId)) ? orderId : gi.first_order_id) || null;
+            const out = { lat: +lat, lng: +lng, orderId: oid, order_id: oid, group_id: Number(groupId) };
+            if (gi.customer_id) io.to(`user:${gi.customer_id}`).emit('driver:location', out);
+            for (const ow of gi.owner_ids) io.to(`user:${ow}`).emit('driver:location', out);
+          } else {
+            const hit = _orderCache.get(`g${groupId}`);
+            if (hit && Date.now() - hit.at > 3000) _orderCache.delete(`g${groupId}`);
+          }
+        } else if (orderId && /^\d+$/.test(String(orderId))) {
           const info = await getOrderInfo(orderId);
           if (info && info.assigned && String(info.driver_id) === String(socket.userId) && ACTIVE.includes(info.status)) {
             const out = { lat: +lat, lng: +lng, orderId: Number(orderId), order_id: Number(orderId) };

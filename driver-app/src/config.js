@@ -14,3 +14,8 @@ export const ADMIN_WHATSAPP = `970${ADMIN_PHONE.replace(/^0/, '')}`;
 // تتبّع الموقع بالخلفية على أندرويد (خدمة أمامية) — موقوف مؤقتاً لحين تقديم إقرار Google Play (فيديو).
 // لإعادة تفعيله: true + إرجاع إذن FOREGROUND_SERVICE_LOCATION في AndroidManifest.
 export const ANDROID_BACKGROUND_TRACKING = false;
+
+// 🧺 قدرات هذا الإصدار — تُرسل مع كل طلب API (هيدر X-Wasaly-Features) ومع مصادقة السوكِت (features)
+// بدونها لا يعرض السيرفر الطلبات المجمّعة (عدة مطاعم — سائق واحد) على هذا السائق
+export const CLIENT_FEATURES = 'groups';
+export const FEATURES_HEADER = 'X-Wasaly-Features';

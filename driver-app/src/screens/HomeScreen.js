@@ -15,6 +15,7 @@ import { useTabBarOffset } from '../components/FloatingTabBar';
 import { COLORS, GRADIENTS, SHADOW, RTL, RADIUS } from '../theme';
 import { FadeIn, PopIn, Pulse, Skeleton, Press, CountUp, RadarRings, LoadingDots, GradientButton, haptic, isReducedMotion } from '../components/Anim';
 import { money, num, orderTitle, orderIcon, orderNo, isPersonal, driverFee, tipOf } from '../utils/format';
+import { groupNo, groupEarning, allPicked, nextStop, pickedCount } from '../utils/group';
 
 // وصف المرحلة الحالية للطلب النشط حسب الحالة الحقيقية
 function activeStage(o) {
@@ -105,7 +106,8 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { contentPadding } = useTabBarOffset();
   const { user } = useAuth();
-  const { isOnline, onlineBusy, setOnline, driver, activeOrder, refreshDriver, refreshActiveOrder } = useDriver();
+  const { isOnline, onlineBusy, setOnline, driver, activeOrder, activeGroup, refreshDriver, refreshActiveOrder } = useDriver();
+  const busyJob = !!(activeOrder || activeGroup);
   const { permission } = useDriverLocation();
   const [stats, setStats] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -253,8 +255,60 @@ export default function HomeScreen() {
           </FadeIn>
         )}
 
+        {/* 🧺 الطلب المجمّع النشط */}
+        {activeGroup && !activeOrder && (() => {
+          const g = activeGroup;
+          const toCustomer = allPicked(g);
+          const nx = nextStop(g);
+          const total = (g.stops || []).length;
+          return (
+            <FadeIn style={styles.section}>
+              <Press onPress={() => navigation.navigate('Delivery', { groupId: g.id })} scaleTo={0.98} hapticStyle="medium"
+                style={[styles.activeShadow]} accessibilityLabel={`طلب مجمّع نشط رقم ${groupNo(g)}، افتح التفاصيل والتنقل`}>
+                <LinearGradient colors={GRADIENTS.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.activeCard}>
+                  <View style={styles.activeGlow} />
+                  <View style={[RTL.row, { justifyContent: 'space-between', marginBottom: 14 }]}>
+                    <View style={[RTL.row, { gap: 8, flex: 1 }]}>
+                      <Pulse to={1.5}><View style={styles.activeLive} /></Pulse>
+                      <Text style={styles.activeTitle} numberOfLines={1}>طلب مجمّع #{groupNo(g)}</Text>
+                    </View>
+                    <StatusBadge status={toCustomer ? 'on_the_way' : 'preparing'} label={toCustomer ? 'في الطريق للزبون' : `استلمت ${pickedCount(g)} من ${total}`} onDark />
+                  </View>
+
+                  <View style={styles.activeRoute}>
+                    <View style={[RTL.row, { gap: 10 }]}>
+                      <View style={styles.activeDotWrap}><Ionicons name="layers" size={13} color={COLORS.primary} /></View>
+                      <Text style={[styles.activeText, RTL.text]} numberOfLines={1}>{(g.stops || []).map(s => s.name).join(' • ') || `${total} مطاعم`}</Text>
+                    </View>
+                    <View style={styles.activeLine} />
+                    <View style={[RTL.row, { gap: 10 }]}>
+                      <View style={styles.activeDotWrap}><Ionicons name="location" size={13} color={COLORS.red} /></View>
+                      <Text style={[styles.activeText, RTL.text]} numberOfLines={1}>{g.dropoff?.address || g.delivery_address || 'عنوان الزبون'}</Text>
+                    </View>
+                  </View>
+
+                  <View style={[RTL.row, { justifyContent: 'space-between', marginTop: 12 }]}>
+                    <Text style={[styles.activeHint, RTL.text]} numberOfLines={2}>
+                      {toCustomer ? 'استلمت كل الطلبات — توجّه إلى الزبون' : nx ? `التالي: ${nx.name}` : 'توجّه للمطاعم لاستلام الطلبات'}
+                    </Text>
+                    <View style={styles.feePill}>
+                      <Text style={styles.feeLabel}>أجرك</Text>
+                      <Text style={styles.feeValue}>{money(groupEarning(g))}</Text>
+                    </View>
+                  </View>
+                  <View style={{ marginTop: 12 }}><CashBadge order={g} size="sm" /></View>
+                  <View style={styles.navBtn}>
+                    <Ionicons name="navigate" size={19} color={COLORS.primary} />
+                    <Text style={styles.navBtnText}>التنقل والتفاصيل</Text>
+                  </View>
+                </LinearGradient>
+              </Press>
+            </FadeIn>
+          );
+        })()}
+
         {/* حالة الانتظار / عدم الاتصال */}
-        {!activeOrder && !isOnline && (
+        {!busyJob && !isOnline && (
           <FadeIn style={styles.section}>
             <View style={styles.stateBox}>
               <View style={styles.stateArt}>
@@ -267,7 +321,7 @@ export default function HomeScreen() {
             </View>
           </FadeIn>
         )}
-        {!activeOrder && isOnline && (
+        {!busyJob && isOnline && (
           <FadeIn style={styles.section}>
             <View style={[styles.stateBox, styles.waitingBox]}>
               <RadarRings size={150} color="rgba(29,185,84,0.35)" duration={2600}>

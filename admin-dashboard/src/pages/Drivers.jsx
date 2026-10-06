@@ -142,6 +142,7 @@ export default function Drivers() {
                         <Badge className={online ? 'bg-green-50 text-green-700 ring-green-200' : 'bg-gray-100 text-gray-500 ring-gray-200'}>{online ? 'متصل' : 'غير متصل'}</Badge>
                         {busy && <Badge className="bg-orange-50 text-orange-700 ring-orange-200">مشغول</Badge>}
                         {blocked && <Badge className="bg-red-50 text-red-600 ring-red-200">محظور</Badge>}
+                        {truthy(d.supports_groups) && <Badge className="bg-violet-50 text-violet-700 ring-violet-200">يدعم المجمّعة</Badge>}
                       </div>
                       <p className="text-[11.5px] text-ink-3 mt-1.5 truncate font-medium flex items-center gap-1.5"><FiPhone className="flex-shrink-0" /><span dir="ltr" className="num">{d.phone}</span> · {d.vehicle_type || '—'} · <span className="font-mono">{d.vehicle_plate || 'بدون لوحة'}</span></p>
                     </div>

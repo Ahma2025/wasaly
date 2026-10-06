@@ -17,6 +17,7 @@ import { useDriver } from '../context/DriverContext';
 import { useDriverLocation } from '../context/LocationContext';
 import { COLORS, GRADIENTS, SHADOW, RTL, RADIUS } from '../theme';
 import { SERVER_URL } from '../config';
+import GroupDeliveryScreen from './GroupDeliveryScreen';
 import {
   isPersonal, isRide, isAccepted, pickupPoint, orderNo, orderTitle, money, cashToCollect,
   driverFee, tipOf, num,
@@ -133,7 +134,13 @@ document.addEventListener('message',function(e){handleMsg(e.data);});
 </html>`;
 }
 
-export default function DeliveryScreen({ route, navigation }) {
+// شاشة "Delivery" واحدة في الـ Stack: طلب مجمّع (groupId) أو طلب عادي (orderId)
+export default function DeliveryScreen(props) {
+  if (props.route?.params?.groupId != null) return <GroupDeliveryScreen {...props} />;
+  return <SingleDeliveryScreen {...props} />;
+}
+
+function SingleDeliveryScreen({ route, navigation }) {
   const { orderId } = route.params || {};
   const insets = useSafeAreaInsets();
   const { user } = useAuth();

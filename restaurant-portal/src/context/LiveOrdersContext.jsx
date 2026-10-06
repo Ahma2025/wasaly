@@ -7,6 +7,7 @@ import { SERVER_URL } from '../utils/config';
 import { setupPush, showBrowserNotification } from '../utils/pushNotifications';
 import * as Printer from '../utils/printer';
 import { useRestaurant } from './RestaurantContext';
+import { isGroupOrder, groupStops } from '../utils/format';
 
 const LiveCtx = createContext({ tick: 0, socket: null, pendingCount: 0, connected: false, refreshNow: () => {} });
 
@@ -75,18 +76,30 @@ export function LiveOrdersProvider({ children }) {
 
   const bump = useCallback(() => setTick(t => t + 1), []);
 
-  const alertNewOrder = useCallback((orderId, orderNumber) => {
+  const alertNewOrder = useCallback((orderId, orderNumber, info = null) => {
     const key = String(orderId ?? orderNumber ?? '');
     if (!key || alerted.current.has(key)) return;
     alerted.current.add(key);
     playNewOrderChime();
     try { navigator.vibrate && navigator.vibrate([350, 120, 350, 120, 350]); } catch {}
     const label = orderNumber || orderId;
-    toast(`طلب جديد #${label} بانتظار موافقتك`, {
-      id: `new-${key}`, icon: '🛎️', duration: 9000,
-      style: { fontWeight: 800, border: '1.5px solid #FFCBA3' },
-    });
-    showBrowserNotification('طلب جديد!', `طلب #${label} ينتظر موافقتك`, { order_id: orderId }, () => navRef.current('/orders'));
+    const grouped = isGroupOrder(info);
+    if (grouped) {
+      // طلب مجمّع: سائق واحد يجمع من عدة مطاعم — التأخير يؤخّر الجميع
+      const n = groupStops(info);
+      toast(`طلب مجمّع جديد #${label}${n ? ` (من ${n} مطاعم)` : ''} — سائق واحد يجمع من عدة مطاعم، التزم بالوقت`, {
+        id: `new-${key}`, icon: '🛎️', duration: 12000,
+        style: { fontWeight: 800, border: '1.5px solid #C4B5FD' },
+      });
+    } else {
+      toast(`طلب جديد #${label} بانتظار موافقتك`, {
+        id: `new-${key}`, icon: '🛎️', duration: 9000,
+        style: { fontWeight: 800, border: '1.5px solid #FFCBA3' },
+      });
+    }
+    showBrowserNotification(grouped ? 'طلب مجمّع جديد!' : 'طلب جديد!',
+      grouped ? `طلب #${label} (ضمن طلب مجمّع — سائق واحد) ينتظر موافقتك` : `طلب #${label} ينتظر موافقتك`,
+      { order_id: orderId }, () => navRef.current('/orders'));
     if (orderId) autoPrintOrder(orderId, restRef.current);
   }, []);
 
@@ -109,7 +122,7 @@ export function LiveOrdersProvider({ children }) {
         const id = String(o.id);
         if (!seenPending.current.has(id)) {
           seenPending.current.add(id);
-          alertNewOrder(o.id, o.order_number);
+          alertNewOrder(o.id, o.order_number, o);
           bump();
         }
       }
@@ -142,7 +155,7 @@ export function LiveOrdersProvider({ children }) {
     s.on('new_order', (p = {}) => {
       const id = p.order_id ?? p.id;
       if (id != null && seenPending.current) seenPending.current.add(String(id));
-      alertNewOrder(id, p.order_number);
+      alertNewOrder(id, p.order_number, p);
       bump();
       setTimeout(pollPending, 800);
     });
@@ -151,7 +164,28 @@ export function LiveOrdersProvider({ children }) {
     s.on('driver_assigned', () => bump());
     s.on('order_cancelled', (p = {}) => {
       if (p.by && p.by !== 'restaurant') {
-        toast(`${p.by === 'customer' ? 'الزبون ألغى' : 'الإدارة ألغت'} الطلب #${p.order_number || p.order_id}`, { icon: '⚠️', duration: 7000, id: `cancel-${p.order_id}` });
+        // طلب ضمن مجمّع: نفس معرّف التنبيه مع group_cancelled حتى لا يتكرر التنبيه
+        toast(`${p.by === 'customer' ? 'الزبون ألغى' : 'الإدارة ألغت'} الطلب #${p.order_number || p.order_id}${p.group_id ? ' (ضمن طلب مجمّع)' : ''}`,
+          { icon: '⚠️', duration: 7000, id: p.group_id ? `grp-cancel-${p.group_id}` : `cancel-${p.order_id}` });
+      }
+      bump(); pollPending();
+    });
+    // ─── أحداث الطلب المجمّع (سائق واحد لعدة مطاعم) ───
+    s.on('group_status', (p = {}) => {
+      if (p.status === 'picking_up') {
+        toast(`سائق قبل الطلب المجمّع ${p.group_number || ''} وهو في طريقه لجمع الطلبات — جهّز طلبك في وقته`, { icon: '🛵', duration: 7000, id: `grp-${p.group_id}-picking` });
+      }
+      bump(); pollPending();
+    });
+    s.on('group_updated', (p = {}) => {
+      if (p.reason === 'restaurant_cancelled' && String(p.restaurant_id) !== String(restRef.current?.id)) {
+        toast(`${p.restaurant_name ? `«${p.restaurant_name}»` : 'أحد المطاعم'} انسحب من الطلب المجمّع ${p.group_number || ''} — الطلب مستمر مع باقي المطاعم`, { icon: 'ℹ️', duration: 7000, id: `grp-upd-${p.group_id}-${p.order_id}` });
+      }
+      bump(); pollPending();
+    });
+    s.on('group_cancelled', (p = {}) => {
+      if (p.by !== 'restaurant') {
+        toast(`${p.by === 'customer' ? 'الزبون ألغى' : p.by === 'admin' ? 'الإدارة ألغت' : 'تم إلغاء'} الطلب المجمّع ${p.group_number || ''}`, { icon: '⚠️', duration: 7000, id: `grp-cancel-${p.group_id}` });
       }
       bump(); pollPending();
     });

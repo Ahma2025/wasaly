@@ -16,7 +16,7 @@ import {
 const RING = 132;
 
 // لمعة تمرّ على زر القبول لجذب الانتباه
-function Shimmer({ active }) {
+export function Shimmer({ active }) {
   const reduced = useReducedMotion();
   const v = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -38,7 +38,7 @@ function Shimmer({ active }) {
   );
 }
 
-function Fact({ icon, label, value }) {
+export function Fact({ icon, label, value }) {
   return (
     <View style={styles.fact}>
       <Ionicons name={icon} size={16} color="#FFF" />

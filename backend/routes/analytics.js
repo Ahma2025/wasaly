@@ -2,6 +2,7 @@
 const pool = require('../config/database');
 const { serverError } = require('../utils/http');
 const { auth, adminOnly } = require('../middleware/auth');
+const { REVENUE_SOURCE } = require('../utils/orderService');
 
 router.get('/overview', auth, adminOnly, async (req, res) => {
   try {
@@ -10,10 +11,11 @@ router.get('/overview', auth, adminOnly, async (req, res) => {
     const end = to || new Date().toISOString();
 
     const [revenue, orders, users, avgOrder] = await Promise.all([
-      pool.query(`SELECT SUM(total) as total FROM orders WHERE status='delivered' AND created_at BETWEEN $1 AND $2`, [start, end]),
+      // 💵 الإيراد ومتوسط الطلب لكل عملية دفع: الطلبات العادية + كل طلب مجمّع مرة واحدة (بدون أبنائه)
+      pool.query(`SELECT SUM(total) as total FROM ${REVENUE_SOURCE} x WHERE status='delivered' AND created_at BETWEEN $1 AND $2`, [start, end]),
       pool.query(`SELECT COUNT(*) FROM orders WHERE created_at BETWEEN $1 AND $2`, [start, end]),
       pool.query(`SELECT COUNT(*) FROM users WHERE created_at BETWEEN $1 AND $2`, [start, end]),
-      pool.query(`SELECT AVG(total) as avg FROM orders WHERE status='delivered' AND created_at BETWEEN $1 AND $2`, [start, end])
+      pool.query(`SELECT AVG(total) as avg FROM ${REVENUE_SOURCE} x WHERE status='delivered' AND created_at BETWEEN $1 AND $2`, [start, end])
     ]);
 
     const hourly = await pool.query(

@@ -42,8 +42,10 @@ router.patch('/location', auth, driverOnly, async (req, res) => {
     const active = await driverLoc.getActiveRelay(req.user.id);
     if (active && !active.none && req.io) {
       const payload = { lat: +lat, lng: +lng, order_id: active.order_id, orderId: active.order_id };
+      if (active.group_id) payload.group_id = active.group_id;
       notifyUser(req.io, active.customer_id, 'driver:location', payload);
-      if (active.owner_id) notifyUser(req.io, active.owner_id, 'driver:location', payload);
+      const owners = new Set([...(active.owner_ids || []), active.owner_id].filter(Boolean).map(String));
+      for (const ow of owners) notifyUser(req.io, ow, 'driver:location', payload);
     }
     res.json({ success: true });
   } catch (e) {
@@ -72,7 +74,7 @@ router.get('/me', auth, driverOnly, async (req, res) => {
     let active = activeOrders[0] || null;
     if (active) {
       const tip = round2(num(active.tip));
-      active = { ...active, tip, cash_to_collect: (active.payment_method !== 'card' && active.payment_status !== 'paid') ? round2(num(active.total)) : 0 };
+      active = { ...active, tip, cash_to_collect: (!active.group_id && active.payment_method !== 'card' && active.payment_status !== 'paid') ? round2(num(active.total)) : 0 };
       if (!active.driver_assigned_at) {
         // عرض لم يُقبل بعد (قد تكون حالته confirmed أو preparing أو ready)
         active.is_offer = true;
@@ -83,7 +85,11 @@ router.get('/me', auth, driverOnly, async (req, res) => {
         }
       }
     }
-    res.json({ success: true, data: { ...drivers[0], active_order: active } });
+    // 🧺 طلب مجمّع حالي (عرض أو مهمة) — التطبيق الجديد يعتمد عليه؛ active_order يبقى للتوافق
+    let activeGroup = null;
+    try { activeGroup = await require('../utils/groupService').activeGroupForDriver(req.user.id); } catch (e) { console.error('active group:', e.message); }
+    if (active && active.group_id) { active.is_group = true; }
+    res.json({ success: true, data: { ...drivers[0], active_order: active, active_group: activeGroup } });
   } catch (e) {
     console.error('driver me:', e.message);
     res.status(500).json({ success: false, message: 'حدث خطأ، حاول مرة أخرى' });
@@ -93,6 +99,8 @@ router.get('/me', auth, driverOnly, async (req, res) => {
 // Driver earnings — period: today (Asia/Hebron calendar day) | week (last 7 days) | month (current calendar month)
 const EARN = `COALESCE(driver_fee, delivery_fee, 0) + COALESCE(tip, 0)`;
 const LOCAL = `(delivered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Hebron')`;
+// رحلة واحدة لكل طلب مجمّع (أبناؤه = توصيلة واحدة؛ المال على "الابن الحامل" فقط)
+const TRIP = `COALESCE(-group_id, id)`;
 router.get('/earnings', auth, driverOnly, async (req, res) => {
   try {
     const period = ['today', 'week', 'month'].includes(req.query.period) ? req.query.period : 'today';
@@ -100,10 +108,10 @@ router.get('/earnings', auth, driverOnly, async (req, res) => {
     const range = period === 'week' ? null : hebronRange(period === 'month' ? 'month' : 'day');
     const where = range ? `delivered_at >= $2::timestamp AND delivered_at < $3::timestamp` : `delivered_at > NOW() - INTERVAL '7 days'`;
     const { rows: stats } = await pool.query(
-      `SELECT COUNT(*) as deliveries, COALESCE(SUM(${EARN}),0) as earnings, COALESCE(SUM(COALESCE(tip,0)),0) as tips
+      `SELECT COUNT(DISTINCT ${TRIP}) as deliveries, COALESCE(SUM(${EARN}),0) as earnings, COALESCE(SUM(COALESCE(tip,0)),0) as tips
        FROM orders WHERE driver_id=$1 AND status='delivered' AND ${where}`, range ? [req.user.id, range.start, range.end] : [req.user.id]);
     const { rows: daily } = await pool.query(
-      `SELECT TO_CHAR(${LOCAL}, 'YYYY-MM-DD') as date, COUNT(*) as count, COALESCE(SUM(${EARN}),0) as earnings
+      `SELECT TO_CHAR(${LOCAL}, 'YYYY-MM-DD') as date, COUNT(DISTINCT ${TRIP}) as count, COALESCE(SUM(${EARN}),0) as earnings
        FROM orders WHERE driver_id=$1 AND status='delivered' AND delivered_at > NOW() - INTERVAL '31 days'
        GROUP BY 1 ORDER BY date DESC`, [req.user.id]);
     const { rows: driver } = await pool.query('SELECT wallet_balance, total_deliveries FROM drivers WHERE user_id=$1', [req.user.id]);

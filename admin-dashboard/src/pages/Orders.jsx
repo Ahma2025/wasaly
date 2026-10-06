@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { FiCalendar, FiPhone, FiRefreshCw, FiPackage, FiX, FiMapPin, FiUser, FiShoppingBag, FiTruck, FiCheck, FiFileText } from 'react-icons/fi';
+import { FiCalendar, FiPhone, FiRefreshCw, FiPackage, FiX, FiMapPin, FiUser, FiShoppingBag, FiTruck, FiCheck, FiFileText, FiLayers, FiChevronLeft } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
 import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, TableSkeleton, LoadMore, Modal, StatusChip, DataTable, IconButton, Button, useConfirm, useMediaQuery, Avatar } from '../components/ui';
 import { Sk } from '../components/Skeleton';
-import { STATUS, ORDER_FILTERS, statusMeta, fmtDateTime, money, num, paymentLabel, isPersonal } from '../utils/format';
+import { STATUS, ORDER_FILTERS, statusMeta, fmtDateTime, money, num, paymentLabel, isPersonal, isGroup } from '../utils/format';
+import GroupDetail, { GroupBadge, GroupStatusChip } from '../components/GroupDetail';
 
 const PAGE = 50;
 const FINAL = ['delivered', 'cancelled'];
@@ -32,6 +33,8 @@ export default function AdminOrders() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [groupId, setGroupId] = useState(null);
+  const [onlyGroups, setOnlyGroups] = useState(false);
   const timer = useRef(null);
   const reqId = useRef(0);
   const desktop = useMediaQuery('(min-width: 1024px)');
@@ -71,13 +74,14 @@ export default function AdminOrders() {
       if (a && !(t >= a)) return false;
       if (b && !(t <= b)) return false;
       if (status && o.status !== status) return false;
+      if (onlyGroups && !isGroup(o)) return false;
       if (q) {
-        const hay = [o.order_number, o.id, o.customer_name, o.restaurant_name, o.customer_phone, o.driver_name].join(' ').toLowerCase();
+        const hay = [o.order_number, o.id, o.customer_name, o.restaurant_name, o.customer_phone, o.driver_name, o.group_number].join(' ').toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [orders, from, to, search, status]);
+  }, [orders, from, to, search, status, onlyGroups]);
 
   const shownTotal = useMemo(() => shown.reduce((a, o) => a + num(o.total), 0), [shown]);
 
@@ -89,7 +93,12 @@ export default function AdminOrders() {
   const dateActive = from || to;
 
   const columns = [
-    { key: 'num', header: 'الطلب', render: o => <span className="font-black text-ink num">#{o.order_number || o.id}</span> },
+    { key: 'num', header: 'الطلب', render: o => (
+      <div className="flex flex-col items-start gap-1">
+        <span className="font-black text-ink num">#{o.order_number || o.id}</span>
+        <GroupBadge o={o} />
+      </div>
+    ) },
     { key: 'cust', header: 'الزبون', render: o => (
       <div className="flex items-center gap-2.5 min-w-[150px]">
         <Avatar name={o.customer_name || 'ز'} size={32} rounded={10} tint="#2E90FA" />
@@ -115,6 +124,10 @@ export default function AdminOrders() {
           <button onClick={() => setShowDates(s => !s)} aria-label="فلتر التاريخ" aria-expanded={showDates}
             className={`h-[46px] px-3.5 rounded-[14px] flex items-center justify-center gap-2 text-sm font-extrabold flex-shrink-0 ${dateActive ? 'grad-sunset text-white shadow-brand' : 'bg-white border-[1.5px] border-surface-line text-ink-2 hover:border-[#DDE0EA]'}`}>
             <FiCalendar className="text-lg" /><span className="hidden sm:inline">{dateActive ? 'تاريخ مفعّل' : 'التاريخ'}</span>
+          </button>
+          <button onClick={() => setOnlyGroups(v => !v)} aria-pressed={onlyGroups} aria-label="الطلبات المجمّعة فقط" title="الطلبات المجمّعة فقط (المحمّلة)"
+            className={`h-[46px] px-3.5 rounded-[14px] flex items-center justify-center gap-2 text-sm font-extrabold flex-shrink-0 ${onlyGroups ? 'bg-violet-600 text-white shadow-[0_10px_22px_rgba(139,92,246,.3)]' : 'bg-white border-[1.5px] border-surface-line text-ink-2 hover:border-[#DDE0EA]'}`}>
+            <FiLayers className="text-lg" /><span className="hidden sm:inline">مجمّعة</span>
           </button>
         </div>
 
@@ -148,6 +161,7 @@ export default function AdminOrders() {
                     <div className="min-w-0">
                       <p className="font-black text-ink text-[15px] truncate">{o.customer_name || 'زبون'} <span className="text-[11px] text-ink-3 font-bold num">#{o.order_number || o.id}</span></p>
                       <p className="text-xs text-ink-2 truncate mt-0.5">{personal ? '📦 توصيل شخصي' : `🏪 ${o.restaurant_name || '—'}`}</p>
+                      {isGroup(o) && <GroupBadge o={o} className="mt-1.5" />}
                     </div>
                     <div className="text-left flex-shrink-0">
                       <p className="font-black text-ink num text-[15px]">{money(o.total)}</p>
@@ -166,7 +180,8 @@ export default function AdminOrders() {
 
       {hasMore && <LoadMore shown={0} total={Infinity} loading={loadingMore} onMore={() => fetchOrders({ append: true, offset: orders.length })} />}
 
-      <OrderDetail order={selected} onClose={() => setSelected(null)} onChanged={onChanged} />
+      <OrderDetail order={selected} onClose={() => setSelected(null)} onChanged={onChanged} onOpenGroup={setGroupId} />
+      <GroupDetail groupId={groupId} onClose={() => setGroupId(null)} onChanged={() => fetchOrders()} />
     </div>
   );
 }
@@ -192,7 +207,7 @@ function SectionCard({ icon, title, children, className = '' }) {
   );
 }
 
-function OrderDetail({ order, onClose, onChanged }) {
+function OrderDetail({ order, onClose, onChanged, onOpenGroup }) {
   const confirm = useConfirm();
   const [full, setFull] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -220,13 +235,18 @@ function OrderDetail({ order, onClose, onChanged }) {
   const personal = isPersonal(o);
   const items = Array.isArray(o.items) ? o.items : [];
   const final = FINAL.includes(o.status);
+  const grouped = isGroup(o);
+  // الطلب الفرعي في المجمّع: الاستلام والتسليم عبر مسار المجمّع فقط (السيرفر يرفض on_the_way/delivered)
+  const statusOptions = ORDER_FILTERS.filter(s => s !== o.status && s !== 'cancelled' && !(grouped && (s === 'on_the_way' || s === 'delivered')));
 
   const setStatus = async (s) => {
     const meta = statusMeta(s);
     const isCancel = s === 'cancelled';
     const ok = await confirm({
       title: isCancel ? 'إلغاء الطلب' : 'تغيير حالة الطلب',
-      message: isCancel
+      message: isCancel && grouped
+        ? `سيُلغى طلب «${o.restaurant_name || 'المطعم'}» فقط من الطلب المجمّع ${o.group_number || ''}، ويُعاد حساب المجمّع وإرجاع الفرق للزبون. لإلغاء المجمّع كاملاً افتح تفاصيل المجمّع.`
+        : isCancel
         ? `سيتم إلغاء الطلب #${o.order_number || o.id} وإشعار الزبون والمطعم والسائق، وإرجاع الخصومات/النقاط للزبون.`
         : `تغيير حالة الطلب #${o.order_number || o.id} من «${m.label}» إلى «${meta.label}»؟`,
       confirmText: isCancel ? 'إلغاء الطلب' : 'تغيير',
@@ -269,14 +289,36 @@ function OrderDetail({ order, onClose, onChanged }) {
           <div className="flex gap-2">
             <select className="inp flex-1" value={newStatus} onChange={e => setNewStatus(e.target.value)} disabled={busy} aria-label="الحالة الجديدة">
               <option value="">تغيير الحالة إلى…</option>
-              {ORDER_FILTERS.filter(s => s !== o.status && s !== 'cancelled').map(s => <option key={s} value={s}>{STATUS[s].label}</option>)}
+              {statusOptions.map(s => <option key={s} value={s}>{STATUS[s].label}</option>)}
             </select>
             <Button disabled={!newStatus} loading={busy && !!newStatus} onClick={() => setStatus(newStatus)}>تطبيق</Button>
           </div>
-          <Button variant="danger" className="w-full" disabled={busy} icon={<FiX />} onClick={() => setStatus('cancelled')}>إلغاء الطلب</Button>
+          {grouped && (o.status === 'on_the_way' || o.picked_up_at) ? (
+            <Button variant="secondary" className="w-full" icon={<FiLayers />} onClick={() => o.group_id != null && onOpenGroup?.(o.group_id)}>استلمه السائق — للإلغاء افتح الطلب المجمّع</Button>
+          ) : (
+            <Button variant="danger" className="w-full" disabled={busy} icon={<FiX />} onClick={() => setStatus('cancelled')}>{grouped ? 'إلغاء طلب هذا المطعم فقط' : 'إلغاء الطلب'}</Button>
+          )}
         </div>
       )}>
       <div className="space-y-4">
+        {grouped && (
+          <button type="button" onClick={() => o.group_id != null && onOpenGroup?.(o.group_id)}
+            className="w-full text-right rounded-[18px] p-3.5 bg-gradient-to-br from-violet-50 to-white border border-violet-200 flex items-center gap-3 hover:shadow-card transition-shadow">
+            <span className="w-10 h-10 rounded-xl bg-violet-600 text-white flex items-center justify-center text-lg flex-shrink-0"><FiLayers /></span>
+            <span className="flex-1 min-w-0">
+              <span className="flex items-center gap-2 flex-wrap">
+                <span className="font-black text-sm text-violet-800">طلب مجمّع <span className="num" dir="ltr">{o.group_number || ''}</span></span>
+                {o.group_status && <GroupStatusChip status={o.group_status} size="sm" />}
+              </span>
+              <span className="block text-[11.5px] text-ink-2 font-medium mt-0.5">
+                {o.stop_sequence ? <>محطة <span className="num">{o.stop_sequence}</span> من <span className="num">{o.group_stops_count || '?'}</span> · </> : null}
+                {o.group_total != null ? <>إجمالي المجمّع <span className="num font-bold">{money(o.group_total)}</span> · </> : null}
+                الرسوم والدفع على مستوى المجمّع
+              </span>
+            </span>
+            <FiChevronLeft className="text-violet-500 flex-shrink-0" />
+          </button>
+        )}
         {/* Status stepper */}
         {!personal || o.status ? (
           <div className={`rounded-[18px] p-4 ${cancelled ? 'bg-red-50/70 border border-red-100' : 'bg-gradient-to-br from-[#FFF7F0] to-white border border-orange-100'}`}>
@@ -364,7 +406,7 @@ function OrderDetail({ order, onClose, onChanged }) {
 
         <SectionCard icon={<FiFileText />} title="الفاتورة">
           <Row k="المجموع الفرعي" v={<span className="num">{money(o.subtotal)}</span>} />
-          <Row k="رسوم التوصيل" v={num(o.delivery_fee) === 0 && o.order_type !== 'pickup' ? 'مجاني' : <span className="num">{money(o.delivery_fee)}</span>} />
+          <Row k="رسوم التوصيل" v={grouped ? 'ضمن المجمّع' : num(o.delivery_fee) === 0 && o.order_type !== 'pickup' ? 'مجاني' : <span className="num">{money(o.delivery_fee)}</span>} />
           {num(o.discount) > 0 && <Row k="الخصم" v={<span className="text-green-600 num">−{money(o.discount)}</span>} />}
           {o.coupon_code && <Row k="كوبون" v={<span className="font-mono">{o.coupon_code}</span>} />}
           {num(o.points_value) > 0 && <Row k="نقاط مستبدلة" v={<span className="text-green-600 num">−{money(o.points_value)}</span>} />}

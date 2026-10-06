@@ -9,7 +9,7 @@ import { AnimatedNumber } from './UI';
 import { SPRING, SPRING_POP, haptic, isReducedMotion } from '../utils/motion';
 
 // شريط السلة العائم: يدخل بانزلاق، يرتد عند تغيّر العدد، والمجموع يعدّ بحركة
-export default function CartBar({ count, total, onPress }) {
+export default function CartBar({ count, total, onPress, hint }) {
   const { colors: COLORS } = useTheme();
   const insets = useSafeAreaInsets();
   const enter = useRef(new Animated.Value(isReducedMotion() ? 1 : 0)).current;
@@ -36,7 +36,7 @@ export default function CartBar({ count, total, onPress }) {
               </View>
               <View style={{ flex: 1, alignItems: 'flex-end', marginRight: 12 }}>
                 <Text style={styles.text}>عرض السلة</Text>
-                <Text style={styles.hint}>اضغط لإتمام الطلب</Text>
+                <Text style={styles.hint} numberOfLines={1}>{hint || 'اضغط لإتمام الطلب'}</Text>
               </View>
               <View style={styles.totalPill}>
                 <AnimatedNumber value={total} suffix="₪" style={styles.total} />

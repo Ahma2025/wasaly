@@ -63,7 +63,8 @@ export default function NotificationsScreen({ navigation }) {
   const onPress = (item) => {
     if (!item.is_read) markRead(item.id);
     const data = parseData(item.data);
-    if (data.order_id) navigation.navigate('OrderTracking', { orderId: data.order_id });
+    if (data.group_id && data.group_id !== 'null' && !data.code) navigation.navigate('GroupTracking', { groupId: data.group_id }); // طلب مجمّع
+    else if (data.order_id) navigation.navigate('OrderTracking', { orderId: data.order_id });
   };
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
@@ -72,7 +73,7 @@ export default function NotificationsScreen({ navigation }) {
     const data = parseData(item.data);
     const title = item.title_ar || item.title || 'إشعار';
     const body = item.body_ar || item.body || '';
-    const opens = !!data.order_id;
+    const opens = !!data.order_id || !!data.group_id;
     return (
       <FadeIn index={index} from={14}>
         <TouchableOpacity style={[styles.card, !item.is_read && styles.cardUnread]} onPress={() => onPress(item)} activeOpacity={0.8}

@@ -23,7 +23,7 @@ export function LocationProvider({ children }) {
   const coordsRef = useRef(null);
   const watcherRef = useRef(null);
   const watcherMode = useRef(null); // 'idle' | 'delivery' | null
-  const trackingRef = useRef({ online: false, activeOrderId: null });
+  const trackingRef = useRef({ online: false, activeOrderId: null, activeGroupId: null });
   const lastUpload = useRef(0);
   const lastRest = useRef(0);
   const permLock = useRef(Promise.resolve());
@@ -96,7 +96,10 @@ export function LocationProvider({ children }) {
     lastUpload.current = now;
     let socketSent = false;
     if (activeOrderId) {
-      socketSent = socketEmit('driver:location', { lat, lng, orderId: activeOrderId, order_id: activeOrderId });
+      const { activeGroupId } = trackingRef.current;
+      const payload = { lat, lng, orderId: activeOrderId, order_id: activeOrderId };
+      if (activeGroupId) payload.group_id = activeGroupId; // 🧺 طلب مجمّع: يُرحَّل للزبون وكل المطاعم
+      socketSent = socketEmit('driver:location', payload);
     }
     const restGap = activeOrderId && socketSent && isSocketConnected() ? REST_WHILE_SOCKET_MS : 0;
     if (force || now - lastRest.current >= restGap - 250) {

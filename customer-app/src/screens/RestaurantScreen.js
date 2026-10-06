@@ -120,7 +120,7 @@ export default function RestaurantScreen() {
   const insets = useSafeAreaInsets();
   const { colors: COLORS } = useTheme();
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
-  const { addItem, count, total, clearAndAdd } = useCart();
+  const { addItem, count, total, clearAndAdd, restaurantsCount } = useCart();
   const groupId = route.params?.groupId;      // وضع الطلب الجماعي (إن وُجد)
   const groupCode = route.params?.groupCode;
   const [restaurant, setRestaurant] = useState(null);
@@ -261,10 +261,31 @@ export default function RestaurantScreen() {
     const itemWithAddons = { ...base, addons: addonsFlat };
     const result = addItem(itemWithAddons, restaurant, qty);
     if (result?.conflict) {
-      Alert.alert('مطعم مختلف', `سلتك فيها أصناف من ${result.restaurant || 'مطعم آخر'}. بدك تفرّغها وتبدأ من هون؟`, [
-        { text: 'إلغاء', style: 'cancel' },
-        { text: 'نعم، ابدأ من جديد', style: 'destructive', onPress: () => { clearAndAdd(itemWithAddons, restaurant, qty); setSelectedItem(null); setFlyShot({ k: Date.now(), image: selectedItem.image }); } },
-      ]);
+      haptic.warning();
+      const replace = { text: 'استبدل السلة', style: 'destructive', onPress: () => { clearAndAdd(itemWithAddons, restaurant, qty); setSelectedItem(null); setFlyShot({ k: Date.now(), image: selectedItem.image }); } };
+      const here = restaurant?.name_ar ? `«${restaurant.name_ar}»` : 'هذا المطعم';
+      if (result.reason === 'limit') {
+        Alert.alert(
+          'وصلت للحد الأقصى 🛵',
+          `بتقدر تطلب من ${result.max} مطاعم كحد أقصى بالطلب الواحد (سائق واحد بيجمعهم).\nسلتك فيها: ${result.restaurant}.\n\nبدك تفرّغ السلة وتبدأ من ${here}؟ أو احذف مطعم من السلة أولاً.`,
+          [
+            { text: 'إلغاء', style: 'cancel' },
+            { text: 'راجع السلة', onPress: () => { setSelectedItem(null); navigation.navigate('Main', { screen: 'سلتي' }); } },
+            replace,
+          ],
+        );
+      } else if (result.reason === 'too_far') {
+        Alert.alert(
+          'المطعم بعيد عن سلتك',
+          `${here} بعيد عن «${result.far}» (${result.distance_km} كم) — بالطلب المجمّع لازم المطاعم تكون قريبة من بعض (${result.max_distance_km} كم كحد أقصى).\n\nبدك تفرّغ السلة وتبدأ من ${here}؟`,
+          [{ text: 'إلغاء', style: 'cancel' }, replace],
+        );
+      } else {
+        Alert.alert('مطعم مختلف', `سلتك فيها أصناف من ${result.restaurant || 'مطعم آخر'}. بدك تفرّغها وتبدأ من هون؟`, [
+          { text: 'إلغاء', style: 'cancel' },
+          { ...replace, text: 'نعم، ابدأ من جديد' },
+        ]);
+      }
     } else {
       haptic.success();
       setSelectedItem(null);
@@ -601,7 +622,7 @@ export default function RestaurantScreen() {
           <Ionicons name="checkmark-circle" size={20} color="#FFF" />
           <Text style={styles.groupReturnTxt}>خلّصت؟ ارجع للمجموعة</Text>
         </Pressable>
-      ) : cartVisible && <CartBar count={count} total={total} onPress={() => navigation.navigate('Main', { screen: 'سلتي' })} />}
+      ) : cartVisible && <CartBar count={count} total={total} hint={restaurantsCount > 1 ? `طلب مجمّع من ${restaurantsCount} مطاعم · سائق واحد` : undefined} onPress={() => navigation.navigate('Main', { screen: 'سلتي' })} />}
 
       <FlyToCart shot={flyShot} onDone={() => setFlyShot(null)} bottomInset={insets.bottom} C={COLORS} />
 

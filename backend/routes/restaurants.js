@@ -263,8 +263,11 @@ router.get('/:id/orders', auth, restaurantOnly, async (req, res) => {
     const rid = String(req.params.id);
     const key = `rorders:${rid}:${statuses.join(',')}:${safeLimit}:${safeOffset}`;
     const rows = await cache.wrapVersioned(cache.V.restOrders(rid), key, REST_ORDERS_TTL, async () => {
-    let q = `SELECT o.*, u.name as customer_name, u.phone as customer_phone FROM orders o
-             LEFT JOIN users u ON o.customer_id = u.id WHERE o.restaurant_id=$1
+    // 🧺 ابن طلب مجمّع: group_id/stop_sequence (من o.*) + group_number + group_stops_count + is_group لتمييز البطاقة
+    let q = `SELECT o.*, u.name as customer_name, u.phone as customer_phone,
+             g.group_number, g.stops_total AS group_stops_count, (o.group_id IS NOT NULL) AS is_group FROM orders o
+             LEFT JOIN users u ON o.customer_id = u.id
+             LEFT JOIN order_groups g ON g.id = o.group_id WHERE o.restaurant_id=$1
              AND NOT (o.payment_method='card' AND COALESCE(o.payment_status,'pending') <> 'paid' AND o.status='pending' AND COALESCE(o.total,0) > 0)`;
     const params = [req.params.id];
     if (statuses.length) { params.push(statuses); q += ` AND o.status = ANY($${params.length}::text[])`; }

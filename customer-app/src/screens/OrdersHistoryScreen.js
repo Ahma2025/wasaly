@@ -13,7 +13,69 @@ import EmptyState from '../components/EmptyState';
 import { useTabBarInset } from '../components/FloatingTabBar';
 import { useCart } from '../context/CartContext';
 import { useTheme } from '../context/ThemeContext';
-import { ACTIVE_STATUSES, statusLabel, statusMeta, softBg, isPersonalOrder } from '../utils/status';
+import { ACTIVE_STATUSES, statusLabel, statusMeta, softBg, isPersonalOrder, ACTIVE_GROUP_STATUSES, GROUP_PROGRESS, groupStatusLabel, groupStatusMeta } from '../utils/status';
+
+const num = (v, d = 0) => { const n = parseFloat(v); return Number.isFinite(n) ? n : d; };
+
+// حالة احتياطية للمجموعة لو السيرفر ما رجّع group_status
+const deriveGroupStatus = (children) => {
+  const st = children.map(c => c.status);
+  if (st.length && st.every(x => x === 'cancelled')) return 'cancelled';
+  const open = st.filter(x => x !== 'cancelled');
+  if (open.length && open.every(x => x === 'delivered')) return 'delivered';
+  if (open.some(x => x === 'on_the_way')) return open.every(x => x === 'on_the_way') ? 'on_the_way' : 'picking_up';
+  if (open.some(x => x === 'pending')) return 'pending';
+  return 'confirmed';
+};
+
+/*
+  طلب مجمّع: /orders/my بيرجّع كل مطعم كطلب لحاله (مع group_id) → ندمجهم بكارت واحد بإجمالي المجموعة.
+  بيانات /orders/groups/my (إن توفرت) تكمّل الحالة والمطاعم.
+*/
+const mergeGroups = (list, groupsById) => {
+  const out = [];
+  const seen = new Map();
+  for (const o of list || []) {
+    if (!o || o.group_id == null) { out.push(o); continue; }
+    const gid = String(o.group_id);
+    let g = seen.get(gid);
+    if (!g) {
+      const gv = groupsById[gid];
+      g = {
+        _group: true, id: 'g' + gid, group_id: o.group_id,
+        group_number: (gv && gv.group_number) || o.group_number,
+        status: (gv && gv.status) || o.group_status || null,
+        status_label: gv && gv.status_label,
+        total: gv && gv.total != null ? gv.total : o.group_total,
+        created_at: (gv && gv.created_at) || o.created_at,
+        stops: num(gv && gv.stops_total, num(o.group_stops_count)),
+        gv, children: [],
+      };
+      seen.set(gid, g);
+      out.push(g);
+    }
+    g.children.push(o);
+  }
+  // مجموعات موجودة بـ groups/my وأطفالها مش ضمن آخر 50 طلب
+  Object.values(groupsById).forEach(gv => {
+    const gid = String(gv.id);
+    if (seen.has(gid) || !Array.isArray(gv.orders) || !gv.orders.length) return;
+    const g = { _group: true, id: 'g' + gid, group_id: gv.id, group_number: gv.group_number, status: gv.status, status_label: gv.status_label,
+      total: gv.total, created_at: gv.created_at, stops: num(gv.stops_total), gv, children: [] };
+    seen.set(gid, g);
+    out.push(g);
+  });
+  seen.forEach(g => {
+    const src = g.gv && Array.isArray(g.gv.orders) && g.gv.orders.length ? g.gv.orders : g.children;
+    if (!g.status) g.status = deriveGroupStatus(src);
+    const live = src.filter(c => c.status !== 'cancelled');
+    g.restaurants = (live.length ? live : src).map(c => ({ name: c.restaurant_name, logo: c.restaurant_logo }));
+    if (!g.stops) g.stops = g.restaurants.length;
+    if (g.total == null) g.total = g.children.reduce((s, c) => s + num(c.total), 0);
+  });
+  return out.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+};
+const isActiveRow = (o) => (o._group ? ACTIVE_GROUP_STATUSES.includes(o.status) : ACTIVE_STATUSES.includes(o.status));
 
 const orderTitle = (o) => (isPersonalOrder(o)
   ? (o.service_type === 'ride' ? '🧍 توصيل راكب' : '📦 توصيل طرد')
@@ -25,24 +87,35 @@ export default function OrdersHistoryScreen() {
   const { colors: COLORS } = useTheme();
   const styles = React.useMemo(() => makeStyles(COLORS), [COLORS]);
   const tabInset = useTabBarInset();
-  const [orders, setOrders] = useState([]);
+  const [rawOrders, setOrders] = useState([]);
+  const [groupsById, setGroupsById] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [reordering, setReordering] = useState(null);
 
   const fetchOrders = useCallback(async () => {
     try {
-      const data = await api.get('/orders/my?limit=50');
+      const [data, groups] = await Promise.all([
+        api.get('/orders/my?limit=50'),
+        api.get('/orders/groups/my?limit=50').catch(() => null), // سيرفر قديم → نكتفي بدمج group_id
+      ]);
       const list = data.data || [];
       setOrders(list);
       writeCache('orders_my', list);
+      if (Array.isArray(groups?.data)) {
+        const map = {};
+        groups.data.forEach(g => { if (g && g.id != null) map[String(g.id)] = g; });
+        setGroupsById(map);
+        writeCache('groups_my', map);
+      }
     } catch {}
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   useFocusEffect(useCallback(() => {
     (async () => {
-      const cached = await readCache('orders_my');
+      const [cached, cachedGroups] = await Promise.all([readCache('orders_my'), readCache('groups_my')]);
+      if (cachedGroups && typeof cachedGroups === 'object') setGroupsById(cachedGroups);
       if (cached) { setOrders(cached); setLoading(false); }
       fetchOrders();
     })();
@@ -84,8 +157,9 @@ export default function OrdersHistoryScreen() {
     } else doReorder(order);
   };
 
-  const active = orders.filter(o => ACTIVE_STATUSES.includes(o.status));
-  const history = orders.filter(o => !ACTIVE_STATUSES.includes(o.status));
+  const orders = React.useMemo(() => mergeGroups(rawOrders, groupsById), [rawOrders, groupsById]);
+  const active = orders.filter(isActiveRow);
+  const history = orders.filter(o => !isActiveRow(o));
 
   const [filter, setFilter] = useState('all');
   const shownHistory = filter === 'all' ? history
@@ -129,7 +203,9 @@ export default function OrdersHistoryScreen() {
                 </TouchableOpacity>
               </FadeIn>
             ) : (
-              active.map((o, i) => <FadeIn key={o.id} index={i}><ActiveCard order={o} navigation={navigation} styles={styles} C={COLORS} /></FadeIn>)
+              active.map((o, i) => <FadeIn key={o.id} index={i}>{o._group
+                ? <GroupActiveCard group={o} navigation={navigation} styles={styles} C={COLORS} />
+                : <ActiveCard order={o} navigation={navigation} styles={styles} C={COLORS} />}</FadeIn>)
             )}
           </View>
 
@@ -147,7 +223,9 @@ export default function OrdersHistoryScreen() {
                 <Text style={styles.noneTxt}>ما في طلبات بهالتصنيف</Text>
               ) : shownHistory.map((o, i) => (
                 <FadeIn key={`${filter}-${o.id}`} index={i}>
-                  <OrderCard order={o} navigation={navigation} onReorder={handleReorder} reordering={reordering === o.id} styles={styles} C={COLORS} />
+                  {o._group
+                    ? <GroupOrderCard group={o} navigation={navigation} styles={styles} C={COLORS} />
+                    : <OrderCard order={o} navigation={navigation} onReorder={handleReorder} reordering={reordering === o.id} styles={styles} C={COLORS} />}
                 </FadeIn>
               ))}
             </View>
@@ -199,6 +277,95 @@ function ActiveCard({ order, navigation, styles, C }) {
           </View>
         </View>
       </LinearGradient>
+    </Press>
+  );
+}
+
+/* لوجوهات المطاعم متراكبة (حتى 3) */
+function StackedLogos({ restaurants, styles, C, onGradient }) {
+  const list = (restaurants || []).slice(0, 3);
+  return (
+    <View style={styles.stack}>
+      {list.map((r, i) => (
+        <View key={i} style={[styles.stackItem, i > 0 && { marginRight: -16 }, { zIndex: 10 - i, borderColor: onGradient ? 'rgba(255,255,255,0.85)' : C.card }]}>
+          {r.logo
+            ? <Image source={{ uri: r.logo }} style={styles.stackImg} />
+            : <View style={[styles.stackImg, { alignItems: 'center', justifyContent: 'center', backgroundColor: onGradient ? 'rgba(255,255,255,0.25)' : C.tint }]}>
+                <Ionicons name="storefront" size={15} color={onGradient ? '#FFF' : C.primary} />
+              </View>}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const groupTitle = (g) => `طلب مجمّع • ${g.stops || g.restaurants?.length || 0} مطاعم`;
+const groupNames = (g) => (g.restaurants || []).map(r => r.name).filter(Boolean).join(' · ');
+
+/* طلب مجمّع جاري: كارت واحد لكل المطاعم */
+function GroupActiveCard({ group, navigation, styles, C }) {
+  const meta = groupStatusMeta(group.status);
+  const idx = Math.max(0, GROUP_PROGRESS.indexOf(group.status));
+  const label = groupStatusLabel(group.status, group);
+  return (
+    <Press onPress={() => navigation.navigate('GroupTracking', { groupId: group.group_id })} scaleTo={0.97}
+      accessibilityRole="button" accessibilityLabel={`${groupTitle(group)}، ${label}، اضغط للتتبع`}
+      style={styles.activeShadow}>
+      <LinearGradient colors={C.gradients.sunset} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.activeCard}>
+        <LinearGradient colors={C.gradients.sheen} style={styles.activeSheen} pointerEvents="none" />
+        <View style={styles.cardTop}>
+          <StackedLogos restaurants={group.restaurants} styles={styles} C={C} onGradient />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.restaurantName, { color: '#FFF' }]} numberOfLines={1}>{groupTitle(group)}</Text>
+            <Text style={[styles.orderDate, { color: 'rgba(255,255,255,0.88)' }]} numberOfLines={1}>{groupNames(group) || (group.group_number ? `#${group.group_number}` : '')}</Text>
+          </View>
+          <View style={styles.activeStatus}>
+            <Ionicons name={meta.icon} size={13} color={C.primary} />
+            <Text style={[styles.statusText, { color: C.primary }]} numberOfLines={1}>{label}</Text>
+          </View>
+        </View>
+        <View style={styles.miniSteps}>
+          {GROUP_PROGRESS.slice(0, 4).map((s, i) => (
+            <View key={s} style={[styles.miniStep, { backgroundColor: i <= idx ? '#FFF' : 'rgba(255,255,255,0.3)' }]} />
+          ))}
+        </View>
+        <View style={styles.activeBottom}>
+          <Text style={styles.activeTotal}>{num(group.total).toFixed(2)}₪</Text>
+          <View style={styles.trackPill}>
+            <Ionicons name="bicycle" size={13} color={C.primary} />
+            <Text style={[styles.trackText, { color: C.primary }]}>سائق واحد · تتبّع</Text>
+          </View>
+        </View>
+      </LinearGradient>
+    </Press>
+  );
+}
+
+function GroupOrderCard({ group, navigation, styles, C }) {
+  const meta = groupStatusMeta(group.status);
+  const date = group.created_at ? new Date(group.created_at) : null;
+  const label = groupStatusLabel(group.status, group);
+  return (
+    <Press style={styles.card} onPress={() => navigation.navigate('GroupTracking', { groupId: group.group_id })} scaleTo={0.98} haptic={false}
+      accessibilityRole="button" accessibilityLabel={`${groupTitle(group)}، ${label}`}>
+      <View style={styles.cardTop}>
+        <StackedLogos restaurants={group.restaurants} styles={styles} C={C} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.restaurantName} numberOfLines={1}>{groupTitle(group)}</Text>
+          <Text style={styles.orderDate} numberOfLines={1}>
+            {date ? date.toLocaleString('ar', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : ''}
+            {group.group_number ? `  ·  #${group.group_number}` : ''}
+          </Text>
+        </View>
+        <View style={[styles.statusBadge, { backgroundColor: softBg(meta.color) }]}>
+          <Ionicons name={meta.icon} size={12} color={meta.color} />
+          <Text style={[styles.statusText, { color: meta.color }]}>{label}</Text>
+        </View>
+      </View>
+      <View style={styles.cardBottom}>
+        <Text style={[styles.itemsCount, { flex: 1, textAlign: 'right' }]} numberOfLines={1}>{groupNames(group)}</Text>
+        <Text style={styles.totalAmount}>{num(group.total).toFixed(2)}₪</Text>
+      </View>
     </Press>
   );
 }
@@ -293,4 +460,7 @@ const makeStyles = (C) => StyleSheet.create({
   trackText: { fontSize: 12.5, fontWeight: '800', textAlign: 'right' },
   reorderBtn: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10, paddingVertical: 11, borderRadius: 14, borderWidth: 1.5, borderColor: C.tintBorder, backgroundColor: C.tint },
   reorderText: { fontSize: 14, color: C.primary, fontWeight: '800' },
+  stack: { flexDirection: 'row-reverse', alignItems: 'center' },
+  stackItem: { width: 40, height: 40, borderRadius: 13, borderWidth: 2, overflow: 'hidden', backgroundColor: C.inputBg },
+  stackImg: { width: '100%', height: '100%' },
 });

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { FiMap, FiRefreshCw, FiCrosshair, FiPackage, FiTruck, FiUser, FiNavigation } from 'react-icons/fi';
+import { FiMap, FiRefreshCw, FiCrosshair, FiPackage, FiTruck, FiUser, FiNavigation, FiLayers } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
-import { statusMeta, money, num, isPersonal, fmtTime } from '../utils/format';
+import { statusMeta, groupStatusMeta, money, num, isPersonal, isGroup, fmtTime } from '../utils/format';
 import { PageHeader, StatTile, StatusChip, IconButton } from '../components/ui';
+import GroupDetail, { GroupBadge } from '../components/GroupDetail';
 
 const CENTER = [32.313, 35.029];
 
@@ -53,6 +54,7 @@ export default function LiveOps() {
   const [updatedAt, setUpdatedAt] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [focused, setFocused] = useState(null);
+  const [groupId, setGroupId] = useState(null);
 
   const load = useCallback(() => { setRefreshing(true); return api.get('/admin/live-ops')
     .then(r => {
@@ -106,7 +108,7 @@ export default function LiveOps() {
         L.marker(from, { icon: icon(personal ? '📦' : '🏪', personal ? '#FFF1E6' : '#fff', '#FF6B00') }).addTo(layer)
           .bindPopup(popupNode(personal
             ? [['📦 توصيل شخصي — نقطة الاستلام', true], [o.pickup_address], [`${num_} — ${st}`]]
-            : [[`🏪 ${o.restaurant_name || 'مطعم'}`, true], [`${num_} — ${st}`]]));
+            : [[`🏪 ${o.restaurant_name || 'مطعم'}`, true], [`${num_} — ${st}`], isGroup(o) ? [`🧺 مجمّع ${o.group_number || ''}${o.stop_sequence ? ` · محطة ${o.stop_sequence}` : ''}${o.group_status ? ` · ${groupStatusMeta(o.group_status).label}` : ''}`] : null]));
         pts.push(from);
       }
       if (to) {
@@ -220,7 +222,7 @@ export default function LiveOps() {
                 const personal = isPersonal(o);
                 const on = focused === o.id;
                 return (
-                  <li key={o.id}>
+                  <li key={o.id} className="relative">
                     <button onClick={() => focusOrder(o)}
                       className={`w-full text-right px-4 py-3.5 flex items-start gap-3 relative ${on ? 'bg-orange-50/70' : 'hover:bg-[#FAFBFD]'}`}>
                       <span className="absolute right-0 top-3 bottom-3 w-[3px] rounded-l" style={{ background: m.color, opacity: on ? 1 : .55 }} />
@@ -228,6 +230,7 @@ export default function LiveOps() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-black text-ink text-sm num">#{o.order_number || o.id}</p>
                           <StatusChip status={o.status} size="sm" />
+                          <GroupBadge o={o} />
                         </div>
                         <p className="text-xs text-ink-2 mt-1.5 truncate font-medium">
                           {personal ? `📦 ${o.pickup_address || 'توصيل شخصي'}` : `🏪 ${o.restaurant_name || '—'}`}
@@ -238,6 +241,12 @@ export default function LiveOps() {
                       </div>
                       <p className="font-black text-brand-600 text-sm flex-shrink-0 num">{money(num(o.total), 0)}</p>
                     </button>
+                    {isGroup(o) && o.group_id != null && (
+                      <button onClick={() => setGroupId(o.group_id)} title="تفاصيل الطلب المجمّع" aria-label={`تفاصيل الطلب المجمّع ${o.group_number || ''}`}
+                        className="absolute left-3 bottom-2.5 inline-flex items-center gap-1 rounded-full bg-violet-600 text-white text-[10.5px] font-extrabold px-2.5 py-1 shadow-soft hover:bg-violet-700">
+                        <FiLayers className="text-[10px]" /> المجمّع
+                      </button>
+                    )}
                   </li>
                 );
               })}
@@ -245,6 +254,7 @@ export default function LiveOps() {
           )}
         </aside>
       </div>
+      <GroupDetail groupId={groupId} onClose={() => setGroupId(null)} onChanged={load} />
     </div>
   );
 }

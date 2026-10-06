@@ -92,12 +92,22 @@ const activeKey = (driverId) => `drvact:${driverId}`;
 async function getActiveRelay(driverId) {
   return cache.wrap(activeKey(driverId), ACTIVE_TTL, async () => {
     const { rows } = await pool.query(
-      `SELECT o.customer_id, o.id as order_id, r.owner_id
+      `SELECT o.customer_id, o.id as order_id, r.owner_id, o.group_id
        FROM orders o LEFT JOIN restaurants r ON o.restaurant_id=r.id
        WHERE o.driver_id=$1 AND o.driver_assigned_at IS NOT NULL
          AND o.status IN ('confirmed','preparing','ready','on_the_way')
-       ORDER BY o.driver_assigned_at DESC LIMIT 1`, [driverId]);
-    return rows[0] ? { order_id: rows[0].order_id, customer_id: rows[0].customer_id, owner_id: rows[0].owner_id } : { none: true };
+       ORDER BY o.driver_assigned_at DESC, o.stop_sequence NULLS LAST, o.id LIMIT 1`, [driverId]);
+    if (!rows[0]) return { none: true };
+    const out = { order_id: rows[0].order_id, customer_id: rows[0].customer_id, owner_id: rows[0].owner_id };
+    if (rows[0].group_id) {
+      // 🧺 طلب مجمّع: الموقع للزبون + كل أصحاب المطاعم غير الملغاة
+      const { rows: ow } = await pool.query(
+        `SELECT DISTINCT r.owner_id FROM orders o JOIN restaurants r ON r.id=o.restaurant_id
+         WHERE o.group_id=$1 AND o.status <> 'cancelled' AND r.owner_id IS NOT NULL`, [rows[0].group_id]);
+      out.group_id = rows[0].group_id;
+      out.owner_ids = ow.map(r => r.owner_id);
+    }
+    return out;
   });
 }
 function invalidateActiveRelay(driverId) {

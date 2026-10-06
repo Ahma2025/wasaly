@@ -2,7 +2,8 @@ const router = require('express').Router();
 const bcrypt = require('bcryptjs');
 const pool = require('../config/database');
 const { auth, adminOnly } = require('../middleware/auth');
-const { round2, num } = require('../utils/orderService');
+const { round2, num, isIntId, HttpError, REVENUE_SOURCE } = require('../utils/orderService');
+const G = require('../utils/groupService');
 const cache = require('../utils/cache');
 const { serverError, clampInt, strParam } = require('../utils/http');
 const { hebronRange } = require('../utils/time');
@@ -22,6 +23,8 @@ const ROLES = ['customer', 'driver', 'restaurant_owner', 'restaurant', 'admin'];
 // نطاق نصف مفتوح [بداية اليوم، بداية الغد) محسوب مسبقاً → يستخدم idx_orders_created / idx_orders_status_created
 const DAY_RANGE = (col, a, b) => `${col} >= $${a}::timestamp AND ${col} < $${b}::timestamp`;
 const DRIVER_EARN = `COALESCE(o.driver_fee, o.delivery_fee, 0) + COALESCE(o.tip, 0)`;
+// توصيلة واحدة لكل طلب مجمّع (أبناؤه يُعدّون مرة واحدة)
+const TRIP = `COALESCE(-o.group_id, o.id)`;
 
 // Dashboard stats
 router.get('/dashboard', auth, adminOnly, async (req, res) => {
@@ -39,11 +42,12 @@ async function buildDashboard() {
       pool.query("SELECT COUNT(*) as count FROM restaurants WHERE is_active=true"),
       pool.query("SELECT COUNT(*) as count FROM drivers WHERE is_online=true"),
       pool.query(`SELECT COUNT(*) as count FROM orders WHERE ${DAY_RANGE('created_at', 1, 2)}`, [day.start, day.end]),
-      pool.query(`SELECT COALESCE(SUM(total),0) as total FROM orders WHERE status='delivered' AND ${DAY_RANGE('created_at', 1, 2)}`, [day.start, day.end]),
+      // 💵 الإيراد: الطلبات العادية + كل طلب مجمّع مرة واحدة (إجمالي المجموعة يشمل رسومه وخصوماته) — مثل صفحة المحاسبة
+      pool.query(`SELECT COALESCE(SUM(total),0) as total FROM ${REVENUE_SOURCE} x WHERE status='delivered' AND ${DAY_RANGE('created_at', 1, 2)}`, [day.start, day.end]),
       pool.query("SELECT COUNT(*) as count FROM orders WHERE status='pending'"),
       pool.query(
         `SELECT TO_CHAR(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Hebron', 'YYYY-MM-DD') as date, COALESCE(SUM(total),0) as revenue, COUNT(*) as orders
-         FROM orders WHERE status='delivered' AND created_at > NOW() - INTERVAL '7 days'
+         FROM ${REVENUE_SOURCE} x WHERE status='delivered' AND created_at > NOW() - INTERVAL '7 days'
          GROUP BY 1 ORDER BY date`),
       pool.query(`SELECT status, COUNT(*) as count FROM orders WHERE created_at > NOW() - INTERVAL '30 days' GROUP BY status`),
     ]);
@@ -131,13 +135,20 @@ router.get('/orders', auth, adminOnly, async (req, res) => {
     const { status, search } = req.query;
     const limit = clampInt(req.query.limit, 30, 1, 500);
     const offset = clampInt(req.query.offset, 0, 0, 10000000);
-    let q = `SELECT o.*, r.name_ar as restaurant_name, u.name as customer_name, d.name as driver_name FROM orders o
+    let q = `SELECT o.*, r.name_ar as restaurant_name, u.name as customer_name, d.name as driver_name,
+             g.group_number, g.status AS group_status, g.total AS group_total, g.stops_total AS group_stops_count,
+             (o.group_id IS NOT NULL) AS is_group FROM orders o
              LEFT JOIN restaurants r ON o.restaurant_id=r.id
              LEFT JOIN users u ON o.customer_id=u.id
-             LEFT JOIN users d ON o.driver_id=d.id WHERE 1=1`;
+             LEFT JOIN users d ON o.driver_id=d.id
+             LEFT JOIN order_groups g ON g.id = o.group_id WHERE 1=1`;
     const params = [];
     if (status) { params.push(status); q += ` AND o.status=$${params.length}`; }
-    if (search) { params.push(`%${search}%`); q += ` AND (o.order_number ILIKE $${params.length} OR u.name ILIKE $${params.length})`; }
+    if (search) { params.push(`%${search}%`); q += ` AND (o.order_number ILIKE $${params.length} OR u.name ILIKE $${params.length} OR g.group_number ILIKE $${params.length})`; }
+    if (req.query.group_id !== undefined) {
+      if (!isIntId(req.query.group_id)) return res.status(400).json({ success: false, message: 'قيمة غير صالحة في الطلب' });
+      params.push(parseInt(req.query.group_id)); q += ` AND o.group_id=$${params.length}`;
+    }
     q += ` ORDER BY o.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     const { rows } = await pool.query(q, [...params, limit, offset]);
     const { rows: total } = await pool.query('SELECT COUNT(*) as count FROM orders');
@@ -249,8 +260,8 @@ router.patch('/restaurants/:id/toggle', auth, adminOnly, async (req, res) => {
 router.get('/driver-stats/:id', auth, adminOnly, async (req, res) => {
   try {
     const { rows: stats } = await pool.query(
-      `SELECT COUNT(*) as total_orders, COALESCE(SUM(${DRIVER_EARN}),0) as total_earnings,
-              COALESCE(AVG(${DRIVER_EARN}),0) as avg_per_delivery
+      `SELECT COUNT(DISTINCT ${TRIP}) as total_orders, COALESCE(SUM(${DRIVER_EARN}),0) as total_earnings,
+              COALESCE(SUM(${DRIVER_EARN}) / NULLIF(COUNT(DISTINCT ${TRIP}),0),0) as avg_per_delivery
        FROM orders o WHERE o.driver_id=$1 AND o.status='delivered'`, [req.params.id]);
     const { rows: weekly } = await pool.query(
       `SELECT TO_CHAR(o.delivered_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Hebron', 'YYYY-MM-DD') as date, COUNT(*) as orders, COALESCE(SUM(${DRIVER_EARN}),0) as earnings
@@ -268,11 +279,11 @@ router.get('/analytics', auth, adminOnly, async (req, res) => {
       pool.query(`SELECT r.name_ar, COUNT(o.id) as orders, COALESCE(SUM(o.total),0) as revenue
                   FROM restaurants r LEFT JOIN orders o ON r.id=o.restaurant_id AND o.status='delivered'
                   GROUP BY r.id, r.name_ar ORDER BY orders DESC LIMIT 10`),
-      pool.query(`SELECT u.name, u.phone, COUNT(o.id) as orders, COALESCE(SUM(${DRIVER_EARN}),0) as earnings
+      pool.query(`SELECT u.name, u.phone, COUNT(DISTINCT ${TRIP}) as orders, COALESCE(SUM(${DRIVER_EARN}),0) as earnings
                   FROM users u LEFT JOIN orders o ON u.id=o.driver_id AND o.status='delivered'
                   WHERE u.role='driver' GROUP BY u.id, u.name, u.phone ORDER BY orders DESC LIMIT 10`),
       pool.query(`SELECT TO_CHAR(created_at, 'YYYY-MM') as month, COALESCE(SUM(total),0) as revenue, COUNT(*) as orders
-                  FROM orders WHERE status='delivered' AND created_at > NOW() - INTERVAL '6 months'
+                  FROM ${REVENUE_SOURCE} x WHERE status='delivered' AND created_at > NOW() - INTERVAL '6 months'
                   GROUP BY TO_CHAR(created_at, 'YYYY-MM') ORDER BY month`),
       pool.query(`SELECT status, COUNT(*) as count FROM orders GROUP BY status`),
     ]);
@@ -362,6 +373,9 @@ router.get('/live-ops', auth, adminOnly, async (req, res) => {
     const { rows: orders } = await pool.query(
       `SELECT o.id, o.order_number, o.status, o.total, o.order_type, o.driver_assigned_at,
               o.delivery_lat, o.delivery_lng, o.created_at,
+              o.group_id, o.stop_sequence, (o.group_id IS NOT NULL) AS is_group,
+              (SELECT g.group_number FROM order_groups g WHERE g.id = o.group_id) AS group_number,
+              (SELECT g.status FROM order_groups g WHERE g.id = o.group_id) AS group_status,
               r.name_ar AS restaurant_name, r.lat AS restaurant_lat, r.lng AS restaurant_lng,
               cu.name AS customer_name, cu.phone AS customer_phone,
               dr.name AS driver_name, dr.phone AS driver_phone,
@@ -416,7 +430,7 @@ router.get('/accounting', auth, adminOnly, async (req, res) => {
     });
 
     const { rows: drivers } = await pool.query(
-      `SELECT u.id, u.name, COUNT(o.id)::int AS deliveries,
+      `SELECT u.id, u.name, COUNT(DISTINCT ${TRIP})::int AS deliveries,
               COALESCE(SUM(${DRIVER_EARN}), 0) AS earnings, COALESCE(SUM(o.tip), 0) AS tips
        FROM orders o JOIN users u ON o.driver_id = u.id
        WHERE o.status = 'delivered' AND o.driver_id IS NOT NULL
@@ -428,6 +442,14 @@ router.get('/accounting', auth, adminOnly, async (req, res) => {
               COALESCE(SUM(discount),0) + COALESCE(SUM(points_value),0) AS discounts,
               COALESCE(SUM(COALESCE(driver_fee, delivery_fee, 0)),0) AS driver_fees
        FROM orders WHERE status='delivered'`);
+    // 🧺 الطلبات المجمّعة: رسوم التوصيل (الأساسية + المحطات الإضافية) والخصومات مسجّلة على المجموعة (الأبناء: delivery_fee=0)
+    //    أما driver_fee + tip فعلى "الابن الحامل" فتدخل تلقائياً في tot أعلاه
+    const { rows: gt } = await pool.query(
+      `SELECT COUNT(*)::int AS groups, COALESCE(SUM(delivery_fee),0) + COALESCE(SUM(extra_stops_fee),0) AS delivery_fees,
+              COALESCE(SUM(extra_stops_fee),0) AS extra_stops_fees,
+              COALESCE(SUM(discount),0) + COALESCE(SUM(points_value),0) AS discounts
+       FROM order_groups WHERE status='delivered'`);
+    const gDelivery = num(gt[0]?.delivery_fees), gDiscounts = num(gt[0]?.discounts);
     const sum = (arr, k) => round2(arr.reduce((s, x) => s + x[k], 0));
     const totals = {
       sales: sum(restaurants, 'sales'),
@@ -436,10 +458,12 @@ router.get('/accounting', auth, adminOnly, async (req, res) => {
       driver_earnings: sum(driversOut, 'earnings'),
       orders: restaurants.reduce((s, r) => s + r.orders, 0),
       tips: round2(num(tot[0]?.tips)),
-      delivery_fees: round2(num(tot[0]?.delivery_fees)),
-      discounts: round2(num(tot[0]?.discounts)),
+      delivery_fees: round2(num(tot[0]?.delivery_fees) + gDelivery),
+      discounts: round2(num(tot[0]?.discounts) + gDiscounts),
       // دعم التوصيل المجاني من المنصة = ما دُفع للسائقين من رسوم − ما دفعه الزبائن من رسوم
-      delivery_subsidy: round2(num(tot[0]?.driver_fees) - num(tot[0]?.delivery_fees)),
+      delivery_subsidy: round2(num(tot[0]?.driver_fees) - num(tot[0]?.delivery_fees) - gDelivery),
+      multi_groups: gt[0]?.groups || 0,
+      extra_stops_fees: round2(num(gt[0]?.extra_stops_fees)),
     };
     res.json({ success: true, totals, restaurants, drivers: driversOut });
   } catch (e) { serverError(res, e); }
@@ -472,6 +496,27 @@ router.put('/settings/personal-delivery', auth, adminOnly, async (req, res) => {
        ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()`, [JSON.stringify(clean)]);
     res.json({ success: true, data: clean });
   } catch (e) { serverError(res, e); }
+});
+
+// ⚙️ إعدادات الطلب المجمّع (عدة مطاعم — سائق واحد)
+router.get('/settings/multi-restaurant', auth, adminOnly, async (req, res) => {
+  try { res.json({ success: true, data: await G.getMultiConfig() }); } catch (e) { serverError(res, e); }
+});
+router.put('/settings/multi-restaurant', auth, adminOnly, async (req, res) => {
+  try { res.json({ success: true, data: await G.saveMultiConfig(req.body || {}) }); }
+  catch (e) {
+    if (e instanceof HttpError) return res.status(e.status).json({ success: false, message: e.message });
+    serverError(res, e);
+  }
+});
+
+// 🧺 تفاصيل طلب مجمّع (المجموعة + الأبناء + الأصناف + السائق + الزبون)
+router.get('/groups/:id', auth, adminOnly, async (req, res) => {
+  try { res.json({ success: true, data: await G.loadGroupView(req.params.id, req.user) }); }
+  catch (e) {
+    if (e instanceof HttpError) return res.status(e.status).json({ success: false, message: e.message });
+    serverError(res, e);
+  }
 });
 
 module.exports = router;

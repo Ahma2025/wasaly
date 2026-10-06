@@ -44,6 +44,18 @@ export const statusMeta = (s) => STATUS[s] || { label: s || '—', short: s || '
 /** فلاتر صفحة الطلبات (picked_up قديم — نبقيه للعرض فقط) */
 export const ORDER_FILTERS = ['pending', 'confirmed', 'preparing', 'ready', 'on_the_way', 'delivered', 'cancelled'];
 
+/** الطلب المجمّع (عدة مطاعم — سائق واحد) */
+export const GROUP_STATUS = {
+  pending:    { label: 'بانتظار المطاعم',      color: '#F59E0B', cls: 'bg-amber-50 text-amber-700 ring-amber-200' },
+  confirmed:  { label: 'نبحث عن سائق',        color: '#3B82F6', cls: 'bg-blue-50 text-blue-700 ring-blue-200' },
+  picking_up: { label: 'السائق يجمع الطلبات', color: '#8B5CF6', cls: 'bg-violet-50 text-violet-700 ring-violet-200' },
+  on_the_way: { label: 'في الطريق',            color: '#06B6D4', cls: 'bg-cyan-50 text-cyan-700 ring-cyan-200' },
+  delivered:  { label: 'تم التوصيل',           color: '#16A34A', cls: 'bg-green-50 text-green-700 ring-green-200' },
+  cancelled:  { label: 'ملغي',                 color: '#EF4444', cls: 'bg-red-50 text-red-600 ring-red-200' },
+};
+export const groupStatusMeta = (s) => GROUP_STATUS[s] || { label: s || '—', color: '#9AA0AE', cls: 'bg-gray-100 text-gray-600 ring-gray-200' };
+export const isGroup = (o) => !!(o && (o.group_id != null || o.is_group === true));
+
 export const PAYMENT = { cash: 'نقداً', card: 'بطاقة', wallet: 'المحفظة', online: 'دفع إلكتروني' };
 export const paymentLabel = (p) => PAYMENT[p] || (p ? p : '—');
 

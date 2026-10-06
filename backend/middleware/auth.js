@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const { jwtVerifyKey } = require('../utils/jwtKey');
 const pool = require('../config/database');
 const { isTokenDenied } = require('../utils/security');
+const { noteDriverFeatures } = require('../utils/driverFeatures');
 
 const auth = async (req, res, next) => {
   try {
@@ -17,6 +18,10 @@ const auth = async (req, res, next) => {
     req.user = rows[0];
     req.token = token;
     req.tokenDecoded = decoded;
+    // 🧺 تطبيق السائق الجديد يعلن دعم الطلب المجمّع (كتابة مخنوقة: مرة/10 دقائق لكل سائق)
+    if (rows[0].role === 'driver' && req.headers['x-wasaly-features']) {
+      await noteDriverFeatures(rows[0].id, req.headers['x-wasaly-features']);
+    }
     next();
   } catch {
     res.status(401).json({ success: false, message: 'Invalid token' });

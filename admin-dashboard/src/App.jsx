@@ -4,7 +4,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import {
   FiHome, FiMap, FiPackage, FiShoppingBag, FiGrid, FiTruck, FiUsers, FiMapPin, FiSend,
   FiTrendingUp, FiTag, FiBell, FiImage, FiStar, FiMessageCircle, FiDollarSign, FiLogOut, FiX,
-  FiSearch, FiChevronsRight, FiChevronsLeft, FiChevronDown, FiCornerDownLeft, FiWifiOff,
+  FiSearch, FiChevronsRight, FiChevronsLeft, FiChevronDown, FiCornerDownLeft, FiWifiOff, FiLayers,
 } from 'react-icons/fi';
 import Login from './pages/Login';
 import PageSkeleton from './components/Skeleton';
@@ -28,6 +28,7 @@ const Chats = lazy(() => import('./pages/Chats'));
 const LiveOps = lazy(() => import('./pages/LiveOps'));
 const Accounting = lazy(() => import('./pages/Accounting'));
 const PersonalDelivery = lazy(() => import('./pages/PersonalDelivery'));
+const MultiRestaurant = lazy(() => import('./pages/MultiRestaurant'));
 
 const LOGO = `${import.meta.env.BASE_URL}logo.png`;
 
@@ -46,6 +47,7 @@ const MORE = [
   { to: '/analytics', icon: FiTrendingUp, label: 'التحليلات', tint: '#0EA5E9' },
   { to: '/zones', icon: FiMapPin, label: 'مناطق التوصيل', tint: '#FF6B00' },
   { to: '/personal-delivery', icon: FiSend, label: 'توصيل شخصي', tint: '#F53B57' },
+  { to: '/multi-orders', icon: FiLayers, label: 'الطلبات المجمّعة', tint: '#7C3AED' },
   { to: '/coupons', icon: FiTag, label: 'الكوبونات', tint: '#D97706' },
   { to: '/notifications', icon: FiBell, label: 'الإشعارات', tint: '#E11D48' },
   { to: '/banners', icon: FiImage, label: 'الإعلانات', tint: '#7C3AED' },
@@ -59,7 +61,7 @@ const byTo = Object.fromEntries(ALL.map(i => [i.to, i]));
 /* الشريط الجانبي (≥1024px) — أقسام مجمّعة */
 const GROUPS = [
   { title: 'نظرة عامة', items: ['/', '/live', '/analytics'] },
-  { title: 'العمليات', items: ['/orders', '/personal-delivery', '/zones', '/chats'] },
+  { title: 'العمليات', items: ['/orders', '/multi-orders', '/personal-delivery', '/zones', '/chats'] },
   { title: 'الشركاء', items: ['/restaurants', '/drivers', '/users'] },
   { title: 'التسويق', items: ['/coupons', '/notifications', '/banners', '/reviews'] },
   { title: 'المالية', items: ['/accounting'] },
@@ -430,6 +432,7 @@ function AppLayout() {
                   <Route path="/live" element={<LiveOps />} />
                   <Route path="/accounting" element={<Accounting />} />
                   <Route path="/personal-delivery" element={<PersonalDelivery />} />
+                  <Route path="/multi-orders" element={<MultiRestaurant />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </div>

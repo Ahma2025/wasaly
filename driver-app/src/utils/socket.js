@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import { io } from 'socket.io-client';
-import { SOCKET_URL } from '../config';
+import { SOCKET_URL, CLIENT_FEATURES } from '../config';
 import { getToken } from './storage';
 
 let socket = null;
@@ -32,7 +32,7 @@ function scheduleRetry() {
     if (stopped || !socket || socket.connected) return;
     const token = await getToken();
     if (!token) { disconnectSocket(); return; }
-    socket.auth = { token }; // توكن جديد إن تغيّر
+    socket.auth = { token, features: CLIENT_FEATURES }; // توكن جديد إن تغيّر
     try { socket.connect(); } catch {}
   }, retryDelay);
   retryDelay = Math.min(retryDelay * 2, 30000);
@@ -49,7 +49,7 @@ export async function connectSocket() {
     const token = await getToken();
     if (!token || stopped) return null;
     const s = io(SOCKET_URL, {
-      auth: { token },
+      auth: { token, features: CLIENT_FEATURES }, // 🧺 دعم الطلب المجمّع
       transports: ['websocket'],
       reconnection: true,
       reconnectionDelay: 1000,
