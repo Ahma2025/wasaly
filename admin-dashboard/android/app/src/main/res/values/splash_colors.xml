@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- لون شاشة الإقلاع الأصلية (بدون شعار) = لون منتصف تدرّج شاشة البداية في HTML -->
+    <color name="wasaly_splash_bg">#FB5A3C</color>
+</resources>

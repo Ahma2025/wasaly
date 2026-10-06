@@ -7,7 +7,7 @@ import { isReducedMotion } from '../utils/motion';
 const { width } = Dimensions.get('window');
 
 // شاشة البداية: شعار يرتد + موجتان متّسعتان + اسم يصعد + شريط تقدّم بلمعة
-export default function SplashScreen({ onFinish }) {
+export default function SplashScreen({ onFinish, onReady }) {
   const bar = useRef(new Animated.Value(0)).current;
   const fade = useRef(new Animated.Value(0)).current;
   const logo = useRef(new Animated.Value(0)).current;
@@ -54,7 +54,7 @@ export default function SplashScreen({ onFinish }) {
   const exitScale = exit.interpolate({ inputRange: [0, 1], outputRange: [1.06, 1] });
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onLayout={onReady}>
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
       <LinearGradient colors={['#FF8A00', '#FF5E3A', '#F53B57']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
       <Animated.View style={[styles.glowTop, { opacity: orbs, transform: [{ translateY: Animated.multiply(orbY, -1) }] }]} />

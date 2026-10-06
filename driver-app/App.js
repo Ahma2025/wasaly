@@ -111,7 +111,7 @@ export default function App() {
   if (fontsLoaded) applyGlobalFont();
 
   // إخفاء السبلاش الأصلي بعد رسم أول شاشة JS (بعد الخطوط) — بلا وميض أبيض
-  const hideNative = useCallback(() => { ExpoSplash.hideAsync().catch(() => {}); }, []);
+  const hideNative = useCallback(() => { requestAnimationFrame(() => { ExpoSplash.hideAsync().catch(() => {}); }); }, []);
   // احتياط: لا نترك السبلاش الأصلي عالقاً إن تأخرت الخطوط
   useEffect(() => { const t = setTimeout(hideNative, 6000); return () => clearTimeout(t); }, [hideNative]);
 

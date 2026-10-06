@@ -47,13 +47,25 @@ export const ORDER_FILTERS = ['pending', 'confirmed', 'preparing', 'ready', 'on_
 export const PAYMENT = { cash: 'نقداً', card: 'بطاقة', wallet: 'المحفظة', online: 'دفع إلكتروني' };
 export const paymentLabel = (p) => PAYMENT[p] || (p ? p : '—');
 
+/** أقسام المتاجر — نسخة محلية مطابقة لـ backend/utils/storeTypes.js (الصفحة تحدّثها من GET /store-types) */
 export const STORE_TYPES = {
-  restaurant:  { label: 'مطعم', icon: '🍽️' },
-  supermarket: { label: 'سوبرماركت', icon: '🛒' },
-  pharmacy:    { label: 'صيدلية', icon: '💊' },
+  restaurant:  { label: 'مطعم',              plural: 'مطاعم',            icon: '🍽️', tone: 'bg-orange-50 text-orange-700 ring-orange-200' },
+  supermarket: { label: 'سوبرماركت',         plural: 'سوبرماركت',        icon: '🛒', tone: 'bg-green-50 text-green-700 ring-green-200' },
+  grocery:     { label: 'بقالة',             plural: 'بقالات',           icon: '🧺', tone: 'bg-lime-50 text-lime-700 ring-lime-200' },
+  pharmacy:    { label: 'صيدلية',            plural: 'صيدليات',          icon: '💊', tone: 'bg-sky-50 text-sky-700 ring-sky-200' },
+  telecom:     { label: 'اتصالات وموبايلات', plural: 'اتصالات وموبايلات', icon: '📱', tone: 'bg-indigo-50 text-indigo-700 ring-indigo-200' },
+  pets:        { label: 'حيوانات أليفة',      plural: 'حيوانات أليفة',     icon: '🐾', tone: 'bg-amber-50 text-amber-700 ring-amber-200' },
+  sweets:      { label: 'حلويات ومخابز',      plural: 'حلويات ومخابز',     icon: '🧁', tone: 'bg-pink-50 text-pink-700 ring-pink-200' },
+  flowers:     { label: 'ورد وهدايا',         plural: 'ورد وهدايا',        icon: '💐', tone: 'bg-rose-50 text-rose-700 ring-rose-200' },
+  beauty:      { label: 'عطور وتجميل',        plural: 'عطور وتجميل',       icon: '💄', tone: 'bg-fuchsia-50 text-fuchsia-700 ring-fuchsia-200' },
 };
-export const storeType = (t) => STORE_TYPES[t === 'market' ? 'supermarket' : t] || STORE_TYPES.restaurant;
-export const normStoreType = (t) => (t === 'market' ? 'supermarket' : (STORE_TYPES[t] ? t : 'restaurant'));
+export const STORE_TYPE_KEYS = Object.keys(STORE_TYPES);
+export const normStoreType = (t) => {
+  const k = String(t || '').trim().toLowerCase();
+  if (k === 'market') return 'supermarket';
+  return STORE_TYPES[k] ? k : 'restaurant';
+};
+export const storeType = (t) => STORE_TYPES[normStoreType(t)];
 
 export const isPersonal = (o) => o?.order_type === 'personal' || (!o?.restaurant_id && !o?.restaurant_name && (o?.pickup_lat || o?.pickup_address));
 

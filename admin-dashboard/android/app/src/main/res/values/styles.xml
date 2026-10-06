@@ -16,7 +16,11 @@
     </style>
 
 
+    <!-- شاشة الإقلاع الأصلية: برتقالي سادة بدون شعار (الشعار المتحرك يظهر في شاشة HTML) -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <item name="android:windowBackground">@color/wasaly_splash_bg</item>
+        <item name="windowSplashScreenBackground">@color/wasaly_splash_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_blank_icon</item>
     </style>
 </resources>

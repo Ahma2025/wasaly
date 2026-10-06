@@ -2,14 +2,14 @@
   "expo": {
     "name": "وصلّي - مندوب",
     "slug": "wasaly-driver",
-    "version": "2.6.2",
+    "version": "2.7.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/splash-blank.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FF6B00"
+      "backgroundColor": "#FF5E3A"
     },
     "android": {
       "package": "com.wasaly.driver",
@@ -30,6 +30,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.wasaly.driver",
+      "splash": { "image": "./assets/splash-blank.png", "resizeMode": "contain", "backgroundColor": "#FF5E3A" },
       "icon": "./assets/icon.png",
       "supportsTablet": false,
       "infoPlist": {

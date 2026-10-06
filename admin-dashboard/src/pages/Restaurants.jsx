@@ -4,12 +4,61 @@ import toast from 'react-hot-toast';
 import { FiPlus, FiEdit2, FiEye, FiEyeOff, FiStar, FiShoppingBag, FiPhone, FiMapPin, FiUser, FiAlertOctagon } from 'react-icons/fi';
 import api from '../utils/api';
 import { readCache, writeCache } from '../utils/cache';
-import { STORE_TYPES, storeType, normStoreType, normalizePhone, truthy, num } from '../utils/format';
+import { STORE_TYPES, normalizePhone, truthy, num } from '../utils/format';
 import { PageHeader, Chips, SearchInput, EmptyState, ListSkeleton, LoadMore, Modal, Field, PasswordInput, Badge, PrimaryBtn, Button, Switch, useConfirm } from '../components/ui';
 
 const FETCH_LIMIT = 1000;
 const PAGE = 30;
 const EMPTY_NEW = { name_ar: '', owner_phone: '', owner_password: '', store_type: 'restaurant' };
+
+/* ─── أقسام المتاجر: القائمة المحلية + ما يرجعه الخادم (GET /store-types) ─── */
+const LOCAL_TYPES = Object.entries(STORE_TYPES).map(([key, v], i) => ({ key, ...v, sort: i }));
+const NEUTRAL_TONE = 'bg-gray-50 text-gray-700 ring-gray-200';
+function mergeTypes(server) {
+  if (!Array.isArray(server) || !server.length) return LOCAL_TYPES;
+  const out = LOCAL_TYPES.map(t => ({ ...t }));
+  for (const s of server) {
+    if (!s || !s.key || out.some(t => t.key === s.key)) continue;
+    out.push({ key: s.key, label: s.name_ar || s.key, plural: s.name_ar || s.key, icon: s.emoji || '🏪', tone: NEUTRAL_TONE, sort: s.sort ?? 99 });
+  }
+  return out.sort((a, b) => a.sort - b.sort);
+}
+function useStoreTypes() {
+  const [types, setTypes] = useState(() => mergeTypes(readCache('adm_store_types')));
+  useEffect(() => {
+    let alive = true;
+    api.get('/store-types').then(r => {
+      if (!alive || !Array.isArray(r?.data)) return;
+      writeCache('adm_store_types', r.data);
+      setTypes(mergeTypes(r.data));
+    }).catch(() => { /* القائمة المحلية تكفي */ });
+    return () => { alive = false; };
+  }, []);
+  return useMemo(() => {
+    const byKey = Object.fromEntries(types.map(t => [t.key, t]));
+    const norm = (v) => { const k = String(v || '').trim().toLowerCase(); if (k === 'market') return 'supermarket'; return byKey[k] ? k : 'restaurant'; };
+    return { types, byKey, norm, meta: (v) => byKey[norm(v)] };
+  }, [types]);
+}
+
+/* شبكة اختيار القسم: إيموجي كبير + الاسم، المختار بإطار برتقالي وعلامة ✓ داخله */
+function StoreTypePicker({ types, value, onChange }) {
+  return (
+    <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="قسم المتجر">
+      {types.map(t => {
+        const on = value === t.key;
+        return (
+          <button key={t.key} type="button" role="radio" aria-checked={on} onClick={() => onChange(t.key)}
+            className={`relative flex flex-col items-center justify-center gap-1 rounded-2xl px-1.5 py-2.5 min-h-[76px] transition active:scale-95 border-2 ${on ? 'border-brand-500 bg-brand-50 shadow-brand' : 'border-surface-line bg-white hover:border-brand-200 hover:bg-[#FFFAF5]'}`}>
+            {on && <span className="absolute top-1.5 left-1.5 w-[18px] h-[18px] rounded-full grad-sunset text-white text-[10px] font-black flex items-center justify-center">✓</span>}
+            <span className="text-[26px] leading-none" aria-hidden>{t.icon}</span>
+            <span className={`text-[11.5px] font-extrabold text-center leading-tight ${on ? 'text-brand-700' : 'text-ink-2'}`}>{t.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function Restaurants() {
   const confirm = useConfirm();
@@ -21,6 +70,8 @@ export default function Restaurants() {
   const [serverHasMore, setServerHasMore] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const ST = useStoreTypes();
   const [visible, setVisible] = useState(PAGE);
   const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState(EMPTY_NEW);
@@ -29,7 +80,7 @@ export default function Restaurants() {
 
   useEffect(() => { fetchRestaurants(); }, []);
   useEffect(() => { if (params.get('new') === '1') { setShowNew(true); const p = new URLSearchParams(params); p.delete('new'); setParams(p, { replace: true }); } }, [params]);
-  useEffect(() => { setVisible(PAGE); }, [search, filter]);
+  useEffect(() => { setVisible(PAGE); }, [search, filter, typeFilter]);
 
   const fetchRestaurants = async ({ append = false } = {}) => {
     setRefreshing(true);
@@ -53,16 +104,21 @@ export default function Restaurants() {
     return restaurants.filter(r => {
       if (filter === 'active' && !truthy(r.is_active)) return false;
       if (filter === 'hidden' && truthy(r.is_active)) return false;
-      if (filter && STORE_TYPES[filter] && normStoreType(r.store_type) !== filter) return false;
+      if (typeFilter && ST.norm(r.store_type) !== typeFilter) return false;
       if (!q) return true;
       return [r.name_ar, r.name_en, r.phone, r.owner_phone, r.owner_name, r.city].join(' ').toLowerCase().includes(q);
     });
-  }, [restaurants, search, filter]);
+  }, [restaurants, search, filter, typeFilter, ST]);
 
   const counts = useMemo(() => ({
     active: restaurants.filter(r => truthy(r.is_active)).length,
     hidden: restaurants.filter(r => !truthy(r.is_active)).length,
   }), [restaurants]);
+  const typeCounts = useMemo(() => {
+    const c = {};
+    restaurants.forEach(r => { const k = ST.norm(r.store_type); c[k] = (c[k] || 0) + 1; });
+    return c;
+  }, [restaurants, ST]);
 
   const addRestaurant = async () => {
     const name = form.name_ar.trim();
@@ -115,7 +171,10 @@ export default function Restaurants() {
         <SearchInput value={search} onChange={setSearch} placeholder="ابحث بالاسم أو الهاتف أو المدينة…" loading={refreshing} />
         <Chips value={filter} onChange={setFilter} options={[
           ['', 'الكل', restaurants.length], ['active', 'نشط', counts.active], ['hidden', 'مخفي', counts.hidden],
-          ['restaurant', '🍽️ مطاعم'], ['supermarket', '🛒 سوبرماركت'], ['pharmacy', '💊 صيدليات'],
+        ]} />
+        <Chips brand value={typeFilter} onChange={setTypeFilter} options={[
+          ['', '🏪 كل الأقسام'],
+          ...ST.types.filter(t => typeCounts[t.key] || typeFilter === t.key).map(t => [t.key, `${t.icon} ${t.plural || t.label}`, typeCounts[t.key] || 0]),
         ]} />
       </div>
 
@@ -128,7 +187,7 @@ export default function Restaurants() {
               const active = truthy(r.is_active);
               const featured = truthy(r.is_featured);
               const open = r.is_open != null ? truthy(r.is_open) : null;
-              const st = storeType(r.store_type);
+              const st = ST.meta(r.store_type);
               return (
                 <article key={r.id} className={`card card-hover p-4 flex flex-col relative overflow-hidden ${active ? '' : 'bg-[#FCFCFD]'}`}>
                   {featured && <span className="absolute top-0 left-4 grad-sunset text-white text-[10px] font-extrabold px-2 pt-1 pb-1.5 rounded-b-lg shadow-brand flex items-center gap-1"><FiStar className="fill-current" /> مميّز</span>}
@@ -144,7 +203,7 @@ export default function Restaurants() {
                       <div className="flex gap-1 flex-wrap mt-1.5">
                         <Badge className={active ? 'bg-green-50 text-green-700 ring-green-200' : 'bg-gray-100 text-gray-500 ring-gray-200'}>{active ? 'نشط' : 'مخفي عن الزبائن'}</Badge>
                         {open != null && <Badge className={open ? 'bg-sky-50 text-sky-700 ring-sky-200' : 'bg-amber-50 text-amber-700 ring-amber-200'}>{open ? 'مفتوح' : 'مغلق'}</Badge>}
-                        <Badge className="bg-orange-50 text-orange-700 ring-orange-200">{st.icon} {st.label}</Badge>
+                        <Badge className={st.tone || NEUTRAL_TONE}>{st.icon} {st.label}</Badge>
                       </div>
                       <p className="text-[11.5px] text-ink-3 mt-1.5 truncate flex items-center gap-1.5 font-medium">
                         {r.city && r.city !== '-' && <><FiMapPin className="flex-shrink-0" />{r.city} · </>}
@@ -186,15 +245,8 @@ export default function Restaurants() {
       <Modal open={showNew} onClose={() => setShowNew(false)} title="متجر جديد" subtitle="صاحب المتجر يكمّل الموقع والمنيو والأوقات من بوابته" icon={<FiPlus />}>
         <div className="space-y-3">
           <Field label="اسم المتجر *"><input className="inp" placeholder="مثال: مطعم العميد" value={form.name_ar} onChange={e => setForm(f => ({ ...f, name_ar: e.target.value }))} /></Field>
-          <Field label="نوع المتجر">
-            <div className="grid grid-cols-3 gap-2">
-              {Object.entries(STORE_TYPES).map(([k, v]) => (
-                <button key={k} type="button" onClick={() => setForm(f => ({ ...f, store_type: k }))}
-                  className={`py-2.5 rounded-xl text-xs font-bold ${form.store_type === k ? 'chip-on' : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>
-                  {v.icon} {v.label}
-                </button>
-              ))}
-            </div>
+          <Field label="قسم المتجر *" hint="(يظهر المتجر للزبائن تحت هذا القسم)">
+            <StoreTypePicker types={ST.types} value={form.store_type} onChange={(k) => setForm(f => ({ ...f, store_type: k }))} />
           </Field>
           <Field label="رقم هاتف صاحب المتجر *" hint="(يُستخدم لتسجيل الدخول — يجب ألا يكون مسجّلاً)">
             <input className="inp" placeholder="05XXXXXXXX" inputMode="tel" dir="ltr" style={{ textAlign: 'right' }}
@@ -207,14 +259,14 @@ export default function Restaurants() {
         </div>
       </Modal>
 
-      <EditRestaurant restaurant={editing} onClose={() => setEditing(null)}
+      <EditRestaurant ST={ST} restaurant={editing} onClose={() => setEditing(null)}
         onSaved={async () => { setEditing(null); await fetchRestaurants(); }}
         refetch={fetchRestaurants} />
     </div>
   );
 }
 
-function EditRestaurant({ restaurant, onClose, onSaved, refetch }) {
+function EditRestaurant({ ST, restaurant, onClose, onSaved, refetch }) {
   const confirm = useConfirm();
   const [f, setF] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -227,7 +279,7 @@ function EditRestaurant({ restaurant, onClose, onSaved, refetch }) {
       city: restaurant.city && restaurant.city !== '-' ? restaurant.city : '',
       address: restaurant.address || '',
       min_order: restaurant.min_order ?? '',
-      store_type: normStoreType(restaurant.store_type),
+      store_type: ST.norm(restaurant.store_type),
       is_open: truthy(restaurant.is_open ?? true),
       commission_rate: restaurant.commission_rate ?? 15,
     });
@@ -263,7 +315,7 @@ function EditRestaurant({ restaurant, onClose, onSaved, refetch }) {
       if (fresh && fresh.is_open != null && truthy(fresh.is_open) !== f.is_open) {
         try { await api.patch(`/admin/restaurants/${r.id}/toggle`, { field: 'is_open' }); } catch { /* ignore */ }
       }
-      if (fresh && fresh.store_type && normStoreType(fresh.store_type) !== f.store_type) {
+      if (fresh && fresh.store_type && ST.norm(fresh.store_type) !== f.store_type) {
         toast('نوع المتجر يتطلب تحديث الخادم ليُحفظ', { icon: 'ℹ️' });
       }
       toast.success('تم حفظ التعديلات');
@@ -297,13 +349,8 @@ function EditRestaurant({ restaurant, onClose, onSaved, refetch }) {
           <Field label="الحد الأدنى للطلب (₪)"><input className="inp" type="number" min="0" step="0.5" value={f.min_order} onChange={set('min_order')} /></Field>
           <Field label="نسبة العمولة %"><input className="inp" type="number" min="0" max="100" step="0.5" value={f.commission_rate} onChange={set('commission_rate')} /></Field>
         </div>
-        <Field label="نوع المتجر">
-          <div className="grid grid-cols-3 gap-2">
-            {Object.entries(STORE_TYPES).map(([k, v]) => (
-              <button key={k} type="button" onClick={() => setF(p => ({ ...p, store_type: k }))}
-                className={`py-2.5 rounded-xl text-xs font-bold ${f.store_type === k ? 'chip-on' : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>{v.icon} {v.label}</button>
-            ))}
-          </div>
+        <Field label="قسم المتجر" hint="(يحدد أين يظهر المتجر في تطبيق الزبائن)">
+          <StoreTypePicker types={ST.types} value={f.store_type} onChange={(k) => setF(p => ({ ...p, store_type: k }))} />
         </Field>
         <div className="flex items-center justify-between rounded-2xl bg-surface p-3.5">
           <div><p className="font-bold text-sm text-ink">المتجر مفتوح الآن</p><p className="text-[11.5px] text-ink-3">يستقبل طلبات جديدة</p></div>

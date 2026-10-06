@@ -4,5 +4,6 @@
   "webDir": "dist",
   "server": {
     "androidScheme": "https"
-  }
+  },
+  "backgroundColor": "#FB5A3C"
 }

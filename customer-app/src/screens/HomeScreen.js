@@ -21,6 +21,7 @@ import { useHeaderTop, HeroDecor } from '../components/GradientHeader';
 import { useTabBarInset } from '../components/FloatingTabBar';
 import { addressLabel } from './AddressesScreen';
 import { useReducedMotion, isReducedMotion, haptic, EASE_OUT, stagger } from '../utils/motion';
+import { fetchStoreTypes, readStoreTypesCache } from '../utils/storeTypes';
 
 // تحية حسب الوقت
 const greetingText = () => {
@@ -256,6 +257,7 @@ export default function HomeScreen() {
   const [userLoc, setUserLoc] = useState(null);
   const [recentRests, setRecentRests] = useState([]);
   const [activeCat, setActiveCat] = useState(null);
+  const [storeTypes, setStoreTypes] = useState([]);
   const suggestedRef = useRef(null);
   const scrollY = useRef(new Animated.Value(0)).current;
   const [miniOn, setMiniOn] = useState(false);
@@ -264,6 +266,7 @@ export default function HomeScreen() {
   useEffect(() => {
     // اعرض من الكاش فوراً (بدون تحميل) ثم حدّث بالخلفية
     (async () => {
+      readStoreTypesCache().then(t => { if (t) setStoreTypes(t); }).catch(() => {});
       const cached = await readCache('home');
       if (cached) {
         if (cached.restaurants) setRestaurants(cached.restaurants);
@@ -330,6 +333,7 @@ export default function HomeScreen() {
   };
 
   const load = async () => {
+    fetchStoreTypes().then(setStoreTypes).catch(() => {}); // أقسام المتاجر (مستقلة عن تحميل المطاعم)
     try {
       const [r, c, b] = await Promise.allSettled([
         api.get('/restaurants?limit=60'),
@@ -413,6 +417,12 @@ export default function HomeScreen() {
   const noMatches = restaurants.length > 0 && sorted.length === 0;
   const firstName = user?.name ? String(user.name).split(' ')[0] : '';
   const goAddress = () => navigation.navigate(defaultAddr ? 'Addresses' : 'AddAddress', defaultAddr ? undefined : { makeDefault: true });
+  // أقسام المتاجر غير المطاعم التي فيها متاجر فعلاً (count من الخادم)
+  const shopTypes = storeTypes.filter(t => t.key !== 'restaurant' && t.count > 0);
+  const openStoreType = (t) => {
+    haptic.select();
+    navigation.navigate('ماركت', { storeType: t.key, t: Date.now() });
+  };
   const openCat = (cat) => {
     setActiveCat(cat.id);
     haptic.select();
@@ -550,6 +560,35 @@ export default function HomeScreen() {
           <ServiceCard colors={C.gradients.violet} icon="people" title="طلب جماعي" sub="اطلبوا سوا وكل واحد يشوف حسابه"
             onPress={() => navigation.navigate('GroupOrder')} delay={140} />
         </View>
+
+        {/* تسوّق حسب القسم → شاشة الماركت والقسم مختار */}
+        {shopTypes.length > 0 && (
+          <View style={{ paddingTop: 24 }}>
+            <View style={s.catHeader}>
+              <Text style={s.catTitle}>تسوّق حسب القسم</Text>
+              <Press onPress={() => navigation.navigate('ماركت', { storeType: 'all', t: Date.now() })} haptic={false} scaleTo={0.94}
+                style={s.shopAll} accessibilityRole="button" accessibilityLabel="كل المتاجر">
+                <Text style={s.shopAllTxt}>كل المتاجر</Text>
+                <Ionicons name="chevron-back" size={13} color={C.primary} />
+              </Press>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ flexDirection: 'row-reverse', paddingHorizontal: 16, gap: 10, paddingVertical: 4 }}>
+              {shopTypes.map((t, i) => (
+                <FadeIn key={t.key} delay={stagger(i, 45)} from={10}>
+                  <Press style={s.shopTile} scaleTo={0.92} haptic={false} onPress={() => openStoreType(t)}
+                    accessibilityRole="button" accessibilityLabel={`${t.name}، ${t.count} متجر`}>
+                    <View style={[s.shopIcon, { backgroundColor: t.color + '1A' }]}>
+                      <Text style={{ fontSize: 26 }}>{t.emoji}</Text>
+                    </View>
+                    <Text style={s.shopLbl} numberOfLines={2}>{t.name}</Text>
+                    <Text style={[s.shopCount, { color: t.color }]}>{t.count} متجر</Text>
+                  </Press>
+                </FadeIn>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         {/* فرز المطاعم + فاجئني + المفتوحة الآن */}
         <View style={s.sortHead}>
@@ -711,5 +750,11 @@ const makeS = (C) => StyleSheet.create({
   quickInner: { width: 56, height: 56, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   quickLbl: { fontSize: 12.5, fontWeight: '800', color: C.text, textAlign: 'center' },
   svcRow: { flexDirection: 'row-reverse', gap: 12, paddingHorizontal: 16, marginTop: 24 },
+  shopAll: { flexDirection: 'row-reverse', alignItems: 'center', gap: 2, paddingVertical: 2 },
+  shopAllTxt: { fontSize: 12.5, fontWeight: '800', color: C.primary },
+  shopTile: { width: 92, alignItems: 'center', gap: 6, paddingVertical: 12, paddingHorizontal: 4, borderRadius: 22, backgroundColor: C.card, borderWidth: 1, borderColor: C.border, ...C.shadow.soft },
+  shopIcon: { width: 52, height: 52, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  shopLbl: { fontSize: 12, fontWeight: '800', color: C.text, textAlign: 'center', lineHeight: 15 },
+  shopCount: { fontSize: 10.5, fontWeight: '800' },
   sortHead: { paddingHorizontal: 16, marginTop: 26, marginBottom: 6, alignItems: 'flex-end' },
 });

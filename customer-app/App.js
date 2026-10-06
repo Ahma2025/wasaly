@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -33,6 +33,7 @@ import AddressesScreen from './src/screens/AddressesScreen';
 import RatingScreen from './src/screens/RatingScreen';
 import FavoritesScreen from './src/screens/FavoritesScreen';
 import MarketScreen from './src/screens/MarketScreen';
+import { fetchStoreTypes } from './src/utils/storeTypes';
 import PaymentWebViewScreen from './src/screens/PaymentWebViewScreen';
 import CategoryScreen from './src/screens/CategoryScreen';
 import SupportChatScreen from './src/screens/SupportChatScreen';
@@ -119,6 +120,7 @@ function AppNavigator() {
         } catch {}
         if (rests.length || cats.length || bans.length) writeCache('home', { restaurants: rests, categories: cats, banners: bans, recentRests: recent });
         api.get('/restaurants?limit=60&store_type=market').then(m => writeCache('market', m.data || [])).catch(() => {});
+        fetchStoreTypes().catch(() => {}); // أقسام المتاجر (تُخزَّن للماركت والرئيسية)
         api.get('/users/profile').then(p => writeCache('profile', p.data)).catch(() => {});
         api.get('/users/favorites').then(f => writeCache('favorites', f.data || [])).catch(() => {});
         api.get('/users/addresses').then(a => writeCache('addresses', a.data || [])).catch(() => {});
@@ -278,18 +280,24 @@ export default function App() {
   // حماية: لو الخطوط علقت لأي سبب ما نخلي المستخدم على شاشة البداية للأبد
   useEffect(() => { const t = setTimeout(() => setFontTimeout(true), 5000); return () => clearTimeout(t); }, []);
 
+  // نخفي الشاشة الأصلية (برتقالي سادة) فقط بعد أن تُرسم شاشة البداية JS فوقها — بلا إطار فارغ
+  const hideNative = useCallback(() => {
+    requestAnimationFrame(() => { ExpoSplash.hideAsync().catch(() => {}); });
+  }, []);
+  // احتياط: لو ما وصل onLayout لأي سبب ما نعلق على الشاشة الأصلية
   useEffect(() => {
     if (!fontsReady) return;
-    if (fontsLoaded) applyGlobalFont();
-    ExpoSplash.hideAsync().catch(() => {});
-  }, [fontsReady, fontsLoaded]);
+    const t = setTimeout(hideNative, 1500);
+    return () => clearTimeout(t);
+  }, [fontsReady, hideNative]);
 
   if (!fontsReady) return null; // الشاشة الأصلية ما زالت ظاهرة
+  if (fontsLoaded) applyGlobalFont(); // قبل أول رسم لشاشة البداية حتى يظهر نصها بخط Tajawal
 
   if (!splashDone) {
     return (
       <ErrorBoundary>
-        <SplashScreen onFinish={() => setSplashDone(true)} />
+        <SplashScreen onReady={hideNative} onFinish={() => setSplashDone(true)} />
       </ErrorBoundary>
     );
   }
